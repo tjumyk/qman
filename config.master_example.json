@@ -1,0 +1,17 @@
+{
+  "SECRET_KEY": "secRetSecRet",
+  "SESSION_COOKIE_NAME": "qman_session",
+
+  "SLAVES": [
+    {
+      "id": "host1",
+      "url": "http://host1.example.com:8436",
+      "api_key": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"
+    },
+    {
+      "id": "host2",
+      "url": "http://host2.example.com:8436",
+      "api_key": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"
+    }
+  ]
+}

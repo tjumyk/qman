@@ -1,0 +1,6 @@
+{
+  "SECRET_KEY": "secRetSecRet",
+  "SESSION_COOKIE_NAME": "qman_session",
+
+  "API_KEY": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"
+}
