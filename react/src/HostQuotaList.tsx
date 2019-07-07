@@ -47,9 +47,16 @@ export class HostQuotaList extends React.Component<{}, HostQuotasState> {
         }
         if(this.state.loading){
             return (
-                <div className="container">
-                    <div>Loading...</div>
-                </div>
+                <section className="section">
+                    <div className="container has-text-centered">
+                        <p className="title">
+                            <span className="icon is-large">
+                                <i className="fas fa-spinner fa-pulse"/>
+                            </span>
+                        </p>
+                        <p className="subtitle">Loading...</p>
+                    </div>
+                </section>
             )
         }
         const itemViews = [];
