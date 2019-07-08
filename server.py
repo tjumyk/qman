@@ -1,13 +1,12 @@
 import functools
 import grp
-import os
 import pwd
 import urllib.parse
 
 import psutil
 import pyquota as pq
 import requests
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify
 
 from auth_connect import oauth
 
@@ -22,6 +21,7 @@ _quota_format_names = {
     2: 'vfsv0',
     4: 'vfsv1'
 }
+_remote_api_timeout = 3  # seconds
 
 
 def requires_api_key(f):
@@ -51,7 +51,7 @@ def get_quotas():
         slave_id = slave['id']
         slave_url = slave['url']
         try:
-            resp = requests.get('%s/remote-api/quotas' % slave_url, auth=_make_auth(slave))
+            resp = requests.get('%s/remote-api/quotas' % slave_url, auth=_make_auth(slave), timeout=_remote_api_timeout)
             if resp.status_code // 100 != 2:
                 results[slave_id] = dict(error=resp.json())
             else:
@@ -77,7 +77,7 @@ def set_user_quota(slave_id, uid):
     device = request.args.get('device')
     try:
         resp = requests.put('%s/remote-api/quotas/users/%d?device=%s' % (slave['url'], uid, urllib.parse.quote(device)),
-                            json=request.json, auth=_make_auth(slave))
+                            json=request.json, auth=_make_auth(slave), timeout=_remote_api_timeout)
         return jsonify(resp.json()), resp.status_code
     except IOError as e:
         return jsonify(msg=str(e)), 500
