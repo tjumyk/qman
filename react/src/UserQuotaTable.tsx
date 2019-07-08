@@ -1,5 +1,5 @@
 import React from "react";
-import {UserQuota} from "./models";
+import {BasicError, UserQuota} from "./models";
 import {BlockSize} from "./BlockSize";
 import {GraceTimestamp} from "./GraceTimestamp";
 import {INodeSize} from "./INodeSize";
@@ -61,16 +61,28 @@ class UserQuotaTableRow extends React.Component<UserQuotaTableRowProps, UserQuot
                 'content-type': 'application/json'
             },
             method: 'PUT'
-        }).then(resp => resp.json())
-            .then((quota: UserQuota) => {
-                this.setState({quota})
-            },
-            (error) => {
+        }).then(resp => {
+            resp.json().then(json => {
+                if (resp.ok) {
+                    let quota = json as UserQuota;
+                    this.setState({quota})
+                } else {
+                    let error = json as BasicError;
+                    console.error(error);
+                    alert(JSON.stringify(error))
+                }
+            }).catch(() => {
+                let error = "Unexpected Error";
                 console.error(error);
                 alert(error)
-            }).finally(() => {
-                this.setState({editing: false, saving: false});
-            })
+            });
+        }).catch(() => {
+            let error = "Connection Error";
+            console.error(error);
+            alert(error)
+        }).finally(() => {
+            this.setState({editing: false, saving: false});
+        })
     }
 
     cancelEdit() {

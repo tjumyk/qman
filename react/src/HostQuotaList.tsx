@@ -23,18 +23,25 @@ export class HostQuotaList extends React.Component<{}, HostQuotasState> {
     componentDidMount(): void {
         this.setState({loading: true});
         fetch("api/quotas")
-            .then(res => res.json())
-            .then(
-                (result) => {
-                    this.setState({data: result})
-                },
-                (error) => {
-                    this.setState({error: error})
-                },
-            ).finally(() => {
+            .then(res => {
+                res.json().then(json => {
+                    if (res.ok) {
+                        let result = json as { [host: string]: HostQuota };
+                        this.setState({data: result})
+                    } else {
+                        let error = json as BasicError;
+                        this.setState({error: error})
+                    }
+                }).catch(() => {
+                    this.setState({error: {msg: 'Unexpected Error'}})
+                })
+            })
+            .catch(() => {
+                this.setState({error: {msg: 'Connection Error'}})
+            })
+            .finally(() => {
                 this.setState({loading: false})
-            }
-        )
+            })
     }
 
     render() {
