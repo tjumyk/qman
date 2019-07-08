@@ -7,7 +7,7 @@ import {ErrorMessage} from "./ErrorMessage";
 interface HostQuotasState {
     error?: BasicError;
     loading: boolean;
-    data: {[host: string] : HostQuota};
+    data: { [host: string]: HostQuota };
 }
 
 export class HostQuotaList extends React.Component<{}, HostQuotasState> {
@@ -45,14 +45,14 @@ export class HostQuotaList extends React.Component<{}, HostQuotasState> {
     }
 
     render() {
-        if(this.state.error){
+        if (this.state.error) {
             return (
                 <div className="container">
-                    <ErrorMessage error={this.state.error} />
+                    <ErrorMessage error={this.state.error}/>
                 </div>
             )
         }
-        if(this.state.loading){
+        if (this.state.loading) {
             return (
                 <section className="section">
                     <div className="container has-text-centered">
@@ -67,7 +67,7 @@ export class HostQuotaList extends React.Component<{}, HostQuotasState> {
             )
         }
         const itemViews = [];
-        for(let key of Object.keys(this.state.data)){
+        for (let key of Object.keys(this.state.data)) {
             let value = this.state.data[key];
             itemViews.push(<HostQuotaView host={key} data={value}/>)
         }

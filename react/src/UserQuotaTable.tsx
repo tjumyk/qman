@@ -89,7 +89,7 @@ class UserQuotaTableRow extends React.Component<UserQuotaTableRowProps, UserQuot
         this.setState({editing: false});
     }
 
-    getQuotaClass(quota: UserQuota):string{
+    getQuotaClass(quota: UserQuota): string {
         let quotaClass = '';
         if ((quota.block_soft_limit > 0 && quota.block_current >= quota.block_soft_limit * 1024) ||
             (quota.inode_soft_limit > 0 && quota.inode_current >= quota.inode_soft_limit))
@@ -140,13 +140,15 @@ class UserQuotaTableRow extends React.Component<UserQuotaTableRowProps, UserQuot
                         {
                             this.state.editing ?
                                 <>
-                                    <button className={"button is-primary" + (this.state.saving ? " is-loading": "")} onClick={() => this.saveEdit()} disabled={this.state.saving}>
+                                    <button className={"button is-primary" + (this.state.saving ? " is-loading" : "")}
+                                            onClick={() => this.saveEdit()} disabled={this.state.saving}>
                                         <span className="icon is-small">
                                             <i className="fas fa-check"/>
                                         </span>
                                         <span>Save</span>
                                     </button>
-                                    <button className="button is-danger" onClick={() => this.cancelEdit()} disabled={this.state.saving}>
+                                    <button className="button is-danger" onClick={() => this.cancelEdit()}
+                                            disabled={this.state.saving}>
                                         <span className="icon is-small">
                                             <i className="fas fa-times"/>
                                         </span>
