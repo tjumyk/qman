@@ -17,9 +17,9 @@ app.config.from_json('config.json')
 oauth.init_app(app)
 
 _quota_format_names = {
-    1: 'vfsold',
-    2: 'vfsv0',
-    4: 'vfsv1'
+    pq.QFMT_VFS_OLD: 'vfsold',
+    pq.QFMT_VFS_V0: 'vfsv0',
+    pq.QFMT_VFS_V1: 'vfsv1'
 }
 _remote_api_timeout = 3  # seconds
 
