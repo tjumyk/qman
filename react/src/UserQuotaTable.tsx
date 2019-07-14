@@ -178,7 +178,7 @@ interface UserQuotaTableProps {
 
 export const UserQuotaTable: React.FC<UserQuotaTableProps> = props => {
     return (
-        <table className="table quota">
+        <table className="table quota is-hoverable is-striped">
             <thead>
             <tr>
                 <th>uid</th>
