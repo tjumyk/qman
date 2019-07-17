@@ -3,12 +3,12 @@
 table.quota{
   tr{
     &.is-warning{
-      background-color: $warning;
-      color: $warning-invert;
+      background-color: $warning !important;
+      color: $warning-invert !important;
     }
     &.is-danger{
-      background-color: $danger;
-      color: $danger-invert;
+      background-color: $danger !important;
+      color: $danger-invert !important;
     }
   }
 }
