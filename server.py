@@ -2,6 +2,7 @@ import functools
 import grp
 import pwd
 import urllib.parse
+import json
 
 import psutil
 import pyquota as pq
@@ -12,7 +13,8 @@ from auth_connect import oauth
 
 app = Flask(__name__)
 
-app.config.from_json('config.json')
+with open('config.json') as _f_cfg:
+    app.config.from_mapping(json.load(_f_cfg))
 
 oauth.init_app(app)
 
@@ -27,10 +29,13 @@ _remote_api_timeout = 3  # seconds
 def requires_api_key(f):
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
+        api_key = app.config.get('API_KEY')
+        if api_key is None:
+            return jsonify(msg='api key not specified in app config'), 500
         auth = request.authorization
         if not auth:
             return jsonify(msg='authorization required'), 401
-        if auth.username != 'api' or auth.password != app.config['API_KEY']:
+        if auth.username != 'api' or auth.password != api_key:
             return jsonify(msg='access forbidden'), 403
         return f(*args, **kwargs)
 
