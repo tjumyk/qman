@@ -49,7 +49,7 @@ def get_index_page():
 
 
 @app.route('/api/quotas')
-@oauth.requires_admin
+@oauth.requires_login
 def get_quotas():
     results = {}
     for slave in app.config['SLAVES']:
