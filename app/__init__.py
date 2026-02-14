@@ -66,7 +66,4 @@ def create_app(config_path: str | None = None) -> Flask:
     api_routes.register_api_routes(app)
     remote_api_routes.register_remote_api_routes(app)
 
-    # CORS not needed?
-    # CORS(app, supports_credentials=True, origins=['http://localhost:5173'])
-
     return app
