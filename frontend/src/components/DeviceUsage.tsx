@@ -70,18 +70,6 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
   const overSoldSoft = reservedSoft > total
   const overSoldHard = reservedHard > total
 
-  let otherPct = pct(total, otherUsage)
-  let trackedPct = pct(total, trackedUsage)
-  let freePct = Math.max(0, pct(total, free))
-  if (used >= total && used > 0) {
-    const usedSum = otherPct + trackedPct
-    if (usedSum > 0) {
-      const scale = 100 / usedSum
-      otherPct *= scale
-      trackedPct *= scale
-    }
-    freePct = 0
-  }
   const totalDemandSoft = otherUsage + reservedSoft
   const totalDemandHard = otherUsage + reservedHard
   const freeSoft = Math.max(0, total - otherUsage - reservedSoft)
