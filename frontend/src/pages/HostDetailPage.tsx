@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Stack, Text, Card, Loader, Alert, Group, Badge } from '@mantine/core'
+import { IconServer } from '@tabler/icons-react'
 import { fetchQuotas } from '../api'
 import { useI18n } from '../i18n'
 import { getQuotaStatus } from '../utils/quotaStatus'
+import { DeviceUsage } from '../components/DeviceUsage'
 
 export function HostDetailPage() {
   const { hostId } = useParams<{ hostId: string }>()
@@ -36,9 +38,12 @@ export function HostDetailPage() {
 
   return (
     <Stack gap="md">
-      <Text size="lg" fw={600}>
-        {hostId} – {t('hostDevicesTitle')}
-      </Text>
+      <Group gap="sm">
+        <IconServer size={24} />
+        <Text size="lg" fw={600}>
+          {hostId}
+        </Text>
+      </Group>
       <Stack gap="xs">
         {devices.map((dev) => {
           const users = dev.user_quotas || []
@@ -59,22 +64,23 @@ export function HostDetailPage() {
                 )
               }
             >
-              <Group justify="space-between">
-                <div>
-                  <Text fw={500}>{dev.name}</Text>
-                  <Text size="sm" c="dimmed">
-                    {dev.fstype} · {dev.mount_points.join(', ')}
-                  </Text>
-                </div>
-                <Group gap="xs">
-                  <Badge variant="light">{users.length} {t('userCount')}</Badge>
-                  {attention > 0 && (
-                    <Badge color={overHard > 0 ? 'red' : 'yellow'}>
-                      {attention} {t('needAttentionCount')}
-                    </Badge>
-                  )}
+              <Stack gap="sm">
+                <Group justify="space-between" align="flex-start">
+                  <Text fw={600} size="md">{dev.name}</Text>
+                  <Group gap="xs">
+                    <Badge variant="light" size="sm">{users.length} {t('userCount')}</Badge>
+                    {attention > 0 && (
+                      <Badge color={overHard > 0 ? 'red' : 'yellow'} size="sm">
+                        {attention} {t('needAttentionCount')}
+                      </Badge>
+                    )}
+                  </Group>
                 </Group>
-              </Group>
+                <Text size="sm" c="dimmed">
+                  {dev.fstype} · {dev.mount_points.join(', ')}
+                </Text>
+                {dev.usage && <DeviceUsage usage={dev.usage} userQuotas={dev.user_quotas} />}
+              </Stack>
             </Card>
           )
         })}

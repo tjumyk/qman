@@ -35,25 +35,25 @@ def _fetch_all_quotas() -> dict[str, Any]:
     return results
 
 
-def _filter_quotas_for_uid(host_quotas: dict[str, Any], uid: int) -> dict[str, Any]:
-    """Filter host-level quota data to only devices where the user has a quota, and only that user's entry."""
-    out: dict[str, Any] = {}
-    for host_id, payload in host_quotas.items():
-        if "error" in payload:
-            out[host_id] = payload
-            continue
-        devices = payload.get("results") or []
-        filtered_devices = []
-        for dev in devices:
-            user_quotas = dev.get("user_quotas") or []
-            mine = [q for q in user_quotas if q.get("uid") == uid]
-            if not mine:
-                continue
-            dev_copy = {k: v for k, v in dev.items() if k != "user_quotas"}
-            dev_copy["user_quotas"] = mine
-            filtered_devices.append(dev_copy)
-        out[host_id] = {"results": filtered_devices}
-    return out
+def _fetch_quotas_for_uid(uid: int) -> dict[str, Any]:
+    """Fetch per-user quotas from all slaves (one GET per slave, no full scan). Returns same shape as _fetch_all_quotas."""
+    results: dict[str, Any] = {}
+    for slave in current_app.config["SLAVES"]:
+        slave_id = slave["id"]
+        slave_url = slave["url"]
+        try:
+            resp = requests.get(
+                f"{slave_url}/remote-api/quotas/users/{uid}",
+                auth=make_auth(slave),
+                timeout=_REMOTE_API_TIMEOUT,
+            )
+            if resp.status_code // 100 != 2:
+                results[slave_id] = {"error": resp.json()}
+            else:
+                results[slave_id] = {"results": resp.json()}
+        except OSError as e:
+            results[slave_id] = {"error": {"msg": str(e)}}
+    return results
 
 
 def register_api_routes(app: Any) -> None:
@@ -83,9 +83,7 @@ def register_api_routes(app: Any) -> None:
         uid = oauth.get_uid()
         if uid is None:
             return jsonify(msg="user info required"), 401
-        raw = _fetch_all_quotas()
-        filtered = _filter_quotas_for_uid(raw, uid)
-        return jsonify(filtered)
+        return jsonify(_fetch_quotas_for_uid(uid))
 
     @app.route("/api/quotas")
     @oauth.requires_login

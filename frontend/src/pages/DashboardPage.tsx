@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Stack, Text, SimpleGrid, Card, Badge, Loader, Alert, Anchor } from '@mantine/core'
+import { Stack, Text, SimpleGrid, Card, Badge, Loader, Alert, Anchor, Group } from '@mantine/core'
+import { IconGauge } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { fetchQuotas } from '../api'
 import { useI18n } from '../i18n'
@@ -33,9 +34,12 @@ export function DashboardPage() {
 
   return (
     <Stack gap="xl">
-      <Text size="lg" fw={600}>
-        {t('dashboard')}
-      </Text>
+      <Group gap="sm">
+        <IconGauge size={24} />
+        <Text size="lg" fw={600}>
+          {t('dashboard')}
+        </Text>
+      </Group>
       <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
         <Card shadow="sm" padding="lg" radius="md" withBorder>
           <Text size="sm" c="dimmed">

@@ -25,6 +25,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { HostListPage } from './pages/HostListPage'
 import { HostDetailPage } from './pages/HostDetailPage'
 import { DeviceUserListPage } from './pages/DeviceUserListPage'
+import { PageBreadcrumbs } from './components/PageBreadcrumbs'
 
 function AppShellWithNav() {
   const { data: me, isLoading, error } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
@@ -141,6 +142,7 @@ function AppShellWithNav() {
       </AppShell.Navbar>
       <AppShell.Main>
         <Container size="xl">
+          <PageBreadcrumbs />
           <Outlet />
         </Container>
       </AppShell.Main>

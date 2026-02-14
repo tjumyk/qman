@@ -123,3 +123,52 @@ def collect_remote_quotas() -> list[dict[str, Any]]:
             results.append(device)
 
     return results
+
+
+def collect_remote_quotas_for_uid(uid: int) -> list[dict[str, Any]]:
+    """Build list of devices where the given user has a quota (single get_user_quota per device)."""
+    results: list[dict[str, Any]] = []
+    devices = get_devices()
+
+    try:
+        user_name = pwd.getpwuid(uid).pw_name
+    except KeyError:
+        user_name = f"user_{uid}"
+
+    for device in devices.values():
+        device_name = device["name"]
+        opts = device["opts"]
+        if "usrquota" not in opts:
+            continue
+        try:
+            quota = pq.get_user_quota(device_name, uid)
+        except pq.APIError:
+            continue
+        quota_dict = quota_tuple_to_dict(quota)
+        quota_dict["uid"] = uid
+        quota_dict["name"] = user_name
+
+        device_copy: dict[str, Any] = {
+            "name": device["name"],
+            "mount_points": list(device["mount_points"]),
+            "fstype": device["fstype"],
+            "opts": list(device["opts"]),
+            "usage": dict(device["usage"]),
+            "user_quotas": [quota_dict],
+        }
+        try:
+            fmt = pq.get_user_quota_format(device_name)
+            device_copy["user_quota_format"] = _QUOTA_FORMAT_NAMES[fmt]
+        except pq.APIError:
+            pass
+        try:
+            bgrace, igrace, flags = pq.get_user_quota_info(device_name)
+            device_copy["user_quota_info"] = {
+                "block_grace": bgrace,
+                "inode_grace": igrace,
+                "flags": flags,
+            }
+        except pq.APIError:
+            pass
+        results.append(device_copy)
+    return results

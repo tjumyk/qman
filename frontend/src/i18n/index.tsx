@@ -95,6 +95,18 @@ const translations: Record<Locale, Record<string, string>> = {
     status: 'status',
     // Host detail
     hostDevicesTitle: 'devices',
+    // Device info
+    fstypeLabel: 'Filesystem type',
+    mountPointsLabel: 'Mount points',
+    diskUsageLabel: 'Disk usage',
+    reservedSoftLabel: 'Reserved (soft)',
+    reservedHardLabel: 'Reserved (hard)',
+    trackedUsageLabel: 'Tracked (quota users)',
+    otherUsageLabel: 'Other (root + system)',
+    freeSpaceLabel: 'Free',
+    noFreeSpaceLabel: 'No free space',
+    overSoldLabel: 'Over-sold',
+    diskLimitLabel: 'Disk size',
   },
   'zh-Hans': {
     appTitle: 'DQMS',
@@ -164,6 +176,17 @@ const translations: Record<Locale, Record<string, string>> = {
     inodeHard: 'inode 硬限',
     status: '状态',
     hostDevicesTitle: '设备',
+    fstypeLabel: '文件系统类型',
+    mountPointsLabel: '挂载点',
+    diskUsageLabel: '磁盘用量',
+    reservedSoftLabel: '预留（软限）',
+    reservedHardLabel: '预留（硬限）',
+    trackedUsageLabel: '已跟踪（配额用户）',
+    otherUsageLabel: '其他（root + 系统）',
+    freeSpaceLabel: '可用',
+    noFreeSpaceLabel: '无可用空间',
+    overSoldLabel: '超额分配',
+    diskLimitLabel: '磁盘容量',
   },
 }
 

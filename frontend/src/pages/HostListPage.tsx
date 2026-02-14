@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Stack, Text, Card, Loader, Alert, Group, Badge } from '@mantine/core'
+import { IconServer } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { fetchQuotas } from '../api'
 import { useI18n } from '../i18n'
@@ -30,9 +31,12 @@ export function HostListPage() {
 
   return (
     <Stack gap="md">
-      <Text size="lg" fw={600}>
-        {t('hosts')}
-      </Text>
+      <Group gap="sm">
+        <IconServer size={24} />
+        <Text size="lg" fw={600}>
+          {t('hosts')}
+        </Text>
+      </Group>
       <Stack gap="xs">
         {hostIds.map((hostId) => {
           const payload = data[hostId]

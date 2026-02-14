@@ -7,7 +7,7 @@ import pyquota as pq
 
 from flask import current_app, request, jsonify
 from app.auth import requires_api_key
-from app.quota import collect_remote_quotas
+from app.quota import collect_remote_quotas, collect_remote_quotas_for_uid
 from app.models import quota_tuple_to_dict, SetUserQuotaRequest
 
 
@@ -22,6 +22,17 @@ def register_remote_api_routes(app: Any) -> None:
             results = collect_remote_quotas_mock()
         else:
             results = collect_remote_quotas()
+        return jsonify(results)
+
+    @app.route("/remote-api/quotas/users/<int:uid>")
+    @requires_api_key
+    def remote_get_quotas_for_user(uid: int) -> Any:
+        """Return only devices where this user has a quota (per-user fetch, no full scan)."""
+        if current_app.config.get("MOCK_QUOTA"):
+            from app.quota_mock import collect_remote_quotas_for_uid_mock
+            results = collect_remote_quotas_for_uid_mock(uid)
+        else:
+            results = collect_remote_quotas_for_uid(uid)
         return jsonify(results)
 
     @app.route("/remote-api/quotas/users/<int:uid>", methods=["PUT"])

@@ -220,6 +220,74 @@ def init_mock_host() -> None:
                 },
             },
         },
+        "/dev/sdc1": {
+            "name": "/dev/sdc1",
+            "mount_points": ["/oversold"],
+            "fstype": "ext4",
+            "opts": ["rw", "usrquota"],
+            "usage": {"free": 7 * 1024**3, "total": 10 * 1024**3, "used": 3 * 1024**3, "percent": 30.0},
+            "user_quota_format": "vfsv1",
+            "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    "block_hard_limit": 7_000_000,
+                    "block_soft_limit": 6_000_000,
+                    "block_current": 1_500_000 * 1024,
+                    "inode_hard_limit": 100_000,
+                    "inode_soft_limit": 80_000,
+                    "inode_current": 20_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    "block_hard_limit": 7_000_000,
+                    "block_soft_limit": 6_000_000,
+                    "block_current": 1_000_000 * 1024,
+                    "inode_hard_limit": 100_000,
+                    "inode_soft_limit": 80_000,
+                    "inode_current": 15_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
+        "/dev/sdd1": {
+            "name": "/dev/sdd1",
+            "mount_points": ["/full"],
+            "fstype": "ext4",
+            "opts": ["rw", "usrquota"],
+            "usage": {"free": 0, "total": 50 * 1024**3, "used": 50 * 1024**3, "percent": 100.0},
+            "user_quota_format": "vfsv1",
+            "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    "block_hard_limit": 20_000_000,
+                    "block_soft_limit": 18_000_000,
+                    "block_current": 25_000_000 * 1024,
+                    "inode_hard_limit": 500_000,
+                    "inode_soft_limit": 400_000,
+                    "inode_current": 300_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    "block_hard_limit": 25_000_000,
+                    "block_soft_limit": 22_000_000,
+                    "block_current": 24_000_000 * 1024,
+                    "inode_hard_limit": 600_000,
+                    "inode_soft_limit": 500_000,
+                    "inode_current": 280_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
         "/dev/vda1": {
             "name": "/dev/vda1",
             "mount_points": ["/"],
@@ -283,6 +351,35 @@ def collect_remote_quotas_mock() -> list[dict[str, Any]]:
 
         if device.get("user_quotas") or device.get("group_quotas"):
             results.append(device)
+
+    return results
+
+
+def collect_remote_quotas_for_uid_mock(uid: int) -> list[dict[str, Any]]:
+    """Build list of devices where the given user has a quota (same shape as collect_remote_quotas_for_uid)."""
+    results: list[dict[str, Any]] = []
+    users = _mock_state["users"]
+
+    for dev in _mock_state["devices"].values():
+        user_quotas = dev.get("user_quotas") or {}
+        if uid not in user_quotas:
+            continue
+        device: dict[str, Any] = {
+            "name": dev["name"],
+            "mount_points": list(dev["mount_points"]),
+            "fstype": dev["fstype"],
+            "opts": list(dev["opts"]),
+            "usage": dict(dev["usage"]),
+        }
+        if dev.get("user_quota_format") is not None:
+            device["user_quota_format"] = dev["user_quota_format"]
+        if dev.get("user_quota_info") is not None:
+            device["user_quota_info"] = dict(dev["user_quota_info"])
+        q = dict(user_quotas[uid])
+        q["uid"] = uid
+        q["name"] = users.get(uid, f"user{uid}")
+        device["user_quotas"] = [q]
+        results.append(device)
 
     return results
 

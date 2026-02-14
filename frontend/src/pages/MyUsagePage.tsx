@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stack, Text, Progress, Badge, Loader, Alert, Group } from '@mantine/core'
+import { IconChartBar } from '@tabler/icons-react'
 import { fetchMeQuotas } from '../api'
 import { useI18n } from '../i18n'
 import { BlockSize } from '../components/BlockSize'
@@ -33,15 +34,20 @@ function QuotaCard({
       <Stack gap="xs">
         <Group justify="space-between">
           <Text fw={600}>
-            {hostId} / {device.name}
+            {hostId} › {device.name}
           </Text>
           <Badge color={statusColor} variant="light">
             {statusLabel}
           </Badge>
         </Group>
-        <Text size="sm" c="dimmed">
-          {device.fstype} · {device.mount_points.join(', ')}
-        </Text>
+        <Stack gap={2}>
+          <Text size="sm" c="dimmed">
+            {t('fstypeLabel')}: {device.fstype}
+          </Text>
+          <Text size="sm" c="dimmed">
+            {t('mountPointsLabel')}: {device.mount_points.join(', ')}
+          </Text>
+        </Stack>
         <div>
           <Text size="sm" fw={500} mb={4}>
             {t('blockUsage')}
@@ -114,9 +120,12 @@ export function MyUsagePage() {
 
   return (
     <Stack gap="md">
-      <Text size="lg" fw={600}>
-        {t('yourQuotaUsage')}
-      </Text>
+      <Group gap="sm">
+        <IconChartBar size={24} />
+        <Text size="lg" fw={600}>
+          {t('yourQuotaUsage')}
+        </Text>
+      </Group>
       <Stack gap="md">
         {cards.map(({ hostId, device, quota }) => (
           <QuotaCard key={`${hostId}-${device.name}`} hostId={hostId} device={device} quota={quota} t={t} />

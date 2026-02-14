@@ -12,12 +12,14 @@ import {
   Badge,
   Group,
 } from '@mantine/core'
+import { IconDisc } from '@tabler/icons-react'
 import { fetchQuotas } from '../api'
 import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
 import { useI18n } from '../i18n'
 import { EditQuotaModal } from '../components/EditQuotaModal'
+import { DeviceUsage } from '../components/DeviceUsage'
 import type { UserQuota } from '../api/schemas'
 
 export function DeviceUserListPage() {
@@ -68,14 +70,23 @@ export function DeviceUserListPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
-        <Text size="lg" fw={600}>
-          {hostId} / {deviceName}
-        </Text>
+      <Group justify="space-between" gap="sm">
+        <Group gap="sm">
+          <IconDisc size={24} />
+          <Text size="lg" fw={600}>
+            {hostId} › {deviceName}
+          </Text>
+        </Group>
       </Group>
-      <Text size="sm" c="dimmed">
-        {device.fstype} · {device.mount_points.join(', ')}
-      </Text>
+      <Stack gap={2}>
+        <Text size="sm" c="dimmed">
+          {t('fstypeLabel')}: {device.fstype}
+        </Text>
+        <Text size="sm" c="dimmed">
+          {t('mountPointsLabel')}: {device.mount_points.join(', ')}
+        </Text>
+        {device.usage && <DeviceUsage usage={device.usage} userQuotas={device.user_quotas} />}
+      </Stack>
       <TextInput
         placeholder={t('searchByNameOrUid')}
         value={search}
