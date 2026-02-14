@@ -1,0 +1,20 @@
+---
+description: 
+alwaysApply: true
+---
+
+# Dependencies:
+- Base Framework: React v19+
+- Base Language: Typescript v5+
+- UI Framework: Mantine v8+
+- Data Validation: zod v4+
+- State Management: Redux Toolkit v2+, Redux v5+
+- Data Fetching: TanStack Query v5+, axios v1.12+
+- Build System: vite v7+
+- Testing: vitest
+- Linter: ESLint
+
+# Principles
+
+- Define the core data models / view models with zod.
+- Try to avoid using `as any` for skipping type check

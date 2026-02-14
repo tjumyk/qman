@@ -1,4 +1,10 @@
-requests
-flask
+# Python 3.11+
+flask>=3.0
+pydantic>=2.0
+requests>=2.28
+sqlalchemy>=2.0
+alembic>=1.13
+gunicorn
 pyquota
 psutil
+Flask-CORS>=4.0.0

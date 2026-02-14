@@ -1,0 +1,17 @@
+---
+alwaysApply: true
+---
+
+# Dependencies:
+- Python: v11+
+- Web App: Flask v3+
+- Database ORM: sqlalchemy v2+
+- Database Migration: alembic v1+
+- Database system: sqlite for development, postgresql for deployment
+- Data Validation: pydantic v2+
+- API calls: requests v2+
+- Server for deployment: gunicorn
+
+# Principles
+- Each function should have type annotations, including types of parameters and return type
+- Define the data models with pydantic
