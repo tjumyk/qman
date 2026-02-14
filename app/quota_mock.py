@@ -12,6 +12,7 @@ _mock_state: dict[str, Any] = {
 }
 
 # Quota 8-tuple: (bhard, bsoft, bcurrent, ihard, isoft, icurrent, btime, itime)
+# Block limits (bhard, bsoft) are in 1K blocks; bcurrent is in bytes (pyquota convention).
 _DEFAULT_QUOTA = (0, 0, 0, 0, 0, 0, 0, 0)
 
 
@@ -59,7 +60,7 @@ def init_mock_host() -> None:
                 1000: {
                     "block_hard_limit": 1_000_000,
                     "block_soft_limit": 900_000,
-                    "block_current": 300_000,
+                    "block_current": 300_000 * 1024,  # bytes (~293 MiB)
                     "inode_hard_limit": 100_000,
                     "inode_soft_limit": 80_000,
                     "inode_current": 25_000,
@@ -69,7 +70,7 @@ def init_mock_host() -> None:
                 1001: {
                     "block_hard_limit": 2_000_000,
                     "block_soft_limit": 1_800_000,
-                    "block_current": 1_200_000,
+                    "block_current": 1_200_000 * 1024,  # bytes (~1.14 GiB)
                     "inode_hard_limit": 200_000,
                     "inode_soft_limit": 150_000,
                     "inode_current": 90_000,
@@ -79,7 +80,7 @@ def init_mock_host() -> None:
                 1002: {
                     "block_hard_limit": 500_000,
                     "block_soft_limit": 400_000,
-                    "block_current": 450_000,  # over soft
+                    "block_current": 450_000_000,  # bytes, over soft (400_000 * 1024)
                     "inode_hard_limit": 50_000,
                     "inode_soft_limit": 40_000,
                     "inode_current": 35_000,
@@ -89,7 +90,7 @@ def init_mock_host() -> None:
                 1003: {
                     "block_hard_limit": 0,
                     "block_soft_limit": 0,
-                    "block_current": 10_000,
+                    "block_current": 10_000,  # bytes
                     "inode_hard_limit": 0,
                     "inode_soft_limit": 0,
                     "inode_current": 1_000,
@@ -99,7 +100,7 @@ def init_mock_host() -> None:
                 1004: {
                     "block_hard_limit": 5_000_000,
                     "block_soft_limit": 4_000_000,
-                    "block_current": 2_000_000,
+                    "block_current": 2_000_000 * 1024,  # bytes (~1.9 GiB)
                     "inode_hard_limit": 500_000,
                     "inode_soft_limit": 400_000,
                     "inode_current": 100_000,
@@ -111,7 +112,7 @@ def init_mock_host() -> None:
                 1000: {
                     "block_hard_limit": 10_000_000,
                     "block_soft_limit": 8_000_000,
-                    "block_current": 3_000_000,
+                    "block_current": 3_000_000 * 1024,  # bytes
                     "inode_hard_limit": 1_000_000,
                     "inode_soft_limit": 800_000,
                     "inode_current": 200_000,
@@ -121,7 +122,7 @@ def init_mock_host() -> None:
                 1001: {
                     "block_hard_limit": 20_000_000,
                     "block_soft_limit": 18_000_000,
-                    "block_current": 5_000_000,
+                    "block_current": 5_000_000 * 1024,  # bytes
                     "inode_hard_limit": 2_000_000,
                     "inode_soft_limit": 1_500_000,
                     "inode_current": 400_000,
@@ -131,7 +132,7 @@ def init_mock_host() -> None:
                 1002: {
                     "block_hard_limit": 50_000_000,
                     "block_soft_limit": 40_000_000,
-                    "block_current": 10_000_000,
+                    "block_current": 10_000_000 * 1024,  # bytes
                     "inode_hard_limit": 5_000_000,
                     "inode_soft_limit": 4_000_000,
                     "inode_current": 1_000_000,
@@ -154,7 +155,7 @@ def init_mock_host() -> None:
                 1000: {
                     "block_hard_limit": 10_000_000,
                     "block_soft_limit": 8_000_000,
-                    "block_current": 2_000_000,
+                    "block_current": 2_000_000 * 1024,  # bytes
                     "inode_hard_limit": 1_000_000,
                     "inode_soft_limit": 800_000,
                     "inode_current": 50_000,
@@ -164,7 +165,7 @@ def init_mock_host() -> None:
                 1001: {
                     "block_hard_limit": 20_000_000,
                     "block_soft_limit": 15_000_000,
-                    "block_current": 12_000_000,
+                    "block_current": 12_000_000 * 1024,  # bytes
                     "inode_hard_limit": 2_000_000,
                     "inode_soft_limit": 1_500_000,
                     "inode_current": 1_200_000,
@@ -188,7 +189,7 @@ def init_mock_host() -> None:
                 1000: {
                     "block_hard_limit": 100_000_000,
                     "block_soft_limit": 80_000_000,
-                    "block_current": 10_000_000,
+                    "block_current": 10_000_000 * 1024,  # bytes
                     "inode_hard_limit": 10_000_000,
                     "inode_soft_limit": 8_000_000,
                     "inode_current": 500_000,
@@ -198,7 +199,7 @@ def init_mock_host() -> None:
                 1002: {
                     "block_hard_limit": 50_000_000,
                     "block_soft_limit": 40_000_000,
-                    "block_current": 5_000_000,
+                    "block_current": 5_000_000 * 1024,  # bytes
                     "inode_hard_limit": 5_000_000,
                     "inode_soft_limit": 4_000_000,
                     "inode_current": 200_000,
@@ -210,7 +211,7 @@ def init_mock_host() -> None:
                 1000: {
                     "block_hard_limit": 500_000_000,
                     "block_soft_limit": 400_000_000,
-                    "block_current": 100_000_000,
+                    "block_current": 100_000_000 * 1024,  # bytes
                     "inode_hard_limit": 50_000_000,
                     "inode_soft_limit": 40_000_000,
                     "inode_current": 2_000_000,

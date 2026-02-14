@@ -23,7 +23,8 @@ function QuotaCard({
   const statusLabel = t(getQuotaStatusLabelKey(status))
 
   const blockLimit = quota.block_hard_limit > 0 ? quota.block_hard_limit : quota.block_soft_limit
-  const blockPct = blockLimit > 0 ? Math.min(100, (quota.block_current / blockLimit) * 100) : 0
+  const blockLimitBytes = blockLimit * 1024
+  const blockPct = blockLimitBytes > 0 ? Math.min(100, (quota.block_current / blockLimitBytes) * 100) : 0
   const inodeLimit = quota.inode_hard_limit > 0 ? quota.inode_hard_limit : quota.inode_soft_limit
   const inodePct = inodeLimit > 0 ? Math.min(100, (quota.inode_current / inodeLimit) * 100) : 0
 
@@ -47,7 +48,7 @@ function QuotaCard({
           </Text>
           <Progress value={blockPct} color={statusColor} size="lg" />
           <Text size="xs" c="dimmed" mt={4}>
-            <BlockSize size={quota.block_current * 1024} />
+            <BlockSize size={quota.block_current} />
             {blockLimit > 0 && (
               <> / <BlockSize size={blockLimit * 1024} /></>
             )}

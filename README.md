@@ -68,6 +68,15 @@ CONFIG_PATH=config.slave.json python run.py
 
 **Slave in mock mode** (no pyquota; uses in-memory mock host with sample filesystems and users): set `"MOCK_QUOTA": true` in `config.slave.json`, then run the slave as above. The mock host includes several devices (e.g. `/dev/sda1`, `/dev/sdb1`, `/dev/nvme0n1p1`), users (alice, bob, charlie, …), and quota limits so you can test the UI without real quota support.
 
+### Quota block units (pyquota)
+
+The backend uses [pyquota](https://github.com/tjumyk/pyquota) (quotactl wrapper). Its API uses **different units** for block usage vs limits:
+
+- **`block_hard_limit`**, **`block_soft_limit`**: in **1K blocks** (1024 bytes per unit).
+- **`block_current`**: in **bytes**.
+
+The API and frontend follow this convention: limits are exposed in 1K blocks, current usage in bytes. The UI converts limits to bytes (×1024) for display; current usage is shown as-is. The mock quota backend uses the same units so behaviour matches real pyquota.
+
 ## Frontend (React 19 + Vite 7 + TypeScript 5)
 
 - **Stack:** Mantine 8, Zod 4, Redux Toolkit, TanStack Query 5, axios, Vitest, ESLint.

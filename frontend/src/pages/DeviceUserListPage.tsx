@@ -105,7 +105,7 @@ export function DeviceUserListPage() {
                 <Table.Td>{q.uid}</Table.Td>
                 <Table.Td>{q.name}</Table.Td>
                 <Table.Td>
-                  <BlockSize size={q.block_current * 1024} />
+                  <BlockSize size={q.block_current} />
                 </Table.Td>
                 <Table.Td>
                   <BlockSize size={q.block_soft_limit * 1024} />
