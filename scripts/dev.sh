@@ -11,12 +11,12 @@ python auth_connect/mock_oauth_server.py &
 OAUTH_PID=$!
 
 echo "Starting slave (8437)..."
-CONFIG_PATH=config.slave.json python app.py &
+CONFIG_PATH=config.slave.json python run.py &
 SLAVE_PID=$!
 
 sleep 2
 echo "Starting master (8436)..."
-python app.py &
+python run.py &
 MASTER_PID=$!
 
 sleep 2

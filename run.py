@@ -1,7 +1,7 @@
 """Entry point for qman: creates Flask app and runs dev server.
 
 Use config.json for master server (default).
-Use config.slave.json for slave server: CONFIG_PATH=config.slave.json python app.py
+Use config.slave.json for slave server: CONFIG_PATH=config.slave.json python run.py
 """
 
 from app import create_app

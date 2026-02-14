@@ -18,7 +18,7 @@ python auth_connect/mock_oauth_server.py
 
 # Terminal 2: run app with OAuth enabled
 # In oauth.config.json set "enabled": true and "server": {"url": "http://localhost:8077", ...}
-python app.py
+python run.py
 ```
 
 Optional env: `MOCK_OAUTH_PORT`, `MOCK_OAUTH_CLIENT_ID`, `MOCK_OAUTH_CLIENT_SECRET`, `MOCK_OAUTH_REDIRECT_URL`. Default client matches `auth_connect/oauth.config.example.json` (id=1, secret=someLongSecret). Connect URL supports `?user_id=1` or `?user_id=2` to log in as Mock Admin or Mock User.
@@ -28,8 +28,8 @@ Optional env: `MOCK_OAUTH_PORT`, `MOCK_OAUTH_CLIENT_ID`, `MOCK_OAUTH_CLIENT_SECR
 | Terminal | Command                                       | Port |
 |----------|-----------------------------------------------|------|
 | 1 | `python auth_connect/mock_oauth_server.py`    | 8077 |
-| 2 | `CONFIG_PATH=config.slave.json python app.py` | 8437 (slave, mock quota) |
-| 3 | `python app.py`                               | 8436 (master) |
+| 2 | `CONFIG_PATH=config.slave.json python run.py` | 8437 (slave, mock quota) |
+| 3 | `python run.py`                               | 8436 (master) |
 | 4 | `cd frontend && npm run dev`                  | 5173 |
 
 Then open http://localhost:5173. Log in via the mock OAuth connect page; use a user from `oauth.mock.config.json` (e.g. **alice** for "My usage" only, **charlie** for admin and "Manage"). Alternatively run `./scripts/dev.sh` from the project root to start all four processes (mock OAuth, slave, master, frontend) in the background.
@@ -55,15 +55,15 @@ cp config.slave_example.json config.slave.json
 **Master server** (uses `config.json`):
 
 ```bash
-python app.py   # serves on http://localhost:8436
-# Production: gunicorn -w 4 -b 0.0.0.0:8436 "server:app"
+python run.py   # serves on http://localhost:8436
+# Production: gunicorn -w 4 -b 0.0.0.0:8436 "run:app"
 ```
 
 **Slave server** (uses `config.slave.json`):
 
 ```bash
-CONFIG_PATH=config.slave.json python app.py
-# Production: CONFIG_PATH=config.slave.json gunicorn -w 4 -b 0.0.0.0:8436 "server:app"
+CONFIG_PATH=config.slave.json python run.py
+# Production: CONFIG_PATH=config.slave.json gunicorn -w 4 -b 0.0.0.0:8436 "run:app"
 ```
 
 **Slave in mock mode** (no pyquota; uses in-memory mock host with sample filesystems and users): set `"MOCK_QUOTA": true` in `config.slave.json`, then run the slave as above. The mock host includes several devices (e.g. `/dev/sda1`, `/dev/sdb1`, `/dev/nvme0n1p1`), users (alice, bob, charlie, …), and quota limits so you can test the UI without real quota support.
@@ -102,6 +102,6 @@ npm run lint
 - `alembic/` – Database migrations
 - `frontend/` – Vite + React SPA (builds into `static/`)
 - `static/` – Served by Flask at `/` (index.html and assets)
-- `app.py` – Entry point; creates app and runs dev server
+- `run.py` – Entry point; creates app and runs dev server
 - `config.json` – Master server config (not committed)
 - `config.slave.json` – Slave server config (not committed)
