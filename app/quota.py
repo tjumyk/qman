@@ -122,6 +122,7 @@ def collect_remote_quotas() -> list[dict[str, Any]]:
                 device["group_quotas"] = group_quotas
             results.append(device)
 
+    results.sort(key=lambda r: r['name'])
     return results
 
 
@@ -171,4 +172,6 @@ def collect_remote_quotas_for_uid(uid: int) -> list[dict[str, Any]]:
         except pq.APIError:
             pass
         results.append(device_copy)
+
+    results.sort(key=lambda r: r['name'])
     return results
