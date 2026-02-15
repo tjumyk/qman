@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Modal, Stack, NumberInput, Group, Button, Text } from '@mantine/core'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { setUserQuota } from '../api'
+import { setUserQuota, getErrorMessage } from '../api'
 import { useI18n } from '../i18n'
 import { BlockLimitEditor } from './BlockLimitEditor'
 import type { UserQuota, SetUserQuotaBody } from '../api/schemas'
@@ -46,8 +46,11 @@ export function EditQuotaModal({
       notifications.show({ message: t('quotaUpdated'), color: 'green' })
       onClose()
     },
-    onError: (err: Error) => {
-      notifications.show({ message: err.message || t('failedToUpdateQuota'), color: 'red' })
+    onError: (err: unknown) => {
+      notifications.show({
+        message: getErrorMessage(err, t('failedToUpdateQuota')),
+        color: 'red',
+      })
     },
   })
 

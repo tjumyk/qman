@@ -13,15 +13,18 @@ import {
 import { IconLink, IconPlus, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router-dom'
 import { Anchor } from '@mantine/core'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
+  fetchMe,
   fetchMeMappings,
   fetchHosts,
   fetchHostUsers,
   postMeMapping,
   deleteMeMapping,
+  getErrorMessage,
 } from '../api'
 import { useI18n } from '../i18n'
+import { notifications } from '@mantine/notifications'
 
 export function MyMappingsPage() {
   const { t } = useI18n()
@@ -34,12 +37,23 @@ export function MyMappingsPage() {
     queryKey: ['me-mappings'],
     queryFn: fetchMeMappings,
   })
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const { data: hosts } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
   const { data: hostUsers, isLoading: hostUsersLoading } = useQuery({
     queryKey: ['hosts', selectedHostId, 'users'],
     queryFn: () => fetchHostUsers(selectedHostId!),
     enabled: !!selectedHostId,
   })
+
+  // Auto-select host user when candidates load only if current user name matches (exact or case-insensitive)
+  useEffect(() => {
+    if (!hostUsers?.length || selectedHostUserName !== null || !me?.name) return
+    const names = hostUsers.map((u) => u.host_user_name)
+    const match =
+      names.find((n) => n === me.name) ??
+      names.find((n) => n.toLowerCase() === me.name.toLowerCase())
+    if (match != null) setSelectedHostUserName(match)
+  }, [hostUsers, me?.name, selectedHostUserName])
 
   const addMutation = useMutation({
     mutationFn: ({ hostId, hostUserName }: { hostId: string; hostUserName: string }) =>
@@ -51,6 +65,13 @@ export function MyMappingsPage() {
       setSelectedHostId(null)
       setSelectedHostUserName(null)
     },
+    onError: (err: unknown) => {
+      notifications.show({
+        title: t('error'),
+        message: getErrorMessage(err, t('failedToAddMapping')),
+        color: 'red',
+      })
+    },
   })
   const deleteMutation = useMutation({
     mutationFn: ({ hostId, hostUserName }: { hostId: string; hostUserName: string }) =>
@@ -58,6 +79,13 @@ export function MyMappingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['me-mappings'] })
       queryClient.invalidateQueries({ queryKey: ['me-quotas'] })
+    },
+    onError: (err: unknown) => {
+      notifications.show({
+        title: t('error'),
+        message: getErrorMessage(err, t('failedToRemoveMapping')),
+        color: 'red',
+      })
     },
   })
 

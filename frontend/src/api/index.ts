@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { isAxiosError } from 'axios'
 import { z } from 'zod'
 import { meMappingSchema, meSchema, quotasResponseSchema, userQuotaSchema } from './schemas'
 import type { Me, MeMapping, QuotasResponse, SetUserQuotaBody, UserQuota } from './schemas'
@@ -24,6 +24,15 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+/** Prefer backend error msg from response.data.msg, else error.message, else fallback. */
+export function getErrorMessage(err: unknown, fallback: string): string {
+  if (isAxiosError(err) && err.response?.data && typeof err.response.data === 'object' && 'msg' in err.response.data && typeof (err.response.data as { msg?: unknown }).msg === 'string') {
+    return (err.response.data as { msg: string }).msg
+  }
+  if (err instanceof Error && err.message) return err.message
+  return fallback
+}
 
 export async function fetchMe(): Promise<Me> {
   const { data } = await api.get<unknown>('me')

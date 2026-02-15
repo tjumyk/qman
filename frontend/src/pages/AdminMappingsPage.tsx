@@ -12,7 +12,7 @@ import {
   ActionIcon,
 } from '@mantine/core'
 import { IconLink, IconPlus, IconTrash, IconUsers } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   fetchAdminMappings,
   fetchAdminHostUsers,
@@ -21,8 +21,10 @@ import {
   fetchHostUsers,
   postAdminMapping,
   deleteAdminMapping,
+  getErrorMessage,
 } from '../api'
 import { useI18n } from '../i18n'
+import { notifications } from '@mantine/notifications'
 import type { AdminMapping, AdminHostUser } from '../api'
 
 function buildRows(
@@ -89,6 +91,22 @@ export function AdminMappingsPage() {
     enabled: !!selectedHostId,
   })
 
+  // Auto-select host user when candidates load only if selected OAuth user name matches (exact or case-insensitive)
+  useEffect(() => {
+    if (!hostUsersForHost?.length || selectedHostUserName !== null) return
+    const oauthUser =
+      selectedOAuthUserId != null && selectedOAuthUserId !== ''
+        ? oauthUsers?.find((u) => String(u.id) === selectedOAuthUserId)
+        : undefined
+    const oauthName = oauthUser?.name
+    if (oauthName == null) return
+    const names = hostUsersForHost.map((u) => u.host_user_name)
+    const match =
+      names.find((n) => n === oauthName) ??
+      names.find((n) => n.toLowerCase() === oauthName.toLowerCase())
+    if (match != null) setSelectedHostUserName(match)
+  }, [hostUsersForHost, selectedOAuthUserId, oauthUsers, selectedHostUserName])
+
   const addMutation = useMutation({
     mutationFn: ({
       oauthUserId,
@@ -107,6 +125,13 @@ export function AdminMappingsPage() {
       setSelectedOAuthUserId(null)
       setSelectedHostUserName(null)
     },
+    onError: (err: unknown) => {
+      notifications.show({
+        title: t('error'),
+        message: getErrorMessage(err, t('failedToAddMapping')),
+        color: 'red',
+      })
+    },
   })
   const deleteMutation = useMutation({
     mutationFn: ({
@@ -121,6 +146,13 @@ export function AdminMappingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-mappings'] })
       queryClient.invalidateQueries({ queryKey: ['admin-host-users'] })
+    },
+    onError: (err: unknown) => {
+      notifications.show({
+        title: t('error'),
+        message: getErrorMessage(err, t('failedToRemoveMapping')),
+        color: 'red',
+      })
     },
   })
 
