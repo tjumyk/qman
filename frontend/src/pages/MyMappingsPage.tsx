@@ -13,7 +13,7 @@ import {
 import { IconLink, IconPlus, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router-dom'
 import { Anchor } from '@mantine/core'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   fetchMe,
   fetchMeMappings,
@@ -44,16 +44,6 @@ export function MyMappingsPage() {
     queryFn: () => fetchHostUsers(selectedHostId!),
     enabled: !!selectedHostId,
   })
-
-  // Auto-select host user when candidates load only if current user name matches (exact or case-insensitive)
-  useEffect(() => {
-    if (!hostUsers?.length || selectedHostUserName !== null || !me?.name) return
-    const names = hostUsers.map((u) => u.host_user_name)
-    const match =
-      names.find((n) => n === me.name) ??
-      names.find((n) => n.toLowerCase() === me.name.toLowerCase())
-    if (match != null) setSelectedHostUserName(match)
-  }, [hostUsers, me?.name, selectedHostUserName])
 
   const addMutation = useMutation({
     mutationFn: ({ hostId, hostUserName }: { hostId: string; hostUserName: string }) =>
@@ -107,10 +97,18 @@ export function MyMappingsPage() {
   const list = mappings ?? []
 
   const hostOptions = (hosts ?? []).map((h) => ({ value: h.id, label: h.id }))
-  const hostUserOptions = (hostUsers ?? []).map((u) => ({
-    value: u.host_user_name,
-    label: u.host_user_name,
-  }))
+  const hostUserOptions = (hostUsers ?? [])
+    .map((u) => ({ value: u.host_user_name, label: u.host_user_name }))
+    .sort((a, b) => {
+      if (!me?.name) return 0
+      const exactA = a.value === me.name ? 1 : 0
+      const exactB = b.value === me.name ? 1 : 0
+      if (exactA !== exactB) return exactB - exactA
+      const ciA = a.value.toLowerCase() === me.name.toLowerCase() ? 1 : 0
+      const ciB = b.value.toLowerCase() === me.name.toLowerCase() ? 1 : 0
+      if (ciA !== ciB) return ciB - ciA
+      return 0
+    })
 
   return (
     <Stack gap="md">
@@ -194,6 +192,25 @@ export function MyMappingsPage() {
                 : t('selectHostFirst')
             }
             disabled={!selectedHostId}
+            renderOption={({ option }) => {
+              const isSuggested =
+                me?.name &&
+                (option.value === me.name ||
+                  option.value.toLowerCase() === me.name.toLowerCase())
+              return (
+                <>
+                  {option.label}
+                  {isSuggested && (
+                    <>
+                      {' '}
+                      <Text component="span" c="dimmed" size="sm">
+                        ({t('suggested')})
+                      </Text>
+                    </>
+                  )}
+                </>
+              )
+            }}
           />
           <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={() => setAddOpen(false)}>

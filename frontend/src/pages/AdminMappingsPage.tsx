@@ -12,7 +12,7 @@ import {
   ActionIcon,
 } from '@mantine/core'
 import { IconLink, IconPlus, IconTrash, IconUsers } from '@tabler/icons-react'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   fetchAdminMappings,
   fetchAdminHostUsers,
@@ -82,30 +82,14 @@ export function AdminMappingsPage() {
   const { data: oauthUsers, isLoading: oauthUsersLoading, refetch: refetchOAuthUsers } = useQuery({
     queryKey: ['admin-oauth-users'],
     queryFn: fetchAdminOAuthUsers,
-    enabled: addOpen,
   })
+  const [inlineAddForRow, setInlineAddForRow] = useState<Record<string, string>>({})
   const { data: hosts } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
   const { data: hostUsersForHost, isLoading: hostUsersForHostLoading } = useQuery({
     queryKey: ['hosts', selectedHostId, 'users'],
     queryFn: () => fetchHostUsers(selectedHostId!),
     enabled: !!selectedHostId,
   })
-
-  // Auto-select host user when candidates load only if selected OAuth user name matches (exact or case-insensitive)
-  useEffect(() => {
-    if (!hostUsersForHost?.length || selectedHostUserName !== null) return
-    const oauthUser =
-      selectedOAuthUserId != null && selectedOAuthUserId !== ''
-        ? oauthUsers?.find((u) => String(u.id) === selectedOAuthUserId)
-        : undefined
-    const oauthName = oauthUser?.name
-    if (oauthName == null) return
-    const names = hostUsersForHost.map((u) => u.host_user_name)
-    const match =
-      names.find((n) => n === oauthName) ??
-      names.find((n) => n.toLowerCase() === oauthName.toLowerCase())
-    if (match != null) setSelectedHostUserName(match)
-  }, [hostUsersForHost, selectedOAuthUserId, oauthUsers, selectedHostUserName])
 
   const addMutation = useMutation({
     mutationFn: ({
@@ -178,10 +162,22 @@ export function AdminMappingsPage() {
     value: String(u.id),
     label: `${u.name} (${u.id})`,
   }))
-  const hostUserOptions = (hostUsersForHost ?? []).map((u) => ({
-    value: u.host_user_name,
-    label: u.host_user_name,
-  }))
+  const selectedOAuthName =
+    selectedOAuthUserId != null && selectedOAuthUserId !== ''
+      ? oauthUsers?.find((u) => String(u.id) === selectedOAuthUserId)?.name
+      : undefined
+  const hostUserOptions = (hostUsersForHost ?? [])
+    .map((u) => ({ value: u.host_user_name, label: u.host_user_name }))
+    .sort((a, b) => {
+      if (!selectedOAuthName) return 0
+      const exactA = a.value === selectedOAuthName ? 1 : 0
+      const exactB = b.value === selectedOAuthName ? 1 : 0
+      if (exactA !== exactB) return exactB - exactA
+      const ciA = a.value.toLowerCase() === selectedOAuthName.toLowerCase() ? 1 : 0
+      const ciB = b.value.toLowerCase() === selectedOAuthName.toLowerCase() ? 1 : 0
+      if (ciA !== ciB) return ciB - ciA
+      return 0
+    })
 
   return (
     <Stack gap="md">
@@ -218,34 +214,103 @@ export function AdminMappingsPage() {
                 <Table.Td>{row.host_id}</Table.Td>
                 <Table.Td>{row.host_user_name}</Table.Td>
                 <Table.Td>
-                  {row.oauthMappings.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      —
-                    </Text>
-                  ) : (
-                    <Group gap="xs" wrap="wrap">
-                      {row.oauthMappings.map((m) => (
-                        <Group key={`${m.oauth_user_id}-${row.host_id}-${row.host_user_name}`} gap={4}>
-                          <Text size="sm">{m.oauth_user_name ?? m.oauth_user_id}</Text>
-                          <ActionIcon
-                            size="sm"
-                            variant="subtle"
-                            color="red"
-                            onClick={() =>
-                              deleteMutation.mutate({
-                                oauthUserId: m.oauth_user_id,
-                                hostId: row.host_id,
-                                hostUserName: row.host_user_name,
-                              })
-                            }
-                            loading={deleteMutation.isPending}
-                          >
-                            <IconTrash size={14} />
-                          </ActionIcon>
-                        </Group>
-                      ))}
-                    </Group>
-                  )}
+                  <Group gap="xs" wrap="wrap" align="center">
+                    {row.oauthMappings.length === 0 && !inlineAddForRow[`${row.host_id}|${row.host_user_name}`] ? (
+                      <Text size="sm" c="dimmed">
+                        —
+                      </Text>
+                    ) : null}
+                    {row.oauthMappings.map((m) => (
+                      <Group key={`${m.oauth_user_id}-${row.host_id}-${row.host_user_name}`} gap={4}>
+                        <Text size="sm">{m.oauth_user_name ?? m.oauth_user_id}</Text>
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          color="red"
+                          onClick={() =>
+                            deleteMutation.mutate({
+                              oauthUserId: m.oauth_user_id,
+                              hostId: row.host_id,
+                              hostUserName: row.host_user_name,
+                            })
+                          }
+                          loading={deleteMutation.isPending}
+                        >
+                          <IconTrash size={14} />
+                        </ActionIcon>
+                      </Group>
+                    ))}
+                    <Select
+                      size="xs"
+                      placeholder={oauthUsersLoading ? t('loading') : t('addUser')}
+                      data={(oauthUserOptions ?? [])
+                        .filter(
+                          (opt) =>
+                            !row.oauthMappings.some((m) => String(m.oauth_user_id) === opt.value)
+                        )
+                        .sort((a, b) => {
+                          const nameA =
+                            oauthUsers?.find((u) => String(u.id) === a.value)?.name ?? ''
+                          const nameB =
+                            oauthUsers?.find((u) => String(u.id) === b.value)?.name ?? ''
+                          const exactA = nameA === row.host_user_name ? 1 : 0
+                          const exactB = nameB === row.host_user_name ? 1 : 0
+                          if (exactA !== exactB) return exactB - exactA
+                          const ciA =
+                            nameA.toLowerCase() === row.host_user_name.toLowerCase() ? 1 : 0
+                          const ciB =
+                            nameB.toLowerCase() === row.host_user_name.toLowerCase() ? 1 : 0
+                          if (ciA !== ciB) return ciB - ciA
+                          return 0
+                        })}
+                      value={inlineAddForRow[`${row.host_id}|${row.host_user_name}`] ?? null}
+                      onChange={(v) => {
+                        if (!v) return
+                        const rowKey = `${row.host_id}|${row.host_user_name}`
+                        setInlineAddForRow((prev) => ({ ...prev, [rowKey]: v }))
+                        addMutation.mutate(
+                          {
+                            oauthUserId: Number(v),
+                            hostId: row.host_id,
+                            hostUserName: row.host_user_name,
+                          },
+                          {
+                            onSettled: () =>
+                              setInlineAddForRow((prev) => {
+                                const next = { ...prev }
+                                delete next[rowKey]
+                                return next
+                              }),
+                          }
+                        )
+                      }}
+                      disabled={oauthUsersLoading || addMutation.isPending}
+                      clearable={false}
+                      style={{ minWidth: 140 }}
+                      renderOption={({ option }) => {
+                        const oauthName = oauthUsers?.find(
+                          (u) => String(u.id) === option.value
+                        )?.name
+                        const isSuggested =
+                          oauthName &&
+                          (oauthName === row.host_user_name ||
+                            oauthName.toLowerCase() === row.host_user_name.toLowerCase())
+                        return (
+                          <>
+                            {option.label}
+                            {isSuggested && (
+                              <>
+                                {' '}
+                                <Text component="span" c="dimmed" size="sm">
+                                  ({t('suggested')})
+                                </Text>
+                              </>
+                            )}
+                          </>
+                        )
+                      }}
+                    />
+                  </Group>
                 </Table.Td>
               </Table.Tr>
             ))}
@@ -298,6 +363,25 @@ export function AdminMappingsPage() {
                 : t('selectHostFirst')
             }
             disabled={!selectedHostId}
+            renderOption={({ option }) => {
+              const isSuggested =
+                selectedOAuthName &&
+                (option.value === selectedOAuthName ||
+                  option.value.toLowerCase() === selectedOAuthName.toLowerCase())
+              return (
+                <>
+                  {option.label}
+                  {isSuggested && (
+                    <>
+                      {' '}
+                      <Text component="span" c="dimmed" size="sm">
+                        ({t('suggested')})
+                      </Text>
+                    </>
+                  )}
+                </>
+              )
+            }}
           />
           <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={() => setAddOpen(false)}>
