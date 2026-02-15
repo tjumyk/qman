@@ -261,7 +261,7 @@ export function AdminMappingsPage() {
                           const ciB =
                             nameB.toLowerCase() === row.host_user_name.toLowerCase() ? 1 : 0
                           if (ciA !== ciB) return ciB - ciA
-                          return 0
+                          return nameA.localeCompare(nameB)
                         })}
                       value={inlineAddForRow[`${row.host_id}|${row.host_user_name}`] ?? null}
                       onChange={(v) => {
