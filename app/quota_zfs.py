@@ -5,6 +5,8 @@ from typing import Any
 
 import pwd
 
+from app.quota_common import should_include_uid
+
 _ZFS_CMD = "zfs"
 
 
@@ -38,7 +40,7 @@ def _zfs_list_datasets() -> list[str]:
         if len(parts) < 4:
             continue
         name, mountpoint, used_s, avail_s = parts
-        if not mountpoint or mountpoint == "-":
+        if not mountpoint or mountpoint in ("-", "none"):
             continue
         try:
             used = int(used_s)
@@ -76,7 +78,8 @@ def get_devices(zfs_datasets: list[str] | None = None) -> dict[str, dict[str, An
         if len(parts) < 4:
             continue
         _, mountpoint, used_s, avail_s = parts
-        mountpoint = mountpoint if mountpoint and mountpoint != "-" else ""
+        if not mountpoint or mountpoint in ("-", "none"):
+            continue
         try:
             used = int(used_s)
             avail = int(avail_s)
@@ -86,7 +89,7 @@ def get_devices(zfs_datasets: list[str] | None = None) -> dict[str, dict[str, An
         percent = (used / total * 100.0) if total else 0.0
         devices[name] = {
             "name": name,
-            "mount_points": [mountpoint] if mountpoint else [],
+            "mount_points": [mountpoint],
             "fstype": "zfs",
             "opts": ["zfs"],
             "usage": {
@@ -163,7 +166,13 @@ def collect_remote_quotas(zfs_datasets: list[str] | None = None) -> list[dict[st
         rows = _parse_userspace_output(result.stdout)
         if not rows:
             continue
-        user_quotas = [_user_quota_dict(uid, used, quota) for uid, used, quota in rows]
+        user_quotas = [
+            _user_quota_dict(uid, used, quota)
+            for uid, used, quota in rows
+            if should_include_uid(uid)
+        ]
+        if not user_quotas:
+            continue
         device_copy: dict[str, Any] = {
             "name": device["name"],
             "mount_points": list(device["mount_points"]),
@@ -180,6 +189,8 @@ def collect_remote_quotas(zfs_datasets: list[str] | None = None) -> list[dict[st
 
 def collect_remote_quotas_for_uid(uid: int, zfs_datasets: list[str] | None = None) -> list[dict[str, Any]]:
     """Build list of ZFS datasets where this user has usage or quota (same shape as quota.collect_remote_quotas_for_uid)."""
+    if not should_include_uid(uid):
+        return []
     devices = get_devices(zfs_datasets)
     results: list[dict[str, Any]] = []
     try:

@@ -8,6 +8,7 @@ import psutil
 import pyquota as pq
 
 from app.models import quota_tuple_to_dict
+from app.quota_common import should_include_uid, should_include_gid
 
 _QUOTA_FORMAT_NAMES = {
     pq.QFMT_VFS_OLD: "vfsold",
@@ -73,7 +74,7 @@ def collect_remote_quotas() -> list[dict[str, Any]]:
             user_quotas = []
             for entry in pwd.getpwall():
                 uid = entry.pw_uid
-                if uid < 1000 or uid == 65534:
+                if not should_include_uid(uid):
                     continue
                 try:
                     quota = pq.get_user_quota(device_name, uid)
@@ -104,7 +105,7 @@ def collect_remote_quotas() -> list[dict[str, Any]]:
             group_quotas = []
             for entry in grp.getgrall():
                 gid = entry.gr_gid
-                if gid < 1000 or gid == 65534:
+                if not should_include_gid(gid):
                     continue
                 try:
                     quota = pq.get_group_quota(device_name, gid)
