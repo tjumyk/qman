@@ -24,8 +24,11 @@ class AppConfig(BaseModel):
     SLAVES: list[SlaveConfig] = Field(default_factory=list)
     API_KEY: str | None = None
     PORT: int | None = None
-    MOCK_QUOTA: bool = False  # If true, slave uses in-memory mock instead of pyquota
+    MOCK_QUOTA: bool = False  # If true, slave uses in-memory mock instead of real backends
     MOCK_HOST_ID: str | None = None  # When MOCK_QUOTA: which host's mock data to use (e.g. host1, host2)
+    USE_PYQUOTA: bool = True  # If true, slave reports/sets quotas on block devices (ext4/xfs via quotactl)
+    USE_ZFS: bool = False  # If true, slave also reports/sets ZFS user quotas (mixed with pyquota devices)
+    ZFS_DATASETS: list[str] | None = None  # When USE_ZFS: optional list of dataset names; if None, discover mounted filesystems
 
 
 # --- API: Error ---

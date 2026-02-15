@@ -3,12 +3,31 @@
 import pwd
 from typing import Any
 
-import pyquota as pq
-
 from flask import current_app, request, jsonify
 from app.auth import requires_api_key
-from app.quota import collect_remote_quotas, collect_remote_quotas_for_uid
 from app.models import quota_tuple_to_dict, SetUserQuotaRequest
+
+
+def _merge_quota_results(pyquota_results: list[dict[str, Any]], use_zfs: bool) -> list[dict[str, Any]]:
+    """Merge pyquota device list with ZFS dataset list when USE_ZFS is true. Sorted by name."""
+    results = list(pyquota_results)
+    if use_zfs:
+        from app.quota_zfs import collect_remote_quotas as zfs_collect_remote_quotas
+        zfs_datasets = current_app.config.get("ZFS_DATASETS")
+        results = results + zfs_collect_remote_quotas(zfs_datasets)
+    results.sort(key=lambda r: r["name"])
+    return results
+
+
+def _merge_quota_results_for_uid(uid: int, pyquota_results: list[dict[str, Any]], use_zfs: bool) -> list[dict[str, Any]]:
+    """Merge pyquota and ZFS results for a single user. Sorted by name."""
+    results = list(pyquota_results)
+    if use_zfs:
+        from app.quota_zfs import collect_remote_quotas_for_uid as zfs_collect_remote_quotas_for_uid
+        zfs_datasets = current_app.config.get("ZFS_DATASETS")
+        results = results + zfs_collect_remote_quotas_for_uid(uid, zfs_datasets)
+    results.sort(key=lambda r: r["name"])
+    return results
 
 
 def register_remote_api_routes(app: Any) -> None:
@@ -21,7 +40,13 @@ def register_remote_api_routes(app: Any) -> None:
             from app.quota_mock import collect_remote_quotas_mock
             results = collect_remote_quotas_mock()
         else:
-            results = collect_remote_quotas()
+            # ext4-only: pyquota only. ZFS-only: pyquota=[], ZFS list. Mixed: both.
+            use_pyquota = current_app.config.get("USE_PYQUOTA", True)
+            pyquota_results: list[dict[str, Any]] = []
+            if use_pyquota:
+                from app.quota import collect_remote_quotas
+                pyquota_results = collect_remote_quotas()
+            results = _merge_quota_results(pyquota_results, current_app.config.get("USE_ZFS", False))
         return jsonify(results)
 
     @app.route("/remote-api/quotas/users/<int:uid>")
@@ -32,7 +57,12 @@ def register_remote_api_routes(app: Any) -> None:
             from app.quota_mock import collect_remote_quotas_for_uid_mock
             results = collect_remote_quotas_for_uid_mock(uid)
         else:
-            results = collect_remote_quotas_for_uid(uid)
+            use_pyquota = current_app.config.get("USE_PYQUOTA", True)
+            pyquota_results = []
+            if use_pyquota:
+                from app.quota import collect_remote_quotas_for_uid
+                pyquota_results = collect_remote_quotas_for_uid(uid)
+            results = _merge_quota_results_for_uid(uid, pyquota_results, current_app.config.get("USE_ZFS", False))
         return jsonify(results)
 
     @app.route("/remote-api/quotas/users/by-name/<username>")
@@ -53,7 +83,12 @@ def register_remote_api_routes(app: Any) -> None:
                 uid = pwd.getpwnam(username).pw_uid
             except KeyError:
                 return jsonify(msg=f"user not found: {username}"), 404
-            results = collect_remote_quotas_for_uid(uid)
+            use_pyquota = current_app.config.get("USE_PYQUOTA", True)
+            pyquota_results = []
+            if use_pyquota:
+                from app.quota import collect_remote_quotas_for_uid
+                pyquota_results = collect_remote_quotas_for_uid(uid)
+            results = _merge_quota_results_for_uid(uid, pyquota_results, current_app.config.get("USE_ZFS", False))
         return jsonify(results)
 
     @app.route("/remote-api/quotas/users/<int:uid>", methods=["PUT"])
@@ -90,19 +125,44 @@ def register_remote_api_routes(app: Any) -> None:
             except ValueError as e:
                 return jsonify(msg=str(e)), 500
         else:
-            try:
-                pq.set_user_quota(
-                    device,
-                    uid,
-                    params.block_hard_limit,
-                    params.block_soft_limit,
-                    params.inode_hard_limit,
-                    params.inode_soft_limit,
-                )
-                quota = pq.get_user_quota(device, uid)
-                quota_dict = quota_tuple_to_dict(quota)
-                quota_dict["uid"] = uid
-                quota_dict["name"] = pwd.getpwuid(uid).pw_name
-                return jsonify(quota_dict)
-            except pq.APIError as e:
-                return jsonify(msg=str(e)), 500
+            use_pyquota = current_app.config.get("USE_PYQUOTA", True)
+            use_zfs = current_app.config.get("USE_ZFS", False)
+            # Block device (ext4/xfs with usrquota) -> pyquota; dataset name -> ZFS when USE_ZFS
+            if device.startswith("/dev/"):
+                if not use_pyquota:
+                    return jsonify(msg="USE_PYQUOTA is disabled; cannot set quota on block device"), 400
+                import pyquota as pq
+                try:
+                    pq.set_user_quota(
+                        device,
+                        uid,
+                        params.block_hard_limit,
+                        params.block_soft_limit,
+                        params.inode_hard_limit,
+                        params.inode_soft_limit,
+                    )
+                    quota = pq.get_user_quota(device, uid)
+                    quota_dict = quota_tuple_to_dict(quota)
+                    quota_dict["uid"] = uid
+                    quota_dict["name"] = pwd.getpwuid(uid).pw_name
+                    return jsonify(quota_dict)
+                except pq.APIError as e:
+                    return jsonify(msg=str(e)), 500
+            if use_zfs:
+                from app.quota_zfs import set_user_quota as zfs_set_user_quota
+                from app.quota_zfs import ZFSQuotaError
+                try:
+                    quota_dict = zfs_set_user_quota(
+                        dataset=device,
+                        uid=uid,
+                        block_hard_limit=params.block_hard_limit or 0,
+                        block_soft_limit=params.block_soft_limit or 0,
+                        inode_hard_limit=params.inode_hard_limit,
+                        inode_soft_limit=params.inode_soft_limit,
+                    )
+                    return jsonify(quota_dict)
+                except ZFSQuotaError as e:
+                    return jsonify(msg=str(e)), 500
+            return jsonify(
+                msg="device not recognized: use /dev/... for block devices, or set USE_ZFS=true for ZFS datasets"
+            ), 400

@@ -2,5 +2,8 @@
   "SECRET_KEY": "secRetSecRet",
   "SESSION_COOKIE_NAME": "qman_session",
   "API_KEY": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey",
-  "MOCK_QUOTA": false
+  "MOCK_QUOTA": false,
+  "USE_PYQUOTA": true,
+  "USE_ZFS": false,
+  "ZFS_DATASETS": null
 }

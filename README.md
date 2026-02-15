@@ -5,7 +5,7 @@ Quota management UI: master aggregates quotas from slave hosts; slaves expose lo
 ## Backend (Python 3.11+)
 
 - **Stack:** Flask 3+, Pydantic 2+, SQLAlchemy 2, Alembic, gunicorn
-- **Config:** Use `config.json` for the master server and `config.slave.json` for the slave server. Copy from `config.master_example.json` and `config.slave_example.json` and adjust.
+- **Config:** Use `config.json` for the master server and `config.slave.json` for the slave server. Copy from `config.master_example.json` and `config.slave_example.json` and adjust. For local dev with mock quota, you can copy `config.slave_mock_example1.json`, `config.slave_mock_example2.json`, or `config.slave_mock_example3.json` to `config.slave.json` (see **Slave in mock mode** below).
 - **Auth:** OAuth via the `auth_connect` submodule (`git submodule update --init`). The submodule includes a minimal mock OAuth server for local development.
 
 ### Mock OAuth server (development)
@@ -66,7 +66,20 @@ CONFIG_PATH=config.slave.json python run.py
 # Production: CONFIG_PATH=config.slave.json gunicorn -w 4 -b 0.0.0.0:8436 "run:app"
 ```
 
-**Slave in mock mode** (no pyquota; uses in-memory mock host with sample filesystems and users): set `"MOCK_QUOTA": true` in `config.slave.json`, then run the slave as above. The mock host includes several devices (e.g. `/dev/sda1`, `/dev/sdb1`, `/dev/nvme0n1p1`), users (alice, bob, charlie, …), and quota limits so you can test the UI without real quota support.
+**Slave in mock mode** (no pyquota; uses in-memory mock host with sample filesystems and users): set `"MOCK_QUOTA": true` in `config.slave.json`, then run the slave as above. Optional **MOCK_HOST_ID** selects which mock host to use; default is `host1`.
+
+- **config.slave_mock_example1.json** – Copy to `config.slave.json` for mock **host1**: many block devices (e.g. `/dev/sda1`, `/dev/sdb1`, `/dev/nvme0n1p1`), users (alice, bob, charlie, …), and quota limits. Port 8437.
+- **config.slave_mock_example2.json** – Copy to `config.slave.json` for mock **host2**: one ext4 device (`/dev/vdb1`) and one ZFS dataset (`tank/home`), users alice and bob. Port 8438. Use this to test the UI with a mixed ext4 + ZFS host (inode fields hidden for the ZFS device).
+- **config.slave_mock_example3.json** – Copy to `config.slave.json` for mock **host3**: ZFS-only (no block devices). Two datasets, `tank/home` and `tank/scratch`, users alice and bob. Port 8439. Use this to test a ZFS-only host; config has `USE_PYQUOTA`: false and `USE_ZFS`: true.
+
+### Slave quota backends
+
+When `MOCK_QUOTA` is false, the slave uses one or both of:
+
+- **USE_PYQUOTA** (default `true`): Report and set user/group quotas on block devices (ext4/XFS with `usrquota`/`grpquota`) via quotactl. Set to `false` on ZFS-only hosts to avoid importing pyquota.
+- **USE_ZFS** (default `false`): Report and set ZFS user quotas per dataset. When `true`, each ZFS dataset is exposed as a “device” (e.g. `tank/home`). The API `device` parameter is then either a block device path (e.g. `/dev/sda1`) or a ZFS dataset name.
+
+At least one of `USE_PYQUOTA` and `USE_ZFS` must be enabled. Optional **ZFS_DATASETS**: list of dataset names to expose; if omitted when `USE_ZFS` is true, all mounted ZFS filesystems are discovered. ZFS user quotas are space-only (no inode limits in the UI).
 
 ### Quota block units (pyquota)
 

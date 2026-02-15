@@ -162,8 +162,8 @@ def init_mock_host() -> None:
             "group_quota_info": None,
             "user_quotas": {
                 1000: {
-                    "block_hard_limit": 10_000_000,
-                    "block_soft_limit": 8_000_000,
+                    "block_hard_limit": 2_100_000,
+                    "block_soft_limit": 1_800_000,
                     "block_current": 2_000_000 * 1024,  # bytes
                     "inode_hard_limit": 1_000_000,
                     "inode_soft_limit": 800_000,
@@ -409,8 +409,107 @@ def init_mock_host() -> None:
             },
             "group_quotas": {},
         },
+        "tank/home": {
+            "name": "tank/home",
+            "mount_points": ["/zfs/home"],
+            "fstype": "zfs",
+            "opts": ["zfs"],
+            "usage": {"free": 80 * 1024**3, "total": 100 * 1024**3, "used": 20 * 1024**3, "percent": 20.0},
+            "user_quota_format": "zfs",
+            "user_quota_info": None,
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    "block_hard_limit": 10_000_000,
+                    "block_soft_limit": 10_000_000,
+                    "block_current": 1_500_000 * 1024,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    "block_hard_limit": 15_000_000,
+                    "block_soft_limit": 15_000_000,
+                    "block_current": 3_000_000 * 1024,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
     }
     _mock_hosts["host2"] = {"devices": host2_devices, "users": host2_users, "groups": host2_groups}
+
+    # Third host: ZFS-only (no block devices).
+    host3_users = {1000: "alice", 1001: "bob"}
+    host3_groups = {1000: "users"}
+    host3_devices = {
+        "tank/home": {
+            "name": "tank/home",
+            "mount_points": ["/zfs/home"],
+            "fstype": "zfs",
+            "opts": ["zfs"],
+            "usage": {"free": 50 * 1024**3, "total": 80 * 1024**3, "used": 30 * 1024**3, "percent": 37.5},
+            "user_quota_format": "zfs",
+            "user_quota_info": None,
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    "block_hard_limit": 20_000_000,
+                    "block_soft_limit": 20_000_000,
+                    "block_current": 5_000_000 * 1024,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    "block_hard_limit": 30_000_000,
+                    "block_soft_limit": 30_000_000,
+                    "block_current": 8_000_000 * 1024,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
+        "tank/scratch": {
+            "name": "tank/scratch",
+            "mount_points": ["/zfs/scratch"],
+            "fstype": "zfs",
+            "opts": ["zfs"],
+            "usage": {"free": 200 * 1024**3, "total": 250 * 1024**3, "used": 50 * 1024**3, "percent": 20.0},
+            "user_quota_format": "zfs",
+            "user_quota_info": None,
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    "block_hard_limit": 50_000_000,
+                    "block_soft_limit": 50_000_000,
+                    "block_current": 2_000_000 * 1024,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
+    }
+    _mock_hosts["host3"] = {"devices": host3_devices, "users": host3_users, "groups": host3_groups}
 
 
 def get_devices_mock() -> dict[str, dict[str, Any]]:

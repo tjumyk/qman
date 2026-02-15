@@ -101,9 +101,13 @@ export function DeviceUserListPage() {
             <Table.Th>{t('blockUsed')}</Table.Th>
             <Table.Th>{t('blockSoft')}</Table.Th>
             <Table.Th>{t('blockHard')}</Table.Th>
-            <Table.Th>{t('inodeUsed')}</Table.Th>
-            <Table.Th>{t('inodeSoft')}</Table.Th>
-            <Table.Th>{t('inodeHard')}</Table.Th>
+            {device.user_quota_format !== 'zfs' && (
+              <>
+                <Table.Th>{t('inodeUsed')}</Table.Th>
+                <Table.Th>{t('inodeSoft')}</Table.Th>
+                <Table.Th>{t('inodeHard')}</Table.Th>
+              </>
+            )}
             <Table.Th>{t('status')}</Table.Th>
             <Table.Th>{t('actions')}</Table.Th>
           </Table.Tr>
@@ -124,15 +128,19 @@ export function DeviceUserListPage() {
                 <Table.Td>
                   <BlockSize size={q.block_hard_limit * 1024} />
                 </Table.Td>
-                <Table.Td>
-                  <INodeSize size={q.inode_current} />
-                </Table.Td>
-                <Table.Td>
-                  <INodeSize size={q.inode_soft_limit} />
-                </Table.Td>
-                <Table.Td>
-                  <INodeSize size={q.inode_hard_limit} />
-                </Table.Td>
+                {device.user_quota_format !== 'zfs' && (
+                  <>
+                    <Table.Td>
+                      <INodeSize size={q.inode_current} />
+                    </Table.Td>
+                    <Table.Td>
+                      <INodeSize size={q.inode_soft_limit} />
+                    </Table.Td>
+                    <Table.Td>
+                      <INodeSize size={q.inode_hard_limit} />
+                    </Table.Td>
+                  </>
+                )}
                 <Table.Td>
                   <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
                     {t(getQuotaStatusLabelKey(status))}
@@ -159,6 +167,7 @@ export function DeviceUserListPage() {
         hostId={hostId}
         deviceName={deviceName}
         quota={editQuota}
+        userQuotaFormat={device.user_quota_format}
       />
     </Stack>
   )

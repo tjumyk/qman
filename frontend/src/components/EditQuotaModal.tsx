@@ -13,6 +13,8 @@ interface EditQuotaModalProps {
   hostId: string
   deviceName: string
   quota: UserQuota | null
+  /** When "zfs", inode fields are hidden (ZFS user quotas are space-only). */
+  userQuotaFormat?: string
 }
 
 export function EditQuotaModal({
@@ -21,7 +23,9 @@ export function EditQuotaModal({
   hostId,
   deviceName,
   quota,
+  userQuotaFormat,
 }: EditQuotaModalProps) {
+  const isZfs = userQuotaFormat === 'zfs'
   const queryClient = useQueryClient()
   const { t } = useI18n()
   const [blockSoft, setBlockSoft] = useState(0)
@@ -60,8 +64,8 @@ export function EditQuotaModal({
     mutation.mutate({
       block_soft_limit: blockSoft,
       block_hard_limit: blockHard,
-      inode_soft_limit: inodeSoft,
-      inode_hard_limit: inodeHard,
+      inode_soft_limit: isZfs ? 0 : inodeSoft,
+      inode_hard_limit: isZfs ? 0 : inodeHard,
     })
   }
 
@@ -83,18 +87,22 @@ export function EditQuotaModal({
           </Text>
           <BlockLimitEditor initValue={blockHard} onChange={setBlockHard} />
         </div>
-        <NumberInput
-          label={t('inodeSoftLimit')}
-          min={0}
-          value={inodeSoft}
-          onChange={(v) => setInodeSoft(typeof v === 'string' ? parseInt(v, 10) || 0 : v)}
-        />
-        <NumberInput
-          label={t('inodeHardLimit')}
-          min={0}
-          value={inodeHard}
-          onChange={(v) => setInodeHard(typeof v === 'string' ? parseInt(v, 10) || 0 : v)}
-        />
+        {!isZfs && (
+          <>
+            <NumberInput
+              label={t('inodeSoftLimit')}
+              min={0}
+              value={inodeSoft}
+              onChange={(v) => setInodeSoft(typeof v === 'string' ? parseInt(v, 10) || 0 : v)}
+            />
+            <NumberInput
+              label={t('inodeHardLimit')}
+              min={0}
+              value={inodeHard}
+              onChange={(v) => setInodeHard(typeof v === 'string' ? parseInt(v, 10) || 0 : v)}
+            />
+          </>
+        )}
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={onClose}>
             {t('cancel')}

@@ -68,18 +68,20 @@ function QuotaCard({
               )}
             </Text>
           </div>
-          <div>
-            <Text size="xs" fw={500} c="dimmed" mb={2}>
-              {t('inodeUsage')}
-            </Text>
-            <Progress value={inodePct} color={statusColor} size="sm" />
-            <Text size="xs" c="dimmed" mt={2}>
-              <INodeSize size={quota.inode_current} />
-              {inodeLimit > 0 && (
-                <> / <INodeSize size={inodeLimit} /></>
-              )}
-            </Text>
-          </div>
+          {device.user_quota_format !== 'zfs' && (
+            <div>
+              <Text size="xs" fw={500} c="dimmed" mb={2}>
+                {t('inodeUsage')}
+              </Text>
+              <Progress value={inodePct} color={statusColor} size="sm" />
+              <Text size="xs" c="dimmed" mt={2}>
+                <INodeSize size={quota.inode_current} />
+                {inodeLimit > 0 && (
+                  <> / <INodeSize size={inodeLimit} /></>
+                )}
+              </Text>
+            </div>
+          )}
         </Stack>
       </Stack>
     </Card>

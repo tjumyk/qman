@@ -44,6 +44,14 @@ def create_app(config_path: str | None = None) -> Flask:
     app.config["MOCK_QUOTA"] = config.MOCK_QUOTA
     if config.MOCK_HOST_ID is not None:
         app.config["MOCK_HOST_ID"] = config.MOCK_HOST_ID
+    app.config["USE_PYQUOTA"] = config.USE_PYQUOTA
+    app.config["USE_ZFS"] = config.USE_ZFS
+    if not config.MOCK_QUOTA and not config.USE_PYQUOTA and not config.USE_ZFS:
+        raise ValueError(
+            "At least one of USE_PYQUOTA and USE_ZFS must be enabled when MOCK_QUOTA is false"
+        )
+    if config.ZFS_DATASETS is not None:
+        app.config["ZFS_DATASETS"] = config.ZFS_DATASETS
     if config.PORT is not None:
         app.config["PORT"] = config.PORT
 

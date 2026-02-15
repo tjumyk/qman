@@ -1,11 +1,11 @@
 {
   "SECRET_KEY": "secRetSecRet",
   "SESSION_COOKIE_NAME": "qman_session",
-  "PORT": 8438,
+  "PORT": 8439,
   "API_KEY": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey",
   "MOCK_QUOTA": true,
-  "MOCK_HOST_ID": "host2",
-  "USE_PYQUOTA": true,
+  "MOCK_HOST_ID": "host3",
+  "USE_PYQUOTA": false,
   "USE_ZFS": true,
-  "ZFS_DATASETS": ["tank/home"]
+  "ZFS_DATASETS": ["tank/home", "tank/scratch"]
 }
