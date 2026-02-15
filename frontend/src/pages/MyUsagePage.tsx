@@ -1,4 +1,3 @@
-import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stack, Text, Progress, Badge, Loader, Alert, Group, SimpleGrid, Title } from '@mantine/core'
 import { IconChartBar } from '@tabler/icons-react'
@@ -10,7 +9,6 @@ import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
-import type { MeMapping } from '../api/schemas'
 
 const MAPPING_KEY_SEP = '|'
 
@@ -21,12 +19,10 @@ function parseMappingKey(key: string): { hostId: string; hostUserName: string } 
 }
 
 function QuotaCard({
-  hostId,
   device,
   quota,
   t,
 }: {
-  hostId: string
   device: DeviceQuota
   quota: UserQuota
   t: (key: string) => string
@@ -88,10 +84,6 @@ function QuotaCard({
       </Stack>
     </Card>
   )
-}
-
-function mappingLabel(m: MeMapping): string {
-  return `${m.host_id} › ${m.host_user_name}`
 }
 
 export function MyUsagePage() {
@@ -161,17 +153,17 @@ export function MyUsagePage() {
   const data = quotasData ?? {}
   // Build sections in mapping order (from mappings list) so UI is stable
   const mappingKeys = (mappings ?? []).map((m) => `${m.host_id}${MAPPING_KEY_SEP}${m.host_user_name}`)
-  const sections: { mappingKey: string; label: string; cards: { hostId: string; device: DeviceQuota; quota: UserQuota }[] }[] = []
+  const sections: { mappingKey: string; label: string; cards: { device: DeviceQuota; quota: UserQuota }[] }[] = []
   for (const mappingKey of mappingKeys) {
     const { hostId, hostUserName } = parseMappingKey(mappingKey)
     const label = `${hostId} › ${hostUserName}`
     const hostData = data[mappingKey]
-    const cards: { hostId: string; device: DeviceQuota; quota: UserQuota }[] = []
+    const cards: { device: DeviceQuota; quota: UserQuota }[] = []
     if (hostData && !hostData.error && hostData.results) {
       for (const device of hostData.results) {
         const userQuotas = device.user_quotas || []
         for (const q of userQuotas) {
-          cards.push({ hostId, device, quota: q })
+          cards.push({ device, quota: q })
         }
       }
     }
@@ -198,15 +190,14 @@ export function MyUsagePage() {
             <Stack key={mappingKey} gap="xs">
               <Title order={5}>{label}</Title>
               {cards.length === 0 ? (
-                <Alert color="gray" size="sm">
+                <Alert color="gray">
                   {t('noQuotasAssigned')}
                 </Alert>
               ) : (
                 <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
-                  {cards.map(({ hostId, device, quota }) => (
+                  {cards.map(({ device, quota }) => (
                     <QuotaCard
                       key={`${mappingKey}-${device.name}`}
-                      hostId={hostId}
                       device={device}
                       quota={quota}
                       t={t}
