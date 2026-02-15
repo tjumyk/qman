@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="gaugeGrad1d" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="gaugeGrad2d" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="gaugeGrad3d" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#4ade80"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle (fits dark header) -->
+  <circle cx="24" cy="24" r="20" fill="#334155" stroke="#475569" stroke-width="1.5"/>
+  <!-- Gauge arc (semicircle, 3 segments) -->
+  <path d="M12 24 A12 12 0 0 1 18 13.61" fill="none" stroke="url(#gaugeGrad1d)" stroke-width="4" stroke-linecap="round"/>
+  <path d="M18 13.61 A12 12 0 0 1 30 13.61" fill="none" stroke="url(#gaugeGrad2d)" stroke-width="4" stroke-linecap="round"/>
+  <path d="M30 13.61 A12 12 0 0 1 36 24" fill="none" stroke="url(#gaugeGrad3d)" stroke-width="4" stroke-linecap="round"/>
+  <!-- Needle -->
+  <line x1="24" y1="24" x2="24" y2="16" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="24" cy="24" r="3" fill="#64748b"/>
+  <circle cx="24" cy="24" r="1.5" fill="#cbd5e1"/>
+</svg>

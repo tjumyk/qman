@@ -17,7 +17,7 @@ import {
 } from '@mantine/core'
 import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useLocation, Outlet } from 'react-router-dom'
 import { fetchMe } from './api'
 import { useI18n } from './i18n'
 import { MyUsagePage } from './pages/MyUsagePage'
@@ -66,13 +66,31 @@ function AppShellWithNav() {
     >
       <AppShell.Header>
         <Container size="xl" h="100%" display="flex" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-          <Group gap="sm">
-            <Box component="img" src="/logo.svg" alt={t('appTitle')} h={32} w="auto" style={{ display: 'block' }} />
-            <Stack gap={0}>
-              <Title order={3}>{t('appTitle')}</Title>
-              <Text size="xs" c="dimmed" mt={2}>{t('appDescription')}</Text>
-            </Stack>
-          </Group>
+          <UnstyledButton
+            component={Link}
+            to="/"
+            display="flex"
+            style={{ alignItems: 'center', textDecoration: 'none', color: 'inherit' }}
+          >
+            <Group gap="sm">
+              <Box
+                component="img"
+                src={computedColorScheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'}
+                alt=""
+                h={32}
+                w="auto"
+                style={{ display: 'block' }}
+              />
+              <Stack gap={2}>
+                <Title order={3} style={{ lineHeight: 1.2 }}>
+                  {t('appTitle')}
+                </Title>
+                <Text size="xs" c="dimmed" style={{ lineHeight: 1.2 }}>
+                  {t('appDescription')}
+                </Text>
+              </Stack>
+            </Group>
+          </UnstyledButton>
           <Group gap="sm" style={{ marginLeft: 'auto' }}>
             <SegmentedControl
               size="xs"

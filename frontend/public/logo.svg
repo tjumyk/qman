@@ -1,201 +1,26 @@
-<?xml version="1.0" ?>
-<svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="48"
-      height="48"
-      version="1.1"
-      viewBox="0 0 12.7 12.7"
-    >
-      <defs>
-        <clipPath clipPathUnits="userSpaceOnUse">
-          <path
-            fill="#7aafff"
-            fillOpacity="1"
-            stroke="none"
-            strokeDasharray="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeMiterlimit="4"
-            strokeOpacity="1"
-            strokeWidth="2.01"
-            d="M3.069 285.557A6.35 6.35 0 00.5 290.65a6.35 6.35 0 1012.7 0c-.002-.843-.452-2.713-.5-2.454-.024.842-.572 2.354-.602 2.232-.003-.506-.288-1.426-.305-1.195.028 1.407-1.484 3.176-2.308 3.5a6.518 6.518 0 01-2.612.565c-.173 0-1.168-.138-1.644-.704-.826-.892-.002-1.1.462-1.273.506-.189 1.031-.31 1.52-.42.746-.169.472-.527.106-.63-.927-.259-2.045.336-2.866.307-.848-.03-.804-1.697-.14-1.763.739-.073 1.666-.51 1.461-.656-.83-.617-.961-.791-1.06-1.164-.147-.565.342-1.036.059-.964-.26.08-.411.156-.6.257-.167.09-.293.055-.674.002-.325-.045-.387-.056-.376-.257.012-.2.073-.52-.052-.476z"
-          ></path>
-        </clipPath>
-        <clipPath clipPathUnits="userSpaceOnUse">
-          <path
-            fill="#666"
-            fillOpacity="1"
-            stroke="none"
-            strokeDasharray="none"
-            strokeDashoffset="0"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeMiterlimit="4"
-            strokeOpacity="1"
-            strokeWidth="2.117"
-            d="M1.776 291.57c-1.826.174-3.294.919-3.49 2.164-.263 1.667 1.567 3.341 4.089 3.739 1.217.191 2.434.053 3.38-.384.731.528 1.67.9 2.67 1.06 2.522.398 4.78-.631 5.042-2.299.263-1.667-1.49-1.943-4.257-2.179-2.766-.236-3.616-1.688-5.747-2.046a6.755 6.755 0 00-1.687-.055z"
-            opacity="1"
-            vectorEffect="none"
-          ></path>
-        </clipPath>
-      </defs>
-      <g
-        fillOpacity="1"
-        stroke="none"
-        strokeDasharray="none"
-        strokeLinecap="round"
-        strokeMiterlimit="4"
-        strokeOpacity="1"
-        transform="translate(0 -284.3)"
-      >
-        <circle
-          cx="6.35"
-          cy="290.65"
-          r="6.35"
-          fill="#999"
-          strokeLinejoin="round"
-          strokeWidth="1.747"
-        ></circle>
-        <path
-          fill="#666"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.248"
-          d="M6.479 287.202a3.776 3.776 0 00-.087.003 3.776 3.776 0 00-.047 0 3.776 3.776 0 00-.048.004 3.776 3.776 0 00-.199.017 3.776 3.776 0 00-.2.024 3.776 3.776 0 00-.173.033 3.776 3.776 0 00-.193.043 3.776 3.776 0 00-.179.052 3.776 3.776 0 00-.178.059 3.776 3.776 0 00-.183.074 3.776 3.776 0 00-.16.072 3.776 3.776 0 00-.173.091 3.776 3.776 0 00-.166.096 3.776 3.776 0 00-.146.096 3.776 3.776 0 00-.165.118 3.776 3.776 0 00-.14.115 3.776 3.776 0 00-.143.126 3.776 3.776 0 00-.137.136 3.776 3.776 0 00-.083.084 3.776 3.776 0 00-.06.07 3.776 3.776 0 00-.052.062 3.776 3.776 0 00-.133.175 3.776 3.776 0 00-.104.147 3.776 3.776 0 00-.101.166 3.776 3.776 0 00-.09.158 3.776 3.776 0 00-.085.174 3.776 3.776 0 00-.076.171 3.776 3.776 0 00-.065.18 3.776 3.776 0 00-.057.174 3.776 3.776 0 00-.047.186 3.776 3.776 0 00-.04.183 3.776 3.776 0 00-.014.063h.004a3.776 3.776 0 00-.057.624 3.776 3.776 0 00.826 2.356l-1.241.717a3.284 3.284 0 001.203 1.202l.726-1.258a3.776 3.776 0 002.263.76 3.776 3.776 0 001.52-.325l.002.004a3.776 3.776 0 00.142-.068 3.776 3.776 0 00.161-.086 3.776 3.776 0 00.17-.098 3.776 3.776 0 00.159-.107 3.776 3.776 0 00.145-.104 3.776 3.776 0 00.15-.124 3.776 3.776 0 00.143-.126 3.776 3.776 0 00.125-.126 3.776 3.776 0 00.136-.146 3.776 3.776 0 00.114-.142 3.776 3.776 0 00.117-.153 3.776 3.776 0 00.101-.155 3.776 3.776 0 00.102-.166 3.776 3.776 0 00.084-.162 3.776 3.776 0 00.083-.171 3.776 3.776 0 00.042-.1h.003a3.776 3.776 0 00.037-.105 3.776 3.776 0 00.052-.147 3.776 3.776 0 00.054-.185 3.776 3.776 0 00.036-.127l-.004-.001a3.776 3.776 0 00.103-.857 3.776 3.776 0 00-1.645-3.116 3.776 3.776 0 00-.002-.002 3.776 3.776 0 00-.001-.001 3.776 3.776 0 00-.12-.08 3.776 3.776 0 00-.103-.057 3.776 3.776 0 00-.161-.09 3.776 3.776 0 00-.169-.082 3.776 3.776 0 00-.18-.077 3.776 3.776 0 00-.17-.063 3.776 3.776 0 00-.179-.057 3.776 3.776 0 00-.187-.048 3.776 3.776 0 00-.187-.04 3.776 3.776 0 00-.177-.027 3.776 3.776 0 00-.195-.022 3.776 3.776 0 00-.187-.009 3.776 3.776 0 00-.114-.006z"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          vectorEffect="none"
-        ></path>
-        <circle
-          cx="6.35"
-          cy="290.65"
-          r="3.776"
-          fill="#ccc"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.248"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          vectorEffect="none"
-        ></circle>
-        <path
-          fill="#ffb6b6"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.248"
-          d="M119.099 266.257a3.776 3.776 0 01-1.018 3.219l-2.712-2.628z"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          transform="rotate(22.13)"
-          vectorEffect="none"
-        ></path>
-        <path
-          fill="#80decc"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.248"
-          d="M6.216 286.876a3.776 3.776 0 00-2.667 1.24l2.801 2.534 3.673.857a3.776 3.776 0 00-1.665-4.055 3.776 3.776 0 00-2.142-.576zm3.78 4.738a3.776 3.776 0 01-.053.188 3.776 3.776 0 00.054-.188zm-.11.353a3.776 3.776 0 01-.042.103l.004.002a3.776 3.776 0 00.037-.105z"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          vectorEffect="none"
-        ></path>
-        <path
-          fill="#ffac76"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.248"
-          d="M111.683 267.672a3.776 3.776 0 01.137-2.116l3.549 1.292z"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          transform="rotate(22.13)"
-          vectorEffect="none"
-        ></path>
-        <path
-          fill="#ff7d7d"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.29"
-          d="M6.32 290.626l.711 1.616a1.536 1.536 0 001.016-1.213z"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          vectorEffect="none"
-        ></path>
-        <path
-          fill="#5dc1ae"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.29"
-          d="M6.53 289.256a1.536 1.536 0 00-1.15.52l.94.85 1.726.403a1.536 1.536 0 00.02-.237 1.536 1.536 0 00-1.536-1.536z"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          vectorEffect="none"
-        ></path>
-        <path
-          fill="#999"
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          strokeWidth="0.29"
-          d="M6.377 289.264a1.536 1.536 0 00-.997.513 1.536 1.536 0 01.997-.513zm-.997.513a1.536 1.536 0 00-.386 1.015 1.536 1.536 0 001.536 1.536 1.536 1.536 0 00.5-.086l-.71-1.616h-.002zm1.65 2.465h.001a1.536 1.536 0 00.026-.01 1.536 1.536 0 01-.027.01zm.027-.01a1.536 1.536 0 00.1-.041 1.536 1.536 0 01-.1.04zm.1-.041a1.536 1.536 0 00.05-.024 1.536 1.536 0 01-.05.024zm.05-.024a1.536 1.536 0 00.083-.044 1.536 1.536 0 01-.082.044zm.083-.044a1.536 1.536 0 00.06-.036 1.536 1.536 0 01-.06.036zm.06-.036a1.536 1.536 0 00.088-.058 1.536 1.536 0 01-.088.058zm-.41-2.775a1.536 1.536 0 01.66.378 1.536 1.536 0 00-.66-.378zm1.123 1.564a1.536 1.536 0 01-.018.153h.002a1.536 1.536 0 00.016-.153zm-.017.156a1.536 1.536 0 01-.02.093 1.536 1.536 0 00.02-.093zm-.027.13a1.536 1.536 0 01-.038.127 1.536 1.536 0 00.038-.128z"
-          opacity="1"
-          paintOrder="stroke fill markers"
-          vectorEffect="none"
-        ></path>
-        <g
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          paintOrder="stroke fill markers"
-          transform="matrix(1.1562 0 0 1.1562 -.992 -45.398)"
-        >
-          <circle
-            cx="6.35"
-            cy="290.65"
-            r="1.312"
-            fill="#fff"
-            strokeWidth="0.147"
-            opacity="1"
-            vectorEffect="none"
-          ></circle>
-          <circle
-            cx="6.35"
-            cy="290.65"
-            r="1.012"
-            fill="#999"
-            strokeWidth="0.113"
-            opacity="1"
-            vectorEffect="none"
-          ></circle>
-          <circle
-            cx="6.35"
-            cy="290.65"
-            r="0.733"
-            fill="#fff"
-            strokeWidth="0.082"
-            opacity="1"
-            vectorEffect="none"
-          ></circle>
-        </g>
-        <g
-          strokeDashoffset="15"
-          strokeLinejoin="bevel"
-          paintOrder="stroke fill markers"
-          transform="rotate(45 104.45 340.289) scale(1.25549)"
-        >
-          <path
-            fill="#fff"
-            strokeWidth="0.463"
-            d="M.71 302.426a2.616 2.616 0 01-1.354 0l.677-2.527z"
-            opacity="1"
-            vectorEffect="none"
-          ></path>
-          <circle
-            cx="0.033"
-            cy="301.902"
-            r="0.301"
-            fill="#999"
-            strokeWidth="0.144"
-            opacity="1"
-            vectorEffect="none"
-          ></circle>
-        </g>
-      </g>
-    </svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="gaugeGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="gaugeGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="gaugeGrad3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle (visible on white) -->
+  <circle cx="24" cy="24" r="20" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
+  <!-- Gauge arc (semicircle, 3 segments) -->
+  <path d="M12 24 A12 12 0 0 1 18 13.61" fill="none" stroke="url(#gaugeGrad1)" stroke-width="4" stroke-linecap="round"/>
+  <path d="M18 13.61 A12 12 0 0 1 30 13.61" fill="none" stroke="url(#gaugeGrad2)" stroke-width="4" stroke-linecap="round"/>
+  <path d="M30 13.61 A12 12 0 0 1 36 24" fill="none" stroke="url(#gaugeGrad3)" stroke-width="4" stroke-linecap="round"/>
+  <!-- Needle -->
+  <line x1="24" y1="24" x2="24" y2="16" stroke="#475569" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="24" cy="24" r="3" fill="#334155"/>
+  <circle cx="24" cy="24" r="1.5" fill="#64748b"/>
+</svg>
