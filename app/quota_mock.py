@@ -51,7 +51,8 @@ def init_mock_host() -> None:
             "mount_points": ["/home"],
             "fstype": "ext4",
             "opts": ["rw", "usrquota", "grpquota"],
-            "usage": {"free": 50 * 1024**3, "total": 100 * 1024**3, "used": 50 * 1024**3, "percent": 50.0},
+            # total 100 GiB, used 50 GiB; ~5% root reserve → user-addressable free 45 GiB
+            "usage": {"free": 45 * 1024**3, "total": 100 * 1024**3, "used": 50 * 1024**3, "percent": 50.0},
             "user_quota_format": "vfsv1",
             "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
             "group_quota_format": "vfsv1",
@@ -146,7 +147,8 @@ def init_mock_host() -> None:
             "mount_points": ["/data", "/mnt/data"],
             "fstype": "ext4",
             "opts": ["rw", "usrquota"],
-            "usage": {"free": 200 * 1024**3, "total": 500 * 1024**3, "used": 300 * 1024**3, "percent": 60.0},
+            # total 500 GiB, used 300 GiB; ~5% root reserve → user-addressable free 175 GiB
+            "usage": {"free": 175 * 1024**3, "total": 500 * 1024**3, "used": 300 * 1024**3, "percent": 60.0},
             "user_quota_format": "vfsv1",
             "user_quota_info": {"block_grace": 14 * 86400, "inode_grace": 14 * 86400, "flags": 0},
             "group_quota_format": None,
@@ -180,7 +182,8 @@ def init_mock_host() -> None:
             "mount_points": ["/scratch"],
             "fstype": "xfs",
             "opts": ["rw", "usrquota", "grpquota"],
-            "usage": {"free": 800 * 1024**3, "total": 1000 * 1024**3, "used": 200 * 1024**3, "percent": 20.0},
+            # total 1 TiB, used 200 GiB; XFS-style reserve → user-addressable free 750 GiB
+            "usage": {"free": 750 * 1024**3, "total": 1000 * 1024**3, "used": 200 * 1024**3, "percent": 20.0},
             "user_quota_format": "vfsv1",
             "user_quota_info": {"block_grace": 3 * 86400, "inode_grace": 3 * 86400, "flags": 0},
             "group_quota_format": "vfsv1",
@@ -225,7 +228,8 @@ def init_mock_host() -> None:
             "mount_points": ["/oversold"],
             "fstype": "ext4",
             "opts": ["rw", "usrquota"],
-            "usage": {"free": 7 * 1024**3, "total": 10 * 1024**3, "used": 3 * 1024**3, "percent": 30.0},
+            # total 10 GiB, used 3 GiB; ~5% root reserve → user-addressable free 6.5 GiB
+            "usage": {"free": int(6.5 * 1024**3), "total": 10 * 1024**3, "used": 3 * 1024**3, "percent": 30.0},
             "user_quota_format": "vfsv1",
             "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
             "group_quota_format": None,
@@ -259,6 +263,7 @@ def init_mock_host() -> None:
             "mount_points": ["/full"],
             "fstype": "ext4",
             "opts": ["rw", "usrquota"],
+            # disk full: no physical or user-addressable free
             "usage": {"free": 0, "total": 50 * 1024**3, "used": 50 * 1024**3, "percent": 100.0},
             "user_quota_format": "vfsv1",
             "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
@@ -293,12 +298,66 @@ def init_mock_host() -> None:
             "mount_points": ["/"],
             "fstype": "ext4",
             "opts": ["rw"],
-            "usage": {"free": 5 * 1024**3, "total": 20 * 1024**3, "used": 15 * 1024**3, "percent": 75.0},
+            # total 20 GiB, used 15 GiB; no quota but root reserve → user-addressable free 4 GiB
+            "usage": {"free": 4 * 1024**3, "total": 20 * 1024**3, "used": 15 * 1024**3, "percent": 75.0},
             "user_quota_format": None,
             "user_quota_info": None,
             "group_quota_format": None,
             "group_quota_info": None,
             "user_quotas": {},
+            "group_quotas": {},
+        },
+        "/dev/sde1": {
+            "name": "/dev/sde1",
+            "mount_points": ["/packed"],
+            "fstype": "ext4",
+            "opts": ["rw", "usrquota"],
+            # 5% root reserved, ~10% other, users have used all remaining space (85% tracked, 0% user free)
+            # total 100 GiB; used 95%; physical free 5% = root reserved; userFree = 0
+            # otherUsage = 10% of total, trackedUsage = 85% of total
+            "usage": {
+                "free": 0,
+                "total": 100 * 1024**3,
+                "used": 95 * 1024**3,
+                "percent": 95.0,
+            },
+            "user_quota_format": "vfsv1",
+            "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                # trackedUsage = 85 GiB total; split across users (limits in 1K blocks)
+                1000: {
+                    "block_hard_limit": 30_000_000,
+                    "block_soft_limit": 25_000_000,
+                    "block_current": 40 * 1024**3,  # 40 GiB
+                    "inode_hard_limit": 1_000_000,
+                    "inode_soft_limit": 800_000,
+                    "inode_current": 500_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    "block_hard_limit": 30_000_000,
+                    "block_soft_limit": 25_000_000,
+                    "block_current": 35 * 1024**3,  # 35 GiB
+                    "inode_hard_limit": 1_000_000,
+                    "inode_soft_limit": 800_000,
+                    "inode_current": 400_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1002: {
+                    "block_hard_limit": 15_000_000,
+                    "block_soft_limit": 12_000_000,
+                    "block_current": 10 * 1024**3,  # 10 GiB (40+35+10 = 85 GiB = trackedUsage)
+                    "inode_hard_limit": 500_000,
+                    "inode_soft_limit": 400_000,
+                    "inode_current": 100_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
             "group_quotas": {},
         },
     }

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Stack, Text, Progress, Group, Badge, Box } from '@mantine/core'
+import { Stack, Text, Progress, Group, Badge, Box, Tooltip } from '@mantine/core'
 import { BlockSize } from './BlockSize'
 import { useI18n } from '../i18n'
 import type { DiskUsage, UserQuota } from '../api/schemas'
@@ -34,9 +34,11 @@ interface DeviceUsageProps {
 
 export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
   const { t } = useI18n()
-  const { used, total, percent } = usage
-  const free = total - used
-  const hasFree = free > 0
+  const { used, total, free: userFree } = usage
+  const physicalFree = total - used
+  const rootReserved = Math.max(0, physicalFree - userFree)
+  const hasFree = userFree > 0
+  const displayPercent = total > 0 ? Math.round((used / total) * 100) : 0
 
   const simple = (
     <Stack gap={4}>
@@ -44,13 +46,13 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
         {t('diskUsageLabel')}
       </Text>
       <Progress
-        value={percent}
+        value={displayPercent}
         size="sm"
         color={hasFree ? 'green' : 'red'}
       />
       <Group gap="xs">
         <Text size="xs" c="dimmed">
-          <BlockSize size={used} /> / <BlockSize size={total} /> ({Math.round(percent)}%)
+          <BlockSize size={used} /> / <BlockSize size={total} /> ({displayPercent}%)
         </Text>
         {hasFree ? (
           <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>
@@ -67,13 +69,13 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
 
   const { reservedSoft, reservedHard, trackedUsage } = computeReservedAndTracked(userQuotas)
   const otherUsage = Math.max(0, used - trackedUsage)
-  const overSoldSoft = reservedSoft > total
-  const overSoldHard = reservedHard > total
-
-  const totalDemandSoft = otherUsage + reservedSoft
-  const totalDemandHard = otherUsage + reservedHard
-  const freeSoft = Math.max(0, total - otherUsage - reservedSoft)
-  const freeHard = Math.max(0, total - otherUsage - reservedHard)
+  // Demand = other + root reserved + quota reserved; over-sold when demand > total (exceeds user-addressable pool)
+  const totalDemandSoft = otherUsage + rootReserved + reservedSoft
+  const totalDemandHard = otherUsage + rootReserved + reservedHard
+  const overSoldSoft = totalDemandSoft > total
+  const overSoldHard = totalDemandHard > total
+  const freeSoft = Math.max(0, total - totalDemandSoft)
+  const freeHard = Math.max(0, total - totalDemandHard)
 
   const maxBytes = Math.max(total, totalDemandSoft, totalDemandHard, 1)
   const toScalePct = (bytes: number) => pct(maxBytes, bytes)
@@ -85,14 +87,17 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
 
   const diskOtherPct = toScalePct(otherUsage)
   const diskTrackedPct = toScalePct(trackedUsage)
-  const diskFreePct = toScalePct(Math.max(0, free))
+  const diskRootReservedPct = toScalePct(rootReserved)
+  const diskUserFreePct = toScalePct(userFree)
 
   const softOtherPct = toScalePct(otherUsage)
   const softReservedPct = toScalePct(reservedSoft)
+  const softRootReservedPct = toScalePct(rootReserved)
   const softFreePct = toScalePct(freeSoft)
 
   const hardOtherPct = toScalePct(otherUsage)
   const hardReservedPct = toScalePct(reservedHard)
+  const hardRootReservedPct = toScalePct(rootReserved)
   const hardFreePct = toScalePct(freeHard)
 
   const diskLimitPct = toScalePct(total)
@@ -122,15 +127,19 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
     </Box>
   )
 
+  const segmentTooltip = (segmentLabel: string, size: number) => (
+    <>{segmentLabel}: <BlockSize size={size} /></>
+  )
+
   const BarRow = ({
     label,
     bar,
-    caption,
+    summary,
     badge,
   }: {
     label: string
     bar: ReactNode
-    caption: ReactNode
+    summary: ReactNode
     badge?: ReactNode
   }) => (
     <Stack gap={4} style={{ width: '100%' }}>
@@ -139,7 +148,7 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
         <Box style={{ flex: 1, minWidth: 0 }}>{bar}</Box>
       </Box>
       <Box style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: barStartOffset }}>
-        <Text size="xs" c="dimmed">{caption}</Text>
+        <Text size="xs" c="dimmed">{summary}</Text>
         {badge}
       </Box>
     </Stack>
@@ -151,54 +160,87 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
         label={t('diskUsageLabel')}
         bar={
           <Progress.Root size={barHeight}>
-            {diskOtherPct > 0 && <Progress.Section value={diskOtherPct} color="gray" />}
-            {diskTrackedPct > 0 && <Progress.Section value={diskTrackedPct} color="blue" />}
-            {diskFreePct > 0 && <Progress.Section value={diskFreePct} color="green" />}
+            {diskRootReservedPct > 0 && (
+              <Tooltip withArrow label={segmentTooltip(t('rootReservedLabel'), rootReserved)}>
+                <Progress.Section value={diskRootReservedPct} color="yellow" />
+              </Tooltip>
+            )}
+            {diskOtherPct > 0 && (
+              <Tooltip withArrow label={segmentTooltip(t('otherUsageLabel'), otherUsage)}>
+                <Progress.Section value={diskOtherPct} color="gray" />
+              </Tooltip>
+            )}
+            {diskTrackedPct > 0 && (
+              <Tooltip withArrow label={segmentTooltip(t('trackedUsageLabel'), trackedUsage)}>
+                <Progress.Section value={diskTrackedPct} color="blue" />
+              </Tooltip>
+            )}
+            {diskUserFreePct > 0 && (
+              <Tooltip withArrow label={segmentTooltip(t('freeSpaceLabel'), userFree)}>
+                <Progress.Section value={diskUserFreePct} color="green" />
+              </Tooltip>
+            )}
           </Progress.Root>
         }
-        caption={<><BlockSize size={used} /> / <BlockSize size={total} /> ({Math.round(percent)}%)</>}
+        summary={<>{t('captionEqualsTotal')} <BlockSize size={total} /></>}
         badge={hasFree ? <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge> : <Badge size="xs" color="red" variant="light">{t('noFreeSpaceLabel')}</Badge>}
       />
 
       <BarRow
-        label={t('reservedSoftLabel')}
+        label={t('softQuotaUsageLabel')}
         bar={
           <BarWithMarker showDiskLimit={overSoldSoft}>
             <Progress.Root size={barHeight}>
-              {softOtherPct > 0 && <Progress.Section value={softOtherPct} color="gray" />}
-              {softReservedPct > 0 && <Progress.Section value={softReservedPct} color="orange" />}
-              {softFreePct > 0 && <Progress.Section value={softFreePct} color="green" />}
+              {softRootReservedPct > 0 && <Progress.Section value={softRootReservedPct} color="transparent" />}
+              {softOtherPct > 0 && <Progress.Section value={softOtherPct} color="transparent" />}
+              {softReservedPct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('reservedSoftLabel'), reservedSoft)}>
+                  <Progress.Section value={softReservedPct} color="orange" />
+                </Tooltip>
+              )}
+              {softFreePct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('freeSpaceLabel'), freeSoft)}>
+                  <Progress.Section value={softFreePct} color="green" />
+                </Tooltip>
+              )}
             </Progress.Root>
           </BarWithMarker>
         }
-        caption={
-          overSoldSoft
-            ? <><BlockSize size={otherUsage} /> + <BlockSize size={reservedSoft} /> = <BlockSize size={totalDemandSoft} /></>
-            : <><BlockSize size={otherUsage} /> + <BlockSize size={reservedSoft} /> + <BlockSize size={freeSoft} /> = <BlockSize size={total} /></>
-        }
-        badge={overSoldSoft ? <Badge size="xs" color="orange" variant="light">{t('overSoldLabel')}</Badge> : undefined}
+        summary={overSoldSoft ? <>{t('captionEqualsDemand')} <BlockSize size={totalDemandSoft} /> ({total > 0 ? Math.round((totalDemandSoft / total) * 100) : 0}%)</> : <>{t('captionEqualsTotal')} <BlockSize size={total} /></>}
+        badge={overSoldSoft ? <Badge size="xs" color="orange" variant="light">{t('overSoldLabel')}</Badge> : <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>}
       />
 
       <BarRow
-        label={t('reservedHardLabel')}
+        label={t('hardQuotaUsageLabel')}
         bar={
           <BarWithMarker showDiskLimit={overSoldHard}>
             <Progress.Root size={barHeight}>
-              {hardOtherPct > 0 && <Progress.Section value={hardOtherPct} color="gray" />}
-              {hardReservedPct > 0 && <Progress.Section value={hardReservedPct} color="red" />}
-              {hardFreePct > 0 && <Progress.Section value={hardFreePct} color="green" />}
+              {hardRootReservedPct > 0 && <Progress.Section value={hardRootReservedPct} color="transparent" />}
+              {hardOtherPct > 0 && <Progress.Section value={hardOtherPct} color="transparent" />}
+              {hardReservedPct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('reservedHardLabel'), reservedHard)}>
+                  <Progress.Section value={hardReservedPct} color="red" />
+                </Tooltip>
+              )}
+              {hardFreePct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('freeSpaceLabel'), freeHard)}>
+                  <Progress.Section value={hardFreePct} color="green" />
+                </Tooltip>
+              )}
             </Progress.Root>
           </BarWithMarker>
         }
-        caption={
-          overSoldHard
-            ? <><BlockSize size={otherUsage} /> + <BlockSize size={reservedHard} /> = <BlockSize size={totalDemandHard} /></>
-            : <><BlockSize size={otherUsage} /> + <BlockSize size={reservedHard} /> + <BlockSize size={freeHard} /> = <BlockSize size={total} /></>
-        }
-        badge={overSoldHard ? <Badge size="xs" color="red" variant="light">{t('overSoldLabel')}</Badge> : undefined}
+        summary={overSoldHard ? <>{t('captionEqualsDemand')} <BlockSize size={totalDemandHard} /> ({total > 0 ? Math.round((totalDemandHard / total) * 100) : 0}%)</> : <>{t('captionEqualsTotal')} <BlockSize size={total} /></>}
+        badge={overSoldHard ? <Badge size="xs" color="red" variant="light">{t('overSoldLabel')}</Badge> : <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>}
       />
 
       <Group gap="md" wrap="wrap" style={{ paddingLeft: barStartOffset }}>
+        {rootReserved > 0 && (
+          <Group gap={4}>
+            <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-yellow-5)' }} />
+            <Text size="xs" c="dimmed">{t('rootReservedLabel')}</Text>
+          </Group>
+        )}
         <Group gap={4}>
           <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-gray-5)' }} />
           <Text size="xs" c="dimmed">{t('otherUsageLabel')}</Text>
