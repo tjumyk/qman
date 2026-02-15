@@ -1,15 +1,22 @@
-"""Mock quota backend: in-memory host with filesystems and quotas, no pyquota."""
+"""Mock quota backend: in-memory host(s) with filesystems and quotas, no pyquota."""
 
 from __future__ import annotations
 
 from typing import Any
 
-# In-memory mock host state. Initialized by init_mock_host().
-_mock_state: dict[str, Any] = {
-    "devices": {},
-    "users": {},
-    "groups": {},
-}
+# In-memory mock state per host_id. Initialized by init_mock_host().
+# Each value: {"devices": {...}, "users": {...}, "groups": {...}}
+_mock_hosts: dict[str, dict[str, Any]] = {}
+
+
+def _get_mock_state() -> dict[str, Any]:
+    """Return mock state for the current host (from MOCK_HOST_ID config, default host1)."""
+    try:
+        from flask import current_app
+        host_id = current_app.config.get("MOCK_HOST_ID", "host1") if current_app else "host1"
+    except RuntimeError:
+        host_id = "host1"
+    return _mock_hosts.get(host_id, _mock_hosts.get("host1", {}))
 
 # Quota 8-tuple: (bhard, bsoft, bcurrent, ihard, isoft, icurrent, btime, itime)
 # Block limits (bhard, bsoft) are in 1K blocks; bcurrent is in bytes (pyquota convention).
@@ -362,23 +369,64 @@ def init_mock_host() -> None:
         },
     }
 
-    _mock_state["devices"] = devices
-    _mock_state["users"] = users
-    _mock_state["groups"] = groups
+    _mock_hosts["host1"] = {"devices": devices, "users": users, "groups": groups}
+
+    # Second host: minimal data (one device, two users).
+    host2_users = {1000: "alice", 1001: "bob"}
+    host2_groups = {1000: "users"}
+    host2_devices = {
+        "/dev/vdb1": {
+            "name": "/dev/vdb1",
+            "mount_points": ["/data"],
+            "fstype": "ext4",
+            "opts": ["rw", "usrquota"],
+            "usage": {"free": 20 * 1024**3, "total": 30 * 1024**3, "used": 10 * 1024**3, "percent": 33.3},
+            "user_quota_format": "vfsv1",
+            "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    "block_hard_limit": 5_000_000,
+                    "block_soft_limit": 4_000_000,
+                    "block_current": 500_000 * 1024,
+                    "inode_hard_limit": 50_000,
+                    "inode_soft_limit": 40_000,
+                    "inode_current": 5_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    "block_hard_limit": 5_000_000,
+                    "block_soft_limit": 4_000_000,
+                    "block_current": 200_000 * 1024,
+                    "inode_hard_limit": 50_000,
+                    "inode_soft_limit": 40_000,
+                    "inode_current": 2_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
+    }
+    _mock_hosts["host2"] = {"devices": host2_devices, "users": host2_users, "groups": host2_groups}
 
 
 def get_devices_mock() -> dict[str, dict[str, Any]]:
     """Return devices from mock state (same shape as quota.get_devices())."""
-    return {d["name"]: dict(d) for d in _mock_state["devices"].values()}
+    state = _get_mock_state()
+    return {d["name"]: dict(d) for d in state["devices"].values()}
 
 
 def collect_remote_quotas_mock() -> list[dict[str, Any]]:
     """Build list of devices with user/group quotas from mock state (same shape as collect_remote_quotas)."""
     results: list[dict[str, Any]] = []
-    users = _mock_state["users"]
-    groups = _mock_state["groups"]
+    state = _get_mock_state()
+    users = state["users"]
+    groups = state["groups"]
 
-    for dev in _mock_state["devices"].values():
+    for dev in state["devices"].values():
         device: dict[str, Any] = {
             "name": dev["name"],
             "mount_points": list(dev["mount_points"]),
@@ -414,12 +462,22 @@ def collect_remote_quotas_mock() -> list[dict[str, Any]]:
     return results
 
 
+def _uid_for_username_mock(username: str) -> int:
+    """Resolve username to uid in mock state. Raises KeyError if not found."""
+    users = _get_mock_state()["users"]
+    for uid, name in users.items():
+        if name == username:
+            return uid
+    raise KeyError(username)
+
+
 def collect_remote_quotas_for_uid_mock(uid: int) -> list[dict[str, Any]]:
     """Build list of devices where the given user has a quota (same shape as collect_remote_quotas_for_uid)."""
     results: list[dict[str, Any]] = []
-    users = _mock_state["users"]
+    state = _get_mock_state()
+    users = state["users"]
 
-    for dev in _mock_state["devices"].values():
+    for dev in state["devices"].values():
         user_quotas = dev.get("user_quotas") or {}
         if uid not in user_quotas:
             continue
@@ -452,7 +510,7 @@ def set_user_quota_mock(
     inode_soft_limit: int | None,
 ) -> None:
     """Update mock user quota for device/uid. None means leave unchanged."""
-    devices = _mock_state["devices"]
+    devices = _get_mock_state()["devices"]
     if device_name not in devices:
         raise ValueError(f"device not found: {device_name}")
     dev = devices[device_name]
@@ -480,8 +538,9 @@ def set_user_quota_mock(
 
 def get_user_quota_mock(device_name: str, uid: int) -> dict[str, Any]:
     """Return user quota dict for device/uid (includes uid and name). Mimics pq.get_user_quota + quota_tuple_to_dict."""
-    devices = _mock_state["devices"]
-    users = _mock_state["users"]
+    state = _get_mock_state()
+    devices = state["devices"]
+    users = state["users"]
     if device_name not in devices:
         raise ValueError(f"device not found: {device_name}")
     dev = devices[device_name]

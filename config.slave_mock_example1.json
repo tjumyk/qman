@@ -1,0 +1,9 @@
+{
+  "SECRET_KEY": "secRetSecRet",
+  "SESSION_COOKIE_NAME": "qman_session",
+  "PORT": 8437,
+
+  "API_KEY": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey",
+  "MOCK_QUOTA": true,
+  "MOCK_HOST_ID": "host1"
+}

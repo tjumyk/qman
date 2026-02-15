@@ -42,6 +42,8 @@ def create_app(config_path: str | None = None) -> Flask:
     app.config["SLAVES"] = [s.model_dump() for s in config.SLAVES]
     app.config["API_KEY"] = config.API_KEY
     app.config["MOCK_QUOTA"] = config.MOCK_QUOTA
+    if config.MOCK_HOST_ID is not None:
+        app.config["MOCK_HOST_ID"] = config.MOCK_HOST_ID
     if config.PORT is not None:
         app.config["PORT"] = config.PORT
 

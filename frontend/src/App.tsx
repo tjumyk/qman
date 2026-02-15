@@ -15,16 +15,18 @@ import {
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core'
-import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom'
 import { fetchMe } from './api'
 import { useI18n } from './i18n'
 import { MyUsagePage } from './pages/MyUsagePage'
+import { MyMappingsPage } from './pages/MyMappingsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { HostListPage } from './pages/HostListPage'
 import { HostDetailPage } from './pages/HostDetailPage'
 import { DeviceUserListPage } from './pages/DeviceUserListPage'
+import { AdminMappingsPage } from './pages/AdminMappingsPage'
 import { PageBreadcrumbs } from './components/PageBreadcrumbs'
 
 function AppShellWithNav() {
@@ -122,6 +124,12 @@ function AppShellWithNav() {
             active={location.pathname === '/my-usage'}
             onClick={() => navigate('/my-usage')}
           />
+          <NavLink
+            leftSection={<IconLink size={18} />}
+            label={t('myMappings')}
+            active={location.pathname === '/my-mappings'}
+            onClick={() => navigate('/my-mappings')}
+          />
           {me.is_admin && (
             <>
               <NavLink
@@ -132,9 +140,15 @@ function AppShellWithNav() {
               />
               <NavLink
                 leftSection={<IconServer size={18} />}
-                label={t('byHost')}
+                label={t('hostList')}
                 active={location.pathname.startsWith('/manage/hosts')}
                 onClick={() => navigate('/manage/hosts')}
+              />
+              <NavLink
+                leftSection={<IconLink size={18} />}
+                label={t('userMappings')}
+                active={location.pathname === '/manage/mappings'}
+                onClick={() => navigate('/manage/mappings')}
               />
             </>
           )}
@@ -170,10 +184,12 @@ function App() {
         <Route path="/" element={<AppShellWithNav />}>
           <Route index element={<RootRedirect />} />
           <Route path="my-usage" element={<MyUsagePage />} />
+          <Route path="my-mappings" element={<MyMappingsPage />} />
           <Route path="manage" element={<DashboardPage />} />
           <Route path="manage/hosts" element={<HostListPage />} />
           <Route path="manage/hosts/:hostId" element={<HostDetailPage />} />
           <Route path="manage/hosts/:hostId/devices/:deviceName" element={<DeviceUserListPage />} />
+          <Route path="manage/mappings" element={<AdminMappingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -83,3 +83,9 @@ export const meSchema = z.object({
   is_admin: z.boolean(),
 })
 export type Me = z.infer<typeof meSchema>
+
+export const meMappingSchema = z.object({
+  host_id: z.string(),
+  host_user_name: z.string(),
+})
+export type MeMapping = z.infer<typeof meMappingSchema>

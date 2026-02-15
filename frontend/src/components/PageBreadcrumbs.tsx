@@ -12,6 +12,10 @@ function buildBreadcrumbItems(pathname: string, params: { hostId?: string; devic
     return [{ path: '/my-usage', label: t('myUsage'), current: true }]
   }
 
+  if (path === '/my-mappings') {
+    return [{ path: '/my-mappings', label: t('myMappings'), current: true }]
+  }
+
   if (path === '/manage') {
     return [{ path: '/manage', label: t('dashboard'), current: true }]
   }
@@ -19,7 +23,14 @@ function buildBreadcrumbItems(pathname: string, params: { hostId?: string; devic
   if (path === '/manage/hosts') {
     return [
       { path: '/manage', label: t('dashboard'), current: false },
-      { path: '/manage/hosts', label: t('byHost'), current: true },
+      { path: '/manage/hosts', label: t('hostList'), current: true },
+    ]
+  }
+
+  if (path === '/manage/mappings') {
+    return [
+      { path: '/manage', label: t('dashboard'), current: false },
+      { path: '/manage/mappings', label: t('userMappings'), current: true },
     ]
   }
 
@@ -30,7 +41,7 @@ function buildBreadcrumbItems(pathname: string, params: { hostId?: string; devic
   if (hostId && isHostDetail) {
     return [
       { path: '/manage', label: t('dashboard'), current: false },
-      { path: '/manage/hosts', label: t('byHost'), current: false },
+      { path: '/manage/hosts', label: t('hostList'), current: false },
       { path: `/manage/hosts/${encodeURIComponent(hostId)}`, label: hostId, current: true },
     ]
   }
@@ -39,7 +50,7 @@ function buildBreadcrumbItems(pathname: string, params: { hostId?: string; devic
   if (hostId && deviceName && isDevicePage) {
     return [
       { path: '/manage', label: t('dashboard'), current: false },
-      { path: '/manage/hosts', label: t('byHost'), current: false },
+      { path: '/manage/hosts', label: t('hostList'), current: false },
       { path: `/manage/hosts/${encodeURIComponent(hostId)}`, label: hostId, current: false },
       { path: `/manage/hosts/${encodeURIComponent(hostId)}/devices/${encodeURIComponent(deviceName)}`, label: deviceName, current: true },
     ]

@@ -25,6 +25,7 @@ class AppConfig(BaseModel):
     API_KEY: str | None = None
     PORT: int | None = None
     MOCK_QUOTA: bool = False  # If true, slave uses in-memory mock instead of pyquota
+    MOCK_HOST_ID: str | None = None  # When MOCK_QUOTA: which host's mock data to use (e.g. host1, host2)
 
 
 # --- API: Error ---

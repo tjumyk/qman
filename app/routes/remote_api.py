@@ -35,6 +35,27 @@ def register_remote_api_routes(app: Any) -> None:
             results = collect_remote_quotas_for_uid(uid)
         return jsonify(results)
 
+    @app.route("/remote-api/quotas/users/by-name/<username>")
+    @requires_api_key
+    def remote_get_quotas_for_user_by_name(username: str) -> Any:
+        """Return quota for user by Linux username (resolved to uid on this host)."""
+        import urllib.parse
+        username = urllib.parse.unquote(username)
+        if current_app.config.get("MOCK_QUOTA"):
+            from app.quota_mock import _uid_for_username_mock, collect_remote_quotas_for_uid_mock
+            try:
+                uid = _uid_for_username_mock(username)
+            except KeyError:
+                return jsonify(msg=f"user not found: {username}"), 404
+            results = collect_remote_quotas_for_uid_mock(uid)
+        else:
+            try:
+                uid = pwd.getpwnam(username).pw_uid
+            except KeyError:
+                return jsonify(msg=f"user not found: {username}"), 404
+            results = collect_remote_quotas_for_uid(uid)
+        return jsonify(results)
+
     @app.route("/remote-api/quotas/users/<int:uid>", methods=["PUT"])
     @requires_api_key
     def remote_set_user_quota(uid: int) -> tuple[Any, int] | Any:
