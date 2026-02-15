@@ -1,7 +1,8 @@
 import axios, { isAxiosError } from 'axios'
 import { z } from 'zod'
 import { meMappingSchema, meSchema, quotasResponseSchema, userQuotaSchema } from './schemas'
-import type { Me, MeMapping, QuotasResponse, SetUserQuotaBody, UserQuota } from './schemas'
+import type { Me, MeMapping, QuotasResponse, ResolveUserResponse, SetUserQuotaBody, UserQuota } from './schemas'
+import { resolveUserResponseSchema } from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
 
@@ -152,4 +153,12 @@ export async function setUserQuota(
     body
   )
   return userQuotaSchema.parse(data)
+}
+
+export async function resolveHostUser(hostId: string, username: string): Promise<ResolveUserResponse> {
+  const { data } = await api.get<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/users/resolve`,
+    { params: { username: username.trim() } }
+  )
+  return resolveUserResponseSchema.parse(data)
 }

@@ -33,6 +33,29 @@ def _merge_quota_results_for_uid(uid: int, pyquota_results: list[dict[str, Any]]
 def register_remote_api_routes(app: Any) -> None:
     """Register /remote-api/* routes on the Flask app."""
 
+    @app.route("/remote-api/users/resolve")
+    @requires_api_key
+    def remote_resolve_user() -> Any:
+        """Resolve username to uid and name. Query param: username=."""
+        import urllib.parse
+        username = (request.args.get("username") or "").strip()
+        if not username:
+            return jsonify(msg="username query parameter required"), 400
+        username = urllib.parse.unquote(username)
+        if current_app.config.get("MOCK_QUOTA"):
+            from app.quota_mock import _uid_for_username_mock, _get_mock_state
+            try:
+                uid = _uid_for_username_mock(username)
+                users = _get_mock_state()["users"]
+                return jsonify({"uid": uid, "name": users.get(uid, username)})
+            except KeyError:
+                return jsonify(msg=f"user not found: {username}"), 404
+        try:
+            entry = pwd.getpwnam(username)
+            return jsonify({"uid": entry.pw_uid, "name": entry.pw_name})
+        except KeyError:
+            return jsonify(msg=f"user not found: {username}"), 404
+
     @app.route("/remote-api/quotas")
     @requires_api_key
     def remote_get_quotas() -> Any:

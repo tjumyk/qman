@@ -77,6 +77,12 @@ export const setUserQuotaBodySchema = z.object({
 })
 export type SetUserQuotaBody = z.infer<typeof setUserQuotaBodySchema>
 
+export const resolveUserResponseSchema = z.object({
+  uid: z.number(),
+  name: z.string(),
+})
+export type ResolveUserResponse = z.infer<typeof resolveUserResponseSchema>
+
 export const meSchema = z.object({
   uid: z.number(),
   name: z.string(),

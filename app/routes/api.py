@@ -244,6 +244,27 @@ def register_api_routes(app: Any) -> None:
     def get_quotas() -> tuple[Any, int] | Any:
         return jsonify(_fetch_all_quotas())
 
+    @app.route("/api/quotas/<string:slave_id>/users/resolve")
+    @oauth.requires_admin
+    def resolve_host_user(slave_id: str) -> tuple[Any, int] | Any:
+        """Resolve username to uid and name on the given host. Query param: username=."""
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            return jsonify(msg="host not found"), 404
+        username = (request.args.get("username") or "").strip()
+        if not username:
+            return jsonify(msg="username query parameter required"), 400
+        try:
+            url = f"{slave['url']}/remote-api/users/resolve?username={urllib.parse.quote(username)}"
+            resp = requests.get(url, auth=make_auth(slave), timeout=_REMOTE_API_TIMEOUT)
+            if resp.status_code == 404:
+                return jsonify(msg=resp.json().get("msg", "user not found")), 404
+            if resp.status_code // 100 != 2:
+                return jsonify(msg=resp.json().get("msg", "resolve failed")), resp.status_code
+            return jsonify(resp.json())
+        except OSError as e:
+            return jsonify(msg=str(e)), 502
+
     @app.route("/api/quotas/<string:slave_id>/users/<int:uid>", methods=["PUT"])
     @oauth.requires_admin
     def set_user_quota(slave_id: str, uid: int) -> tuple[Any, int]:

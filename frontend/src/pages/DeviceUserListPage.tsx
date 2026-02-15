@@ -11,9 +11,10 @@ import {
   TextInput,
   Badge,
   Group,
+  Modal,
 } from '@mantine/core'
-import { IconDisc } from '@tabler/icons-react'
-import { fetchQuotas } from '../api'
+import { IconDisc, IconPlus } from '@tabler/icons-react'
+import { fetchQuotas, resolveHostUser, getErrorMessage } from '../api'
 import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
@@ -22,10 +23,29 @@ import { EditQuotaModal } from '../components/EditQuotaModal'
 import { DeviceUsage } from '../components/DeviceUsage'
 import type { UserQuota } from '../api/schemas'
 
+function syntheticUserQuota(uid: number, name: string): UserQuota {
+  return {
+    uid,
+    name,
+    block_hard_limit: 0,
+    block_soft_limit: 0,
+    block_current: 0,
+    inode_hard_limit: 0,
+    inode_soft_limit: 0,
+    inode_current: 0,
+    block_time_limit: 0,
+    inode_time_limit: 0,
+  }
+}
+
 export function DeviceUserListPage() {
   const { hostId, deviceName } = useParams<{ hostId: string; deviceName: string }>()
   const [search, setSearch] = useState('')
   const [editQuota, setEditQuota] = useState<UserQuota | null>(null)
+  const [addQuotaOpened, setAddQuotaOpened] = useState(false)
+  const [addQuotaUsername, setAddQuotaUsername] = useState('')
+  const [addQuotaResolving, setAddQuotaResolving] = useState(false)
+  const [addQuotaError, setAddQuotaError] = useState<string | null>(null)
   const { t } = useI18n()
 
   const { data, isLoading, error } = useQuery({ queryKey: ['quotas'], queryFn: fetchQuotas })
@@ -68,6 +88,23 @@ export function DeviceUserListPage() {
     return <Alert color="red">{t('deviceNotFound')}</Alert>
   }
 
+  async function handleAddQuotaContinue() {
+    const username = addQuotaUsername.trim()
+    if (!username || !hostId) return
+    setAddQuotaError(null)
+    setAddQuotaResolving(true)
+    try {
+      const resolved = await resolveHostUser(hostId, username)
+      setAddQuotaOpened(false)
+      setAddQuotaUsername('')
+      setEditQuota(syntheticUserQuota(resolved.uid, resolved.name))
+    } catch (err) {
+      setAddQuotaError(getErrorMessage(err, t('userNotFound')))
+    } finally {
+      setAddQuotaResolving(false)
+    }
+  }
+
   return (
     <Stack gap="md">
       <Group justify="space-between" gap="sm">
@@ -87,12 +124,25 @@ export function DeviceUserListPage() {
         </Text>
         {device.usage && <DeviceUsage usage={device.usage} userQuotas={device.user_quotas} />}
       </Stack>
-      <TextInput
-        placeholder={t('searchByNameOrUid')}
-        value={search}
-        onChange={(e) => setSearch(e.currentTarget.value)}
-        style={{ maxWidth: 300 }}
-      />
+      <Group gap="sm">
+        <TextInput
+          placeholder={t('searchByNameOrUid')}
+          value={search}
+          onChange={(e) => setSearch(e.currentTarget.value)}
+          style={{ maxWidth: 300 }}
+        />
+        <Button
+          leftSection={<IconPlus size={16} />}
+          variant="light"
+          onClick={() => {
+            setAddQuotaOpened(true)
+            setAddQuotaUsername('')
+            setAddQuotaError(null)
+          }}
+        >
+          {t('addQuota')}
+        </Button>
+      </Group>
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
@@ -161,6 +211,42 @@ export function DeviceUserListPage() {
           {t('noUsersMatch')}
         </Text>
       )}
+      <Modal
+        opened={addQuotaOpened}
+        onClose={() => setAddQuotaOpened(false)}
+        title={t('addQuotaForUser')}
+        size="sm"
+      >
+        <Stack gap="md">
+          <TextInput
+            label={t('usernameLabel')}
+            placeholder={t('usernameLabel')}
+            value={addQuotaUsername}
+            onChange={(e) => {
+              setAddQuotaUsername(e.currentTarget.value)
+              setAddQuotaError(null)
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddQuotaContinue()}
+          />
+          {addQuotaError && (
+            <Text size="sm" c="red">
+              {addQuotaError}
+            </Text>
+          )}
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={() => setAddQuotaOpened(false)}>
+              {t('cancel')}
+            </Button>
+            <Button
+              loading={addQuotaResolving}
+              onClick={handleAddQuotaContinue}
+              disabled={!addQuotaUsername.trim()}
+            >
+              {t('continue')}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       <EditQuotaModal
         opened={editQuota !== null}
         onClose={() => setEditQuota(null)}
