@@ -79,8 +79,22 @@ function AppShellWithNav() {
               value={computedColorScheme}
               onChange={(v) => setColorScheme(v as 'light' | 'dark')}
               data={[
-                { label: <IconSun size={14} />, value: 'light' },
-                { label: <IconMoon size={14} />, value: 'dark' },
+                {
+                  label: (
+                    <Box component="span" display="flex" style={{ alignItems: 'center', justifyContent: 'center' }}>
+                      <IconSun size={16} />
+                    </Box>
+                  ),
+                  value: 'light',
+                },
+                {
+                  label: (
+                    <Box component="span" display="flex" style={{ alignItems: 'center', justifyContent: 'center' }}>
+                      <IconMoon size={16} />
+                    </Box>
+                  ),
+                  value: 'dark',
+                },
               ]}
             />
             <SegmentedControl
