@@ -28,12 +28,12 @@ _VALID_ORDERS = ("newest_first", "oldest_first", "largest_first")
 
 
 def _load_slave_config() -> tuple[str, str, str, str]:
-    """Load host_id, master_url, secret, enforcement_order from CONFIG_PATH or env. Returns (host_id, url, secret, order)."""
+    """Load host_id, master_url, secret, enforcement_order from CONFIG_PATH (default config.json) or env. Returns (host_id, url, secret, order)."""
     host_id = os.environ.get("SLAVE_HOST_ID", "slave")
     master_url = os.environ.get("MASTER_EVENT_CALLBACK_URL", "")
     secret = os.environ.get("MASTER_EVENT_CALLBACK_SECRET", "")
     order = os.environ.get("DOCKER_QUOTA_ENFORCEMENT_ORDER", _DEFAULT_ORDER)
-    config_path = os.environ.get("CONFIG_PATH")
+    config_path = os.environ.get("CONFIG_PATH", "config.json")
     if config_path and os.path.isfile(config_path):
         try:
             with open(config_path, encoding="utf-8") as f:

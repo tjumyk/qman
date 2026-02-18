@@ -324,7 +324,7 @@ When **USE_DOCKER_QUOTA** is `true`, the slave exposes a virtual “Docker” de
   # Beat scheduler (runs periodic tasks: enforcement every 5min, sync every 2min)
   CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app beat
   ```
-  **Note:** In mock mode (`MOCK_QUOTA: true`), Celery is not required (no enforcement runs, but quota display works).
+  **Note:** Set `CONFIG_PATH` to your slave config file (e.g. `config.slave.json`) so worker and beat load slave settings; if unset, `config.json` is used. In mock mode (`MOCK_QUOTA: true`), Celery is not required (no enforcement runs, but quota display works).
 - **Image usage:** Both container writable layers and image layers count toward quota. Image layers are attributed to the first creator (first puller/builder/committer/importer/loader). See `docs/DOCKER_IMAGE_QUOTA_DESIGN.md` for details on layer-level attribution and shared-image handling.
 
 ### Quota block units (pyquota)
