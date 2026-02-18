@@ -34,3 +34,54 @@ class OAuthUserCache(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+# --- Docker quota (slave-only tables) ---
+
+
+class DockerContainerAttribution(Base):
+    """Attribution of a container to a user (creator). Persisted on slave."""
+
+    __tablename__ = "docker_container_attribution"
+
+    container_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DockerImageAttribution(Base):
+    """Attribution of an image to a user (puller). Optional."""
+
+    __tablename__ = "docker_image_attribution"
+
+    image_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    puller_host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    puller_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DockerUserQuotaLimit(Base):
+    """Per-user Docker quota limit (1K blocks). Stored on slave."""
+
+    __tablename__ = "docker_user_quota_limit"
+
+    uid: Mapped[int] = mapped_column(Integer, primary_key=True)
+    block_hard_limit: Mapped[int] = mapped_column(Integer, default=0)  # in 1K blocks
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DockerLayerAttribution(Base):
+    """Attribution of a Docker layer to a user (first creator). Persisted on slave."""
+
+    __tablename__ = "docker_layer_attribution"
+
+    layer_id: Mapped[str] = mapped_column(String(64), primary_key=True)  # e.g. sha256:abc123...
+    first_puller_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)  # uid of first creator
+    first_puller_host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)  # incremental size from history
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    creation_method: Mapped[str | None] = mapped_column(String(32), nullable=True)  # 'pull', 'build', 'commit', 'import', 'load'

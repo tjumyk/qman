@@ -1,0 +1,20 @@
+{
+  "SECRET_KEY": "secRetSecRet",
+  "SESSION_COOKIE_NAME": "qman_session",
+  "PORT": 8440,
+  "API_KEY": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey",
+  "MOCK_QUOTA": true,
+  "MOCK_HOST_ID": "host4",
+  "USE_PYQUOTA": true,
+  "USE_ZFS": false,
+  "USE_DOCKER_QUOTA": true,
+  "DOCKER_DATA_ROOT": "/var/lib/docker",
+  "DOCKER_QUOTA_RESERVED_BYTES": null,
+  "CELERY_BROKER_URL": "redis://localhost:6379/1",
+  "CELERY_RESULT_BACKEND": "redis://localhost:6379/1",
+  "DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS": 300,
+  "DOCKER_QUOTA_ENFORCEMENT_ORDER": "newest_first",
+  "SLAVE_HOST_ID": "host4",
+  "MASTER_EVENT_CALLBACK_URL": "http://localhost:8436",
+  "MASTER_EVENT_CALLBACK_SECRET": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"
+}

@@ -457,6 +457,24 @@ def register_api_routes(app: Any) -> None:
         finally:
             db.close()
 
+    @app.route("/api/internal/slave-events", methods=["POST"])
+    def post_slave_events() -> tuple[Any, int] | Any:
+        """Accept events from slaves (quota exceeded, container removed). Auth: X-API-Key = SLAVE_EVENT_SECRET."""
+        secret = current_app.config.get("SLAVE_EVENT_SECRET")
+        if not secret:
+            return jsonify(msg="slave events not configured"), 503
+        provided = request.headers.get("X-API-Key") or request.headers.get("Authorization", "").replace("Bearer ", "")
+        if provided != secret:
+            return jsonify(msg="unauthorized"), 401
+        body = request.get_json(silent=True) or {}
+        host_id = body.get("host_id")
+        events = body.get("events")
+        if not host_id or not isinstance(events, list):
+            return jsonify(msg="host_id and events (array) required"), 400
+        from app.notifications import process_slave_events
+        process_slave_events(host_id, events)
+        return jsonify(msg="ok"), 200
+
     @app.route("/api/admin/oauth-users")
     @oauth.requires_admin
     def get_admin_oauth_users() -> tuple[Any, int] | Any:

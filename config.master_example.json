@@ -1,17 +1,15 @@
 {
   "SECRET_KEY": "secRetSecRet",
   "SESSION_COOKIE_NAME": "qman_session",
-
   "SLAVES": [
-    {
-      "id": "host1",
-      "url": "http://host1.example.com:8436",
-      "api_key": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"
-    },
-    {
-      "id": "host2",
-      "url": "http://host2.example.com:8436",
-      "api_key": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"
-    }
-  ]
+    {"id": "host1", "url": "http://host1.example.com:8436", "api_key": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"},
+    {"id": "host2", "url": "http://host2.example.com:8436", "api_key": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey"}
+  ],
+  "SMTP_HOST": "smtp.example.com",
+  "SMTP_PORT": 587,
+  "SMTP_USER": null,
+  "SMTP_PASSWORD": null,
+  "NOTIFICATION_FROM": "qman@example.com",
+  "NOTIFICATION_OAUTH_ACCESS_TOKEN": null,
+  "SLAVE_EVENT_SECRET": "sharedSecretForSlaveEvents"
 }

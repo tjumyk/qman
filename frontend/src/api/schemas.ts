@@ -57,6 +57,8 @@ export const deviceQuotaSchema = z.object({
   group_quota_format: z.string().optional(),
   group_quota_info: quotaInfoSchema.optional(),
   group_quotas: z.array(groupQuotaSchema).optional(),
+  /** Docker: bytes not attributed to any user (containers without qman.user). */
+  unattributed_usage: z.number().optional(),
 })
 export type DeviceQuota = z.infer<typeof deviceQuotaSchema>
 

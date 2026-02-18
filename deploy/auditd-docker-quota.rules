@@ -1,0 +1,7 @@
+# Audit rules for Docker quota attribution (slave host).
+# Install: copy to /etc/audit/rules.d/ or append to /etc/audit/audit.rules then restart auditd.
+# Keys: docker-socket (socket access), docker-client (binary execution). Parsers use these to
+# correlate container create / image pull with uid (e.g. ausearch -k docker-socket -k docker-client).
+
+-w /var/run/docker.sock -p rwxa -k docker-socket
+-w /usr/bin/docker -p x -k docker-client

@@ -77,9 +77,24 @@ export function HostDetailPage() {
                   </Group>
                 </Group>
                 <Text size="sm" c="dimmed">
-                  {dev.fstype} · {dev.mount_points.join(', ')}
+                  {dev.fstype === 'docker' ? t('deviceTypeDocker') : dev.fstype} · {dev.mount_points.join(', ')}
                 </Text>
-                {dev.usage && <DeviceUsage usage={dev.usage} userQuotas={dev.user_quotas} />}
+                {dev.usage && (
+                  <DeviceUsage
+                    usage={dev.usage}
+                    userQuotas={dev.user_quotas}
+                    otherUsageLabelOverride={
+                      dev.fstype === 'docker' && dev.unattributed_usage
+                        ? t('unattributedUsageLabel')
+                        : undefined
+                    }
+                    otherUsageBytes={
+                      dev.fstype === 'docker' && dev.unattributed_usage != null
+                        ? dev.unattributed_usage
+                        : undefined
+                    }
+                  />
+                )}
               </Stack>
             </Card>
           )

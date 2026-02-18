@@ -7,3 +7,6 @@ alembic>=1.13
 gunicorn
 pyquota
 psutil
+# Docker quota (slave)
+celery[redis]>=5.3
+docker>=7.0

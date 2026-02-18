@@ -8,24 +8,43 @@ from app.auth import requires_api_key
 from app.models import quota_tuple_to_dict, SetUserQuotaRequest
 
 
-def _merge_quota_results(pyquota_results: list[dict[str, Any]], use_zfs: bool) -> list[dict[str, Any]]:
-    """Merge pyquota device list with ZFS dataset list when USE_ZFS is true. Sorted by name."""
+def _merge_quota_results(
+    pyquota_results: list[dict[str, Any]],
+    use_zfs: bool,
+    use_docker_quota: bool,
+) -> list[dict[str, Any]]:
+    """Merge pyquota, ZFS, and Docker device lists. Sorted by name."""
     results = list(pyquota_results)
     if use_zfs:
         from app.quota_zfs import collect_remote_quotas as zfs_collect_remote_quotas
         zfs_datasets = current_app.config.get("ZFS_DATASETS")
         results = results + zfs_collect_remote_quotas(zfs_datasets)
+    if use_docker_quota:
+        from app.docker_quota import docker_collect_remote_quotas
+        data_root = current_app.config.get("DOCKER_DATA_ROOT")
+        reserved = current_app.config.get("DOCKER_QUOTA_RESERVED_BYTES")
+        results = results + docker_collect_remote_quotas(data_root, reserved)
     results.sort(key=lambda r: r["name"])
     return results
 
 
-def _merge_quota_results_for_uid(uid: int, pyquota_results: list[dict[str, Any]], use_zfs: bool) -> list[dict[str, Any]]:
-    """Merge pyquota and ZFS results for a single user. Sorted by name."""
+def _merge_quota_results_for_uid(
+    uid: int,
+    pyquota_results: list[dict[str, Any]],
+    use_zfs: bool,
+    use_docker_quota: bool,
+) -> list[dict[str, Any]]:
+    """Merge pyquota, ZFS, and Docker results for a single user. Sorted by name."""
     results = list(pyquota_results)
     if use_zfs:
         from app.quota_zfs import collect_remote_quotas_for_uid as zfs_collect_remote_quotas_for_uid
         zfs_datasets = current_app.config.get("ZFS_DATASETS")
         results = results + zfs_collect_remote_quotas_for_uid(uid, zfs_datasets)
+    if use_docker_quota:
+        from app.docker_quota import docker_collect_remote_quotas_for_uid
+        data_root = current_app.config.get("DOCKER_DATA_ROOT")
+        reserved = current_app.config.get("DOCKER_QUOTA_RESERVED_BYTES")
+        results = results + docker_collect_remote_quotas_for_uid(uid, data_root, reserved)
     results.sort(key=lambda r: r["name"])
     return results
 
@@ -62,14 +81,19 @@ def register_remote_api_routes(app: Any) -> None:
         if current_app.config.get("MOCK_QUOTA"):
             from app.quota_mock import collect_remote_quotas_mock
             results = collect_remote_quotas_mock()
+            # Mock quota already includes Docker device if USE_DOCKER_QUOTA is enabled
         else:
-            # ext4-only: pyquota only. ZFS-only: pyquota=[], ZFS list. Mixed: both.
+            # ext4-only: pyquota only. ZFS/Docker: merge when enabled.
             use_pyquota = current_app.config.get("USE_PYQUOTA", True)
             pyquota_results: list[dict[str, Any]] = []
             if use_pyquota:
                 from app.quota import collect_remote_quotas
                 pyquota_results = collect_remote_quotas()
-            results = _merge_quota_results(pyquota_results, current_app.config.get("USE_ZFS", False))
+            results = _merge_quota_results(
+                pyquota_results,
+                current_app.config.get("USE_ZFS", False),
+                current_app.config.get("USE_DOCKER_QUOTA", False),
+            )
         return jsonify(results)
 
     @app.route("/remote-api/quotas/users/<int:uid>")
@@ -79,13 +103,19 @@ def register_remote_api_routes(app: Any) -> None:
         if current_app.config.get("MOCK_QUOTA"):
             from app.quota_mock import collect_remote_quotas_for_uid_mock
             results = collect_remote_quotas_for_uid_mock(uid)
+            # Mock quota already includes Docker device if USE_DOCKER_QUOTA is enabled and user has quota
         else:
             use_pyquota = current_app.config.get("USE_PYQUOTA", True)
             pyquota_results = []
             if use_pyquota:
                 from app.quota import collect_remote_quotas_for_uid
                 pyquota_results = collect_remote_quotas_for_uid(uid)
-            results = _merge_quota_results_for_uid(uid, pyquota_results, current_app.config.get("USE_ZFS", False))
+            results = _merge_quota_results_for_uid(
+                uid,
+                pyquota_results,
+                current_app.config.get("USE_ZFS", False),
+                current_app.config.get("USE_DOCKER_QUOTA", False),
+            )
         return jsonify(results)
 
     @app.route("/remote-api/quotas/users/by-name/<username>")
@@ -111,7 +141,12 @@ def register_remote_api_routes(app: Any) -> None:
             if use_pyquota:
                 from app.quota import collect_remote_quotas_for_uid
                 pyquota_results = collect_remote_quotas_for_uid(uid)
-            results = _merge_quota_results_for_uid(uid, pyquota_results, current_app.config.get("USE_ZFS", False))
+            results = _merge_quota_results_for_uid(
+                uid,
+                pyquota_results,
+                current_app.config.get("USE_ZFS", False),
+                current_app.config.get("USE_DOCKER_QUOTA", False),
+            )
         return jsonify(results)
 
     @app.route("/remote-api/quotas/users/<int:uid>", methods=["PUT"])
@@ -186,6 +221,17 @@ def register_remote_api_routes(app: Any) -> None:
                     return jsonify(quota_dict)
                 except ZFSQuotaError as e:
                     return jsonify(msg=str(e)), 500
+            if current_app.config.get("USE_DOCKER_QUOTA", False) and device == "docker":
+                from app.docker_quota import docker_set_user_quota
+                try:
+                    quota_dict = docker_set_user_quota(
+                        uid=uid,
+                        block_hard_limit=params.block_hard_limit or 0,
+                        block_soft_limit=params.block_soft_limit or 0,
+                    )
+                    return jsonify(quota_dict)
+                except Exception as e:
+                    return jsonify(msg=str(e)), 500
             return jsonify(
-                msg="device not recognized: use /dev/... for block devices, or set USE_ZFS=true for ZFS datasets"
+                msg="device not recognized: use /dev/... for block devices, USE_ZFS for ZFS datasets, or device=docker when USE_DOCKER_QUOTA is enabled"
             ), 400

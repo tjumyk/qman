@@ -46,18 +46,57 @@ def create_app(config_path: str | None = None) -> Flask:
         app.config["MOCK_HOST_ID"] = config.MOCK_HOST_ID
     app.config["USE_PYQUOTA"] = config.USE_PYQUOTA
     app.config["USE_ZFS"] = config.USE_ZFS
-    if not config.MOCK_QUOTA and not config.USE_PYQUOTA and not config.USE_ZFS:
+    if not config.MOCK_QUOTA and not config.USE_PYQUOTA and not config.USE_ZFS and not config.USE_DOCKER_QUOTA:
         raise ValueError(
-            "At least one of USE_PYQUOTA and USE_ZFS must be enabled when MOCK_QUOTA is false"
+            "At least one of USE_PYQUOTA, USE_ZFS, USE_DOCKER_QUOTA must be enabled when MOCK_QUOTA is false"
         )
     if config.ZFS_DATASETS is not None:
         app.config["ZFS_DATASETS"] = config.ZFS_DATASETS
     if config.PORT is not None:
         app.config["PORT"] = config.PORT
+    # Docker quota (slave)
+    app.config["USE_DOCKER_QUOTA"] = config.USE_DOCKER_QUOTA
+    if config.DOCKER_DATA_ROOT is not None:
+        app.config["DOCKER_DATA_ROOT"] = config.DOCKER_DATA_ROOT
+    if config.DOCKER_QUOTA_RESERVED_BYTES is not None:
+        app.config["DOCKER_QUOTA_RESERVED_BYTES"] = config.DOCKER_QUOTA_RESERVED_BYTES
+    if config.CELERY_BROKER_URL is not None:
+        app.config["CELERY_BROKER_URL"] = config.CELERY_BROKER_URL
+    if config.CELERY_RESULT_BACKEND is not None:
+        app.config["CELERY_RESULT_BACKEND"] = config.CELERY_RESULT_BACKEND
+    if config.DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS is not None:
+        app.config["DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS"] = config.DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS
+    if config.DOCKER_QUOTA_ENFORCEMENT_ORDER is not None:
+        app.config["DOCKER_QUOTA_ENFORCEMENT_ORDER"] = config.DOCKER_QUOTA_ENFORCEMENT_ORDER
+    if config.SLAVE_HOST_ID is not None:
+        app.config["SLAVE_HOST_ID"] = config.SLAVE_HOST_ID
+    if config.MASTER_EVENT_CALLBACK_URL is not None:
+        app.config["MASTER_EVENT_CALLBACK_URL"] = config.MASTER_EVENT_CALLBACK_URL
+    if config.MASTER_EVENT_CALLBACK_SECRET is not None:
+        app.config["MASTER_EVENT_CALLBACK_SECRET"] = config.MASTER_EVENT_CALLBACK_SECRET
+    # Notifications (master)
+    if config.SMTP_HOST is not None:
+        app.config["SMTP_HOST"] = config.SMTP_HOST
+    if config.SMTP_PORT is not None:
+        app.config["SMTP_PORT"] = config.SMTP_PORT
+    if config.SMTP_USER is not None:
+        app.config["SMTP_USER"] = config.SMTP_USER
+    if config.SMTP_PASSWORD is not None:
+        app.config["SMTP_PASSWORD"] = config.SMTP_PASSWORD
+    if config.NOTIFICATION_FROM is not None:
+        app.config["NOTIFICATION_FROM"] = config.NOTIFICATION_FROM
+    if config.NOTIFICATION_OAUTH_ACCESS_TOKEN is not None:
+        app.config["NOTIFICATION_OAUTH_ACCESS_TOKEN"] = config.NOTIFICATION_OAUTH_ACCESS_TOKEN
+    if config.SLAVE_EVENT_SECRET is not None:
+        app.config["SLAVE_EVENT_SECRET"] = config.SLAVE_EVENT_SECRET
 
     if config.MOCK_QUOTA:
         from app.quota_mock import init_mock_host
         init_mock_host()
+
+    if config.USE_DOCKER_QUOTA and config.CELERY_BROKER_URL:
+        from app.celery_app import make_celery
+        make_celery(app)
 
     from auth_connect import oauth
     oauth.init_app(app, config_file=os.path.join(_PROJECT_ROOT, "oauth.config.json"))

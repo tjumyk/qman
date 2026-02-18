@@ -146,6 +146,8 @@ const translations: Record<Locale, Record<string, string>> = {
     loadOAuthUsersFirst: 'Load OAuth users',
     noAdminMappingsMessage: 'No host users or mappings yet.',
     host: 'Host',
+    deviceTypeDocker: 'Docker',
+    containerRemovedDueToQuota: 'Container removed due to quota',
   },
   'zh-Hans': {
     appTitle: 'DQMS',
@@ -264,6 +266,9 @@ const translations: Record<Locale, Record<string, string>> = {
     loadOAuthUsersFirst: '加载 OAuth 用户',
     noAdminMappingsMessage: '暂无主机用户或映射。',
     host: '主机',
+    deviceTypeDocker: 'Docker',
+    containerRemovedDueToQuota: '因配额移除容器',
+    unattributedUsageLabel: '未归属（无 qman.user）',
   },
 }
 

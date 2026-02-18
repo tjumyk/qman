@@ -1,0 +1,18 @@
+{
+  "SECRET_KEY": "secRetSecRet",
+  "SESSION_COOKIE_NAME": "qman_session",
+  "API_KEY": "someLongAPIKeySomeLongAPIKeySomeLongAPIKeySomeLongAPIKey",
+  "MOCK_QUOTA": false,
+  "USE_PYQUOTA": true,
+  "USE_ZFS": false,
+  "ZFS_DATASETS": null,
+  "USE_DOCKER_QUOTA": true,
+  "DOCKER_DATA_ROOT": "/var/lib/docker",
+  "DOCKER_QUOTA_RESERVED_BYTES": null,
+  "CELERY_BROKER_URL": "redis://localhost:6379/0",
+  "DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS": 300,
+  "DOCKER_QUOTA_ENFORCEMENT_ORDER": "newest_first",
+  "SLAVE_HOST_ID": "host1",
+  "MASTER_EVENT_CALLBACK_URL": "https://qman-master.example.com",
+  "MASTER_EVENT_CALLBACK_SECRET": "sharedSecretForSlaveEvents"
+}

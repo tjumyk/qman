@@ -45,6 +45,11 @@ function QuotaCard({
             <Text size="sm" fw={600} lineClamp={1}>
               {device.name}
             </Text>
+            {device.fstype === 'docker' && (
+              <Badge size="sm" variant="light" color="blue" styles={{ root: { textTransform: 'none' } }}>
+                {t('deviceTypeDocker')}
+              </Badge>
+            )}
             {device.mount_points.map((mp) => (
               <Badge key={mp} size="sm" variant="outline" color="gray" styles={{ root: { textTransform: 'none' } }}>
                 {mp}

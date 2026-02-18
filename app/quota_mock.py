@@ -511,6 +511,107 @@ def init_mock_host() -> None:
     }
     _mock_hosts["host3"] = {"devices": host3_devices, "users": host3_users, "groups": host3_groups}
 
+    # Fourth host: Docker quota enabled (with some block devices too).
+    host4_users = {1000: "alice", 1001: "bob", 1002: "charlie"}
+    host4_groups = {1000: "users"}
+    host4_devices = {
+        "/dev/sda1": {
+            "name": "/dev/sda1",
+            "mount_points": ["/home"],
+            "fstype": "ext4",
+            "opts": ["rw", "usrquota"],
+            "usage": {"free": 30 * 1024**3, "total": 50 * 1024**3, "used": 20 * 1024**3, "percent": 40.0},
+            "user_quota_format": "vfsv1",
+            "user_quota_info": {"block_grace": 7 * 86400, "inode_grace": 7 * 86400, "flags": 0},
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    "block_hard_limit": 5_000_000,
+                    "block_soft_limit": 4_000_000,
+                    "block_current": 2_000_000 * 1024,
+                    "inode_hard_limit": 100_000,
+                    "inode_soft_limit": 80_000,
+                    "inode_current": 20_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    "block_hard_limit": 8_000_000,
+                    "block_soft_limit": 7_000_000,
+                    "block_current": 3_000_000 * 1024,
+                    "inode_hard_limit": 150_000,
+                    "inode_soft_limit": 120_000,
+                    "inode_current": 30_000,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
+        "docker": {
+            "name": "docker",
+            "mount_points": ["/var/lib/docker"],
+            "fstype": "docker",
+            "opts": ["docker"],
+            # total = sum of user quota limits + unattributed = (10+15+5)*1024*1024 + 2*1024*1024 = 32 GiB
+            # used = attributed = 8 GiB (containers) + 12 GiB (image layers) = 20 GiB
+            # unattributed = 2 GiB
+            # free = 32 - 20 - 2 = 10 GiB
+            "usage": {
+                "free": 10 * 1024**3,
+                "total": 32 * 1024**3,
+                "used": 20 * 1024**3,
+                "percent": 62.5,
+            },
+            "unattributed_usage": 2 * 1024**3,  # 2 GiB unattributed
+            "user_quota_format": "docker",
+            "user_quota_info": None,
+            "group_quota_format": None,
+            "group_quota_info": None,
+            "user_quotas": {
+                1000: {
+                    # block_hard_limit in 1K blocks: 10 GiB = 10 * 1024 * 1024 = 10,485,760
+                    "block_hard_limit": 10_485_760,
+                    "block_soft_limit": 10_485_760,
+                    # block_current in bytes: containers (2 GiB) + image layers (3 GiB) = 5 GiB
+                    "block_current": 5 * 1024**3,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1001: {
+                    # 15 GiB quota
+                    "block_hard_limit": 15_728_640,
+                    "block_soft_limit": 15_728_640,
+                    # containers (3 GiB) + image layers (6 GiB) = 9 GiB
+                    "block_current": 9 * 1024**3,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+                1002: {
+                    # 5 GiB quota
+                    "block_hard_limit": 5_242_880,
+                    "block_soft_limit": 5_242_880,
+                    # containers (3 GiB) + image layers (3 GiB) = 6 GiB (over quota!)
+                    "block_current": 6 * 1024**3,
+                    "inode_hard_limit": 0,
+                    "inode_soft_limit": 0,
+                    "inode_current": 0,
+                    "block_time_limit": 0,
+                    "inode_time_limit": 0,
+                },
+            },
+            "group_quotas": {},
+        },
+    }
+    _mock_hosts["host4"] = {"devices": host4_devices, "users": host4_users, "groups": host4_groups}
+
 
 def get_devices_mock() -> dict[str, dict[str, Any]]:
     """Return devices from mock state (same shape as quota.get_devices())."""
@@ -519,13 +620,26 @@ def get_devices_mock() -> dict[str, dict[str, Any]]:
 
 
 def collect_remote_quotas_mock() -> list[dict[str, Any]]:
-    """Build list of devices with user/group quotas from mock state (same shape as collect_remote_quotas)."""
+    """Build list of devices with user/group quotas from mock state (same shape as collect_remote_quotas).
+    If USE_DOCKER_QUOTA is enabled, includes Docker device from mock state.
+    """
     results: list[dict[str, Any]] = []
     state = _get_mock_state()
     users = state["users"]
     groups = state["groups"]
 
+    # Check if Docker quota should be included
+    try:
+        from flask import current_app
+        use_docker_quota = current_app.config.get("USE_DOCKER_QUOTA", False) if current_app else False
+    except RuntimeError:
+        use_docker_quota = False
+
     for dev in state["devices"].values():
+        # Skip Docker device if not enabled (will be added separately if enabled)
+        if dev["name"] == "docker" and not use_docker_quota:
+            continue
+
         device: dict[str, Any] = {
             "name": dev["name"],
             "mount_points": list(dev["mount_points"]),
@@ -541,6 +655,8 @@ def collect_remote_quotas_mock() -> list[dict[str, Any]]:
             device["group_quota_format"] = dev["group_quota_format"]
         if dev.get("group_quota_info") is not None:
             device["group_quota_info"] = dict(dev["group_quota_info"])
+        if dev.get("unattributed_usage") is not None:
+            device["unattributed_usage"] = dev["unattributed_usage"]
 
         user_quotas = dev.get("user_quotas") or {}
         if user_quotas:
@@ -555,7 +671,7 @@ def collect_remote_quotas_mock() -> list[dict[str, Any]]:
                 for gid, q in group_quotas.items()
             ]
 
-        if device.get("user_quotas") or device.get("group_quotas"):
+        if device.get("user_quotas") or device.get("group_quotas") or dev["name"] == "docker":
             results.append(device)
 
     return results
@@ -571,15 +687,37 @@ def _uid_for_username_mock(username: str) -> int:
 
 
 def collect_remote_quotas_for_uid_mock(uid: int) -> list[dict[str, Any]]:
-    """Build list of devices where the given user has a quota (same shape as collect_remote_quotas_for_uid)."""
+    """Build list of devices where the given user has a quota (same shape as collect_remote_quotas_for_uid).
+    If USE_DOCKER_QUOTA is enabled, includes Docker device if user has quota or usage.
+    """
     results: list[dict[str, Any]] = []
     state = _get_mock_state()
     users = state["users"]
 
+    # Check if Docker quota should be included
+    try:
+        from flask import current_app
+        use_docker_quota = current_app.config.get("USE_DOCKER_QUOTA", False) if current_app else False
+    except RuntimeError:
+        use_docker_quota = False
+
     for dev in state["devices"].values():
-        user_quotas = dev.get("user_quotas") or {}
-        if uid not in user_quotas:
+        # Skip Docker device if not enabled
+        if dev["name"] == "docker" and not use_docker_quota:
             continue
+
+        user_quotas = dev.get("user_quotas") or {}
+        # For Docker device, include if user has quota OR usage
+        if dev["name"] == "docker":
+            # Check if user has quota or usage
+            has_quota = uid in user_quotas
+            # Also check if there's any usage (would need to check all users' usage)
+            # For simplicity, include if user has quota
+            if not has_quota:
+                continue
+        elif uid not in user_quotas:
+            continue
+
         device: dict[str, Any] = {
             "name": dev["name"],
             "mount_points": list(dev["mount_points"]),
@@ -591,6 +729,8 @@ def collect_remote_quotas_for_uid_mock(uid: int) -> list[dict[str, Any]]:
             device["user_quota_format"] = dev["user_quota_format"]
         if dev.get("user_quota_info") is not None:
             device["user_quota_info"] = dict(dev["user_quota_info"])
+        if dev.get("unattributed_usage") is not None:
+            device["unattributed_usage"] = dev["unattributed_usage"]
         q = dict(user_quotas[uid])
         q["uid"] = uid
         q["name"] = users.get(uid, f"user{uid}")
@@ -608,21 +748,36 @@ def set_user_quota_mock(
     inode_hard_limit: int | None,
     inode_soft_limit: int | None,
 ) -> None:
-    """Update mock user quota for device/uid. None means leave unchanged."""
+    """Update mock user quota for device/uid. None means leave unchanged.
+    For Docker device, inode limits are ignored.
+    """
     devices = _get_mock_state()["devices"]
     if device_name not in devices:
         raise ValueError(f"device not found: {device_name}")
     dev = devices[device_name]
     user_quotas = dev.get("user_quotas") or {}
     if uid not in user_quotas:
-        user_quotas[uid] = dict(zip(
-            [
-                "block_hard_limit", "block_soft_limit", "block_current",
-                "inode_hard_limit", "inode_soft_limit", "inode_current",
-                "block_time_limit", "inode_time_limit",
-            ],
-            _DEFAULT_QUOTA,
-        ))
+        if device_name == "docker":
+            # Docker quota: only block limits, inode = 0
+            user_quotas[uid] = {
+                "block_hard_limit": 0,
+                "block_soft_limit": 0,
+                "block_current": 0,
+                "inode_hard_limit": 0,
+                "inode_soft_limit": 0,
+                "inode_current": 0,
+                "block_time_limit": 0,
+                "inode_time_limit": 0,
+            }
+        else:
+            user_quotas[uid] = dict(zip(
+                [
+                    "block_hard_limit", "block_soft_limit", "block_current",
+                    "inode_hard_limit", "inode_soft_limit", "inode_current",
+                    "block_time_limit", "inode_time_limit",
+                ],
+                _DEFAULT_QUOTA,
+            ))
     q = user_quotas[uid]
     if block_hard_limit is not None:
         q["block_hard_limit"] = block_hard_limit

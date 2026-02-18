@@ -30,15 +30,22 @@ function pct(total: number, value: number): number {
 interface DeviceUsageProps {
   usage: DiskUsage
   userQuotas?: UserQuota[]
+  /** When set (e.g. Docker with unattributed usage), used as label for the "other" segment instead of otherUsageLabel. */
+  otherUsageLabelOverride?: string
+  /** When set (e.g. Docker), size in bytes for the "other" segment. If not set, other = used - trackedUsage (pyquota/ZFS). */
+  otherUsageBytes?: number
 }
 
-export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
+export function DeviceUsage({ usage, userQuotas, otherUsageLabelOverride, otherUsageBytes }: DeviceUsageProps) {
   const { t } = useI18n()
+  const otherLabel = otherUsageLabelOverride ?? t('otherUsageLabel')
   const { used, total, free: userFree } = usage
   const physicalFree = total - used
   const rootReserved = Math.max(0, physicalFree - userFree)
   const hasFree = userFree > 0
-  const displayPercent = total > 0 ? Math.round((used / total) * 100) : 0
+  /** For Docker, used = attributed only; total consumption = used + (otherUsageBytes ?? 0). For pyquota/ZFS, used = device used. */
+  const displayUsed = otherUsageBytes != null ? used + otherUsageBytes : used
+  const displayPercent = total > 0 ? Math.round((displayUsed / total) * 100) : 0
 
   const simple = (
     <Stack gap={4}>
@@ -52,7 +59,7 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
       />
       <Group gap="xs">
         <Text size="xs" c="dimmed">
-          <BlockSize size={used} /> / <BlockSize size={total} /> ({displayPercent}%)
+          <BlockSize size={displayUsed} /> / <BlockSize size={total} /> ({Math.round(displayPercent)}%)
         </Text>
         {hasFree ? (
           <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>
@@ -68,7 +75,7 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
   }
 
   const { reservedSoft, reservedHard, trackedUsage } = computeReservedAndTracked(userQuotas)
-  const otherUsage = Math.max(0, used - trackedUsage)
+  const otherUsage = otherUsageBytes != null ? Math.max(0, otherUsageBytes) : Math.max(0, used - trackedUsage)
   // Demand = other + root reserved + quota reserved; over-sold when demand > total (exceeds user-addressable pool)
   const totalDemandSoft = otherUsage + rootReserved + reservedSoft
   const totalDemandHard = otherUsage + rootReserved + reservedHard
@@ -243,7 +250,7 @@ export function DeviceUsage({ usage, userQuotas }: DeviceUsageProps) {
         )}
         <Group gap={4}>
           <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-gray-5)' }} />
-          <Text size="xs" c="dimmed">{t('otherUsageLabel')}</Text>
+          <Text size="xs" c="dimmed">{otherLabel}</Text>
         </Group>
         <Group gap={4}>
           <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-blue-5)' }} />
