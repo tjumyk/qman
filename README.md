@@ -146,10 +146,10 @@ CONFIG_PATH=config.slave.json python run.py
 
 ```bash
 # Terminal 3a: Worker (processes enforcement tasks)
-CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app worker -Q qman.docker
+CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app worker -Q qman.docker --concurrency=4 --loglevel=info
 
 # Terminal 3b: Beat scheduler (runs periodic tasks: enforcement every 5min, sync every 2min)
-CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app beat
+CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app beat --loglevel=info
 ```
 
 **Note:** In mock mode (`MOCK_QUOTA: true`), Celery is not required (no enforcement runs, but quota display works).
@@ -182,10 +182,10 @@ CONFIG_PATH=config.slave.json gunicorn -w 4 -b 0.0.0.0:8436 "run:app"
 
 ```bash
 # Worker (run multiple instances for high availability)
-CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app worker -Q qman.docker --concurrency=4
+CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app worker -Q qman.docker --concurrency=4 --loglevel=info
 
 # Beat scheduler (run single instance - only one beat process per slave)
-CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app beat
+CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app beat --loglevel=info
 ```
 
 **Production deployment notes:**
@@ -319,10 +319,10 @@ When **USE_DOCKER_QUOTA** is `true`, the slave exposes a virtual “Docker” de
 - **Run worker and beat:** Both load **CONFIG_PATH** so the same config file drives Flask and Celery:
   ```bash
   # Worker (processes enforcement tasks)
-  CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app worker -Q qman.docker
+  CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app worker -Q qman.docker --concurrency=4 --loglevel=info
   
   # Beat scheduler (runs periodic tasks: enforcement every 5min, sync every 2min)
-  CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app beat
+  CONFIG_PATH=config.slave.json celery -A app.celery_app:celery_app beat --loglevel=info
   ```
   **Note:** Set `CONFIG_PATH` to your slave config file (e.g. `config.slave.json`) so worker and beat load slave settings; if unset, `config.json` is used. In mock mode (`MOCK_QUOTA: true`), Celery is not required (no enforcement runs, but quota display works).
 - **Image usage:** Both container writable layers and image layers count toward quota. Image layers are attributed to the first creator (first puller/builder/committer/importer/loader). See `docs/DOCKER_IMAGE_QUOTA_DESIGN.md` for details on layer-level attribution and shared-image handling.

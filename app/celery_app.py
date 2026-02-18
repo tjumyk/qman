@@ -40,16 +40,37 @@ def make_celery(app=None) -> Celery:
             },
         }
     else:
+        import json
         import os
-        celery_app.conf.broker_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-        celery_app.conf.result_backend = os.environ.get("CELERY_RESULT_BACKEND") or celery_app.conf.broker_url
+        broker_url = os.environ.get("CELERY_BROKER_URL")
+        result_backend = os.environ.get("CELERY_RESULT_BACKEND")
+        enforce_interval = _DEFAULT_INTERVAL
+        config_path = os.environ.get("CONFIG_PATH", "config.json")
+        if config_path and os.path.isfile(config_path):
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                if broker_url is None:
+                    broker_url = data.get("CELERY_BROKER_URL")
+                if result_backend is None:
+                    result_backend = data.get("CELERY_RESULT_BACKEND")
+                if data.get("DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS") is not None:
+                    enforce_interval = float(data["DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS"])
+            except Exception as e:
+                logger.warning("Could not load Celery config from %s: %s", config_path, e)
+        if broker_url is None:
+            broker_url = "redis://localhost:6379/0"
+        if result_backend is None:
+            result_backend = broker_url
+        celery_app.conf.broker_url = broker_url
+        celery_app.conf.result_backend = result_backend
         celery_app.conf.task_serializer = "json"
         celery_app.conf.accept_content = ["json"]
         celery_app.conf.result_serializer = "json"
         celery_app.conf.beat_schedule = {
             "enforce-docker-quota-periodic": {
                 "task": "app.tasks.docker_quota_tasks.enforce_docker_quota",
-                "schedule": schedule(run_every=_DEFAULT_INTERVAL),
+                "schedule": schedule(run_every=enforce_interval),
                 "options": {"queue": "qman.docker"},
             },
             "sync-docker-attribution-periodic": {
