@@ -83,5 +83,14 @@ def make_celery(app=None) -> Celery:
 
 
 # Global instance; make_celery(flask_app) updates its config when USE_DOCKER_QUOTA
-celery_app = Celery("qman.slave")
+#
+# IMPORTANT: The worker must import task modules so @celery_app.task decorators run
+# and tasks are registered. Without this, beat can enqueue tasks that the worker
+# treats as "unregistered".
+celery_app = Celery(
+    "qman.slave",
+    include=[
+        "app.tasks.docker_quota_tasks",
+    ],
+)
 make_celery()  # set defaults
