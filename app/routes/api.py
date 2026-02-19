@@ -115,7 +115,7 @@ def _fetch_all_quotas() -> dict[str, Any]:
         "Fetched quotas from %d slave(s) in %.2fs (per-slave: %s)",
         len(slaves),
         total_time,
-        ", ".join(f"{sid}={t:.2fs}" for sid, t in slave_times.items()),
+        ", ".join(f"{sid}={t:.2f}s" for sid, t in slave_times.items()),
     )
     return results
 
@@ -165,7 +165,7 @@ def _fetch_quotas_for_uid(uid: int) -> dict[str, Any]:
         uid,
         len(slaves),
         total_time,
-        ", ".join(f"{sid}={t:.2fs}" for sid, t in slave_times.items()),
+        ", ".join(f"{sid}={t:.2f}s" for sid, t in slave_times.items()),
     )
     return results
 
@@ -693,7 +693,7 @@ def register_api_routes(app: Any) -> None:
             len(slaves),
             total_time,
             len(result),
-            ", ".join(f"{sid}={t:.2fs}" for sid, t in slave_times.items()),
+            ", ".join(f"{sid}={t:.2f}s" for sid, t in slave_times.items()),
         )
         db = SessionLocal()
         try:
