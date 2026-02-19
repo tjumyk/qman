@@ -180,7 +180,7 @@ def sync_from_docker_events() -> int:
             since_ts = float(last_s)
         except ValueError:
             pass
-    events = collect_events_since(since_ts, max_seconds=5.0, max_events=500)
+    events = collect_events_since(since_ts, max_seconds=90.0, max_events=500)
     audit_events = parse_audit_logs(keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK)
     df = get_system_df()
     container_sizes = df.get("containers") or {}

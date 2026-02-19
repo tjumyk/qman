@@ -1,4 +1,11 @@
-"""Docker API/CLI client for listing containers, images, and disk usage (slave)."""
+"""Docker API/CLI client for listing containers, images, and disk usage (slave).
+
+Note on timeouts: Docker API requests can take ~1 minute to complete. The collect_events_since()
+function has a configurable timeout (default 90s). Other Docker SDK calls (list_containers,
+get_system_df, etc.) use the SDK's default timeout (no timeout by default, waits indefinitely).
+If you need explicit timeouts for all Docker operations, configure the Docker client with
+timeout parameters when creating it.
+"""
 
 from typing import Any
 
@@ -115,13 +122,16 @@ def get_system_df() -> dict[str, Any]:
 
 
 def stop_container(container_id: str) -> bool:
-    """Stop a container. Returns True on success."""
+    """Stop a container. Returns True on success.
+    
+    Note: Container stop timeout is 60s to allow graceful shutdown even if Docker API is slow.
+    """
     try:
         import docker
         client = docker.from_env()
         try:
             c = client.containers.get(container_id)
-            c.stop(timeout=10)
+            c.stop(timeout=60)
             return True
         finally:
             client.close()
@@ -130,9 +140,11 @@ def stop_container(container_id: str) -> bool:
         return False
 
 
-def collect_events_since(since_ts: float, max_seconds: float = 10.0, max_events: int = 2000) -> list[dict[str, Any]]:
+def collect_events_since(since_ts: float, max_seconds: float = 90.0, max_events: int = 2000) -> list[dict[str, Any]]:
     """Collect Docker API events since given Unix timestamp. Returns list of {type, action, id, time_nano, ...}.
     Stops after max_seconds or when max_events is reached (events() is a blocking generator).
+    
+    Note: Docker API requests can take ~1 minute, so default max_seconds is 90 to avoid early abort.
     """
     try:
         import datetime
@@ -167,7 +179,8 @@ def collect_events_since(since_ts: float, max_seconds: float = 10.0, max_events:
         t.start()
         done.wait(timeout=max_seconds)
         done.set()
-        t.join(timeout=2.0)
+        # Allow extra time for thread cleanup if Docker API is slow
+        t.join(timeout=5.0)
         return out
     except Exception as e:
         logger.warning("Docker events failed: %s", e)

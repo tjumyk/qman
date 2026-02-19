@@ -95,7 +95,7 @@ def _post_events_to_master(events: list[dict[str, Any]], host_id: str, master_ur
             url,
             json={"host_id": host_id, "events": events},
             headers={"X-API-Key": secret, "Content-Type": "application/json"},
-            timeout=10,
+            timeout=60,  # Increased from 10s: master API may be slow, and events payload can be large
         )
         if resp.status_code // 100 != 2:
             logger.warning("Master event callback returned %s: %s", resp.status_code, resp.text)
@@ -170,7 +170,12 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
     return {"enforced": total_removed, "events": len(events)}
 
 
-@celery_app.task(name="app.tasks.docker_quota_tasks.sync_docker_attribution", bind=True)
+@celery_app.task(
+    name="app.tasks.docker_quota_tasks.sync_docker_attribution",
+    bind=True,
+    time_limit=600,  # 10 minutes: Docker API calls (~1 min), collect_events_since (90s), get_system_df, multiple image layer queries
+    soft_time_limit=540,  # 9 minutes: warn before hard limit
+)
 def sync_docker_attribution(self: Any) -> dict[str, int]:
     """Sync container/image attribution from audit logs and Docker events (container create, image pull)."""
     from app.docker_quota.attribution_sync import run_sync_docker_attribution
