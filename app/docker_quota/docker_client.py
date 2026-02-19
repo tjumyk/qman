@@ -30,23 +30,37 @@ def get_docker_data_root(base_url: str = "unix://var/run/docker.sock") -> str:
 
 
 def list_containers(all_containers: bool = True) -> list[dict[str, Any]]:
-    """List containers (running and stopped). Returns list of {id, name, image_id, created, labels}."""
+    """List containers (running and stopped). Returns list of {id, name, image_id, created, labels}.
+    
+    Note: Avoids accessing c.image.id (which triggers expensive inspect_image API call). Instead uses
+    image ID from container attributes (c.attrs) which is already loaded.
+    """
     try:
         import docker
         client = docker.from_env()
         try:
             containers = client.containers.list(all=all_containers)
-            return [
-                {
+            result = []
+            for c in containers:
+                # Get image ID from attrs to avoid lazy-loading API call (c.image.id triggers inspect_image)
+                # Image ID is in c.attrs["Image"] (short ID) or c.attrs["Config"]["Image"] (image name)
+                # For full image ID, we'd need inspect, but short ID is usually sufficient
+                image_id = None
+                attrs = c.attrs
+                if "Image" in attrs:
+                    image_id = attrs["Image"]  # Short image ID (e.g. "sha256:abc123...")
+                elif "Config" in attrs and "Image" in attrs["Config"]:
+                    # Fallback: image name/tag (less ideal but avoids API call)
+                    image_id = attrs["Config"]["Image"]
+                result.append({
                     "id": c.id,
                     "short_id": c.short_id,
                     "name": (c.name or ""),
-                    "image": (c.image.id if c.image else None),
-                    "created": c.attrs.get("Created"),
-                    "labels": c.attrs.get("Labels") or {},
-                }
-                for c in containers
-            ]
+                    "image": image_id,
+                    "created": attrs.get("Created"),
+                    "labels": attrs.get("Labels") or {},
+                })
+            return result
         finally:
             client.close()
     except Exception as e:

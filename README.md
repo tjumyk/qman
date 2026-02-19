@@ -166,15 +166,61 @@ cd frontend && npm run dev
 **Master server:**
 
 ```bash
+# Basic (for low-traffic deployments)
 gunicorn -w 4 -b 0.0.0.0:8436 "run:app"
-# Or with custom config: CONFIG_PATH=config.prod.json gunicorn -w 4 -b 0.0.0.0:8436 "run:app"
+
+# Recommended production settings (handles Docker API slowness, better logging)
+gunicorn \
+  -w 4 \
+  -b 0.0.0.0:8436 \
+  --timeout 180 \
+  --graceful-timeout 30 \
+  --max-requests 1000 \
+  --max-requests-jitter 50 \
+  --preload \
+  --access-logfile - \
+  --error-logfile - \
+  --log-level info \
+  --name qman-master \
+  "run:app"
+
+# Or with custom config:
+CONFIG_PATH=config.prod.json gunicorn -w 4 -b 0.0.0.0:8436 --timeout 180 --preload "run:app"
 ```
 
 **Slave server:**
 
 ```bash
+# Basic
 CONFIG_PATH=config.slave.json gunicorn -w 4 -b 0.0.0.0:8436 "run:app"
+
+# Recommended production settings (higher timeout for Docker quota operations)
+CONFIG_PATH=config.slave.json gunicorn \
+  -w 4 \
+  -b 0.0.0.0:8436 \
+  --timeout 180 \
+  --graceful-timeout 30 \
+  --max-requests 1000 \
+  --max-requests-jitter 50 \
+  --preload \
+  --access-logfile - \
+  --error-logfile - \
+  --log-level info \
+  --name qman-slave \
+  "run:app"
 ```
+
+**Gunicorn parameter explanations:**
+- `-w 4`: Number of worker processes (adjust based on CPU cores: `(2 × CPU cores) + 1`)
+- `--timeout 180`: Worker timeout in seconds (default 30s; increased for Docker API calls that can take ~1 minute)
+- `--graceful-timeout 30`: Time to wait for workers to finish requests during restart (default 30s)
+- `--max-requests 1000`: Restart worker after N requests to prevent memory leaks (default: no limit)
+- `--max-requests-jitter 50`: Randomize max-requests to avoid all workers restarting simultaneously
+- `--preload`: Load app code before forking workers (saves memory, but can't reload code without full restart)
+- `--access-logfile -`: Log access to stdout (use `--access-logfile /var/log/qman/access.log` for file)
+- `--error-logfile -`: Log errors to stderr (use `--error-logfile /var/log/qman/error.log` for file)
+- `--log-level info`: Logging verbosity (debug, info, warning, error, critical)
+- `--name qman-master/slave`: Process name for easier identification in `ps`/monitoring
 
 **Docker quota worker (production):**
 
