@@ -162,3 +162,23 @@ export async function resolveHostUser(hostId: string, username: string): Promise
   )
   return resolveUserResponseSchema.parse(data)
 }
+
+export type HostPingStatus = {
+  status: 'ok' | 'error'
+  latency_ms?: number
+  error?: string
+}
+
+export type HostPingResponse = Record<string, HostPingStatus>
+
+export async function pingHosts(): Promise<HostPingResponse> {
+  const { data } = await api.get<unknown>('hosts/ping')
+  return z.record(
+    z.string(),
+    z.object({
+      status: z.enum(['ok', 'error']),
+      latency_ms: z.number().optional(),
+      error: z.string().optional(),
+    })
+  ).parse(data)
+}

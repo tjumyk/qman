@@ -52,6 +52,12 @@ def _merge_quota_results_for_uid(
 def register_remote_api_routes(app: Any) -> None:
     """Register /remote-api/* routes on the Flask app."""
 
+    @app.route("/remote-api/ping")
+    @requires_api_key
+    def remote_ping() -> Any:
+        """Lightweight ping endpoint for health checks. Returns {"status": "ok"}."""
+        return jsonify({"status": "ok"})
+
     @app.route("/remote-api/users/resolve")
     @requires_api_key
     def remote_resolve_user() -> Any:

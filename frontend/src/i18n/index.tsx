@@ -41,6 +41,8 @@ const translations: Record<Locale, Record<string, string>> = {
     statusOk: 'OK',
     statusNearLimit: 'Near limit',
     statusOverLimit: 'Over limit',
+    online: 'Online',
+    offline: 'Offline',
     // Errors & loading
     error: 'Error',
     failedToLoadQuotas: 'Failed to load quotas',
@@ -169,6 +171,8 @@ const translations: Record<Locale, Record<string, string>> = {
     statusOk: '正常',
     statusNearLimit: '接近限制',
     statusOverLimit: '超出限制',
+    online: '在线',
+    offline: '离线',
     error: '错误',
     failedToLoadQuotas: '加载配额失败',
     missingHost: '缺少主机',

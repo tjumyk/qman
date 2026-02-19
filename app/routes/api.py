@@ -300,6 +300,33 @@ def register_api_routes(app: Any) -> None:
         slaves = current_app.config.get("SLAVES", [])
         return jsonify([{"id": s["id"]} for s in slaves])
 
+    @app.route("/api/hosts/ping")
+    @oauth.requires_login
+    def ping_hosts() -> tuple[Any, int] | Any:
+        """Ping all slaves to check connectivity. Returns { host_id: { status: "ok"|"error", latency_ms?: number, error?: string } }."""
+        import time
+        slaves = current_app.config.get("SLAVES", [])
+        results: dict[str, Any] = {}
+        for slave in slaves:
+            host_id = slave["id"]
+            start_time = time.time()
+            try:
+                resp = requests.get(
+                    f"{slave['url']}/remote-api/ping",
+                    auth=make_auth(slave),
+                    timeout=5,  # Short timeout for ping
+                )
+                latency_ms = int((time.time() - start_time) * 1000)
+                if resp.status_code == 200:
+                    results[host_id] = {"status": "ok", "latency_ms": latency_ms}
+                else:
+                    results[host_id] = {"status": "error", "error": f"HTTP {resp.status_code}"}
+            except requests.exceptions.Timeout:
+                results[host_id] = {"status": "error", "error": "timeout"}
+            except Exception as e:
+                results[host_id] = {"status": "error", "error": str(e)}
+        return jsonify(results)
+
     @app.route("/api/hosts/<string:host_id>/users")
     @oauth.requires_login
     def get_host_users(host_id: str) -> tuple[Any, int] | Any:
