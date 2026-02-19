@@ -6,9 +6,17 @@ import { resolveUserResponseSchema } from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
 
+// Timeout configuration (in milliseconds) matching backend operation-specific timeouts
+// Note: axios timeout is total timeout (connect + read), not separate like requests library
+const TIMEOUT_PING = 5000 // 5s for health checks
+const TIMEOUT_QUOTA = 180000 // 180s for quota fetching (Docker operations can take ~1 min)
+const TIMEOUT_USER_RESOLVE = 10000 // 10s for user resolution
+const TIMEOUT_SET_QUOTA = 120000 // 120s for setting quota (Docker quota setting can be slow)
+const TIMEOUT_DEFAULT = 60000 // 60s default for other operations
+
 const api = axios.create({
   baseURL: '/api',
-  timeout: 10000,
+  timeout: TIMEOUT_DEFAULT,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,
 })
@@ -53,7 +61,7 @@ export async function fetchMeQuotas(params?: MeQuotasParams): Promise<QuotasResp
   if (params?.hostUserName) searchParams.set('host_user_name', params.hostUserName)
   const qs = searchParams.toString()
   const url = qs ? `me/quotas?${qs}` : 'me/quotas'
-  const { data } = await api.get<unknown>(url)
+  const { data } = await api.get<unknown>(url, { timeout: TIMEOUT_QUOTA })
   return quotasResponseSchema.parse(data)
 }
 
@@ -79,7 +87,7 @@ export async function deleteMeMapping(hostId: string, hostUserName: string): Pro
 }
 
 export async function fetchQuotas(): Promise<QuotasResponse> {
-  const { data } = await api.get<unknown>('quotas')
+  const { data } = await api.get<unknown>('quotas', { timeout: TIMEOUT_QUOTA })
   return quotasResponseSchema.parse(data)
 }
 
@@ -110,7 +118,7 @@ export async function fetchAdminMappings(): Promise<AdminMapping[]> {
 }
 
 export async function fetchAdminHostUsers(): Promise<AdminHostUser[]> {
-  const { data } = await api.get<unknown>('admin/host-users')
+  const { data } = await api.get<unknown>('admin/host-users', { timeout: TIMEOUT_QUOTA })
   return z.array(adminHostUserSchema).parse(data)
 }
 
@@ -150,7 +158,8 @@ export async function setUserQuota(
 ): Promise<UserQuota> {
   const { data } = await api.put<unknown>(
     `quotas/${encodeURIComponent(host)}/users/${uid}?device=${encodeURIComponent(device)}`,
-    body
+    body,
+    { timeout: TIMEOUT_SET_QUOTA }
   )
   return userQuotaSchema.parse(data)
 }
@@ -158,7 +167,7 @@ export async function setUserQuota(
 export async function resolveHostUser(hostId: string, username: string): Promise<ResolveUserResponse> {
   const { data } = await api.get<unknown>(
     `quotas/${encodeURIComponent(hostId)}/users/resolve`,
-    { params: { username: username.trim() } }
+    { params: { username: username.trim() }, timeout: TIMEOUT_USER_RESOLVE }
   )
   return resolveUserResponseSchema.parse(data)
 }
@@ -172,7 +181,7 @@ export type HostPingStatus = {
 export type HostPingResponse = Record<string, HostPingStatus>
 
 export async function pingHosts(): Promise<HostPingResponse> {
-  const { data } = await api.get<unknown>('hosts/ping')
+  const { data } = await api.get<unknown>('hosts/ping', { timeout: TIMEOUT_PING })
   return z.record(
     z.string(),
     z.object({
