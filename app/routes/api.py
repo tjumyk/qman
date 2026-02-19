@@ -10,7 +10,17 @@ from flask import current_app, g, jsonify, request
 from app.db import SessionLocal
 from app.models_db import OAuthHostUserMapping, OAuthUserCache
 
-_REMOTE_API_TIMEOUT = 3  # seconds
+# Timeout configuration: (connect_timeout, read_timeout) in seconds
+# Using separate timeouts allows faster detection of connection failures while allowing
+# longer time for slow operations (e.g., Docker quota queries) to complete.
+_REMOTE_API_TIMEOUT_PING = (5, 5)  # Fast timeout for health checks
+_REMOTE_API_TIMEOUT_QUOTA = (10, 180)  # Quota fetching: 10s connect, 180s read (Docker operations can take ~1 min)
+_REMOTE_API_TIMEOUT_USER_RESOLVE = (5, 10)  # User resolution: fast operation
+_REMOTE_API_TIMEOUT_SET_QUOTA = (10, 120)  # Setting quota: 10s connect, 120s read (Docker quota setting can be slow)
+_REMOTE_API_TIMEOUT_DEFAULT = (10, 60)  # Default for other operations: 10s connect, 60s read
+
+# Backward compatibility: use default for code that hasn't been updated yet
+_REMOTE_API_TIMEOUT = _REMOTE_API_TIMEOUT_DEFAULT
 
 # Host user name: non-empty, printable ASCII (no control chars). Relaxed to allow letters, numbers, dash, underscore, dot.
 _HOST_USER_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,255}$")
@@ -39,12 +49,12 @@ def _fetch_quotas_for_host_user(host_id: str, host_user_name: str) -> dict[str, 
         resp = requests.get(
             f"{slave['url']}/remote-api/quotas/users/by-name/{encoded_name}",
             auth=make_auth(slave),
-            timeout=_REMOTE_API_TIMEOUT,
+            timeout=_REMOTE_API_TIMEOUT_QUOTA,
         )
         if resp.status_code // 100 != 2:
             return {host_id: {"error": resp.json() if resp.content else {"msg": resp.reason}}}
         return {host_id: {"results": resp.json()}}
-    except OSError as e:
+    except (OSError, requests.exceptions.RequestException) as e:
         return {host_id: {"error": {"msg": str(e)}}}
 
 
@@ -58,13 +68,13 @@ def _fetch_all_quotas() -> dict[str, Any]:
             resp = requests.get(
                 f"{slave_url}/remote-api/quotas",
                 auth=make_auth(slave),
-                timeout=_REMOTE_API_TIMEOUT,
+                timeout=_REMOTE_API_TIMEOUT_QUOTA,
             )
             if resp.status_code // 100 != 2:
                 results[slave_id] = {"error": resp.json()}
             else:
                 results[slave_id] = {"results": resp.json()}
-        except OSError as e:
+        except (OSError, requests.exceptions.RequestException) as e:
             results[slave_id] = {"error": {"msg": str(e)}}
     return results
 
@@ -79,13 +89,13 @@ def _fetch_quotas_for_uid(uid: int) -> dict[str, Any]:
             resp = requests.get(
                 f"{slave_url}/remote-api/quotas/users/{uid}",
                 auth=make_auth(slave),
-                timeout=_REMOTE_API_TIMEOUT,
+                timeout=_REMOTE_API_TIMEOUT_QUOTA,
             )
             if resp.status_code // 100 != 2:
                 results[slave_id] = {"error": resp.json()}
             else:
                 results[slave_id] = {"results": resp.json()}
-        except OSError as e:
+        except (OSError, requests.exceptions.RequestException) as e:
             results[slave_id] = {"error": {"msg": str(e)}}
     return results
 
@@ -256,13 +266,13 @@ def register_api_routes(app: Any) -> None:
             return jsonify(msg="username query parameter required"), 400
         try:
             url = f"{slave['url']}/remote-api/users/resolve?username={urllib.parse.quote(username)}"
-            resp = requests.get(url, auth=make_auth(slave), timeout=_REMOTE_API_TIMEOUT)
+            resp = requests.get(url, auth=make_auth(slave), timeout=_REMOTE_API_TIMEOUT_USER_RESOLVE)
             if resp.status_code == 404:
                 return jsonify(msg=resp.json().get("msg", "user not found")), 404
             if resp.status_code // 100 != 2:
                 return jsonify(msg=resp.json().get("msg", "resolve failed")), resp.status_code
             return jsonify(resp.json())
-        except OSError as e:
+        except (OSError, requests.exceptions.RequestException) as e:
             return jsonify(msg=str(e)), 502
 
     @app.route("/api/quotas/<string:slave_id>/users/<int:uid>", methods=["PUT"])
@@ -287,10 +297,10 @@ def register_api_routes(app: Any) -> None:
                 url,
                 json=request.get_json(silent=True) or {},
                 auth=make_auth(slave),
-                timeout=_REMOTE_API_TIMEOUT,
+                timeout=_REMOTE_API_TIMEOUT_SET_QUOTA,
             )
             return jsonify(resp.json()), resp.status_code
-        except OSError as e:
+        except (OSError, requests.exceptions.RequestException) as e:
             return jsonify(msg=str(e)), 500
 
     @app.route("/api/hosts")
@@ -314,7 +324,7 @@ def register_api_routes(app: Any) -> None:
                 resp = requests.get(
                     f"{slave['url']}/remote-api/ping",
                     auth=make_auth(slave),
-                    timeout=5,  # Short timeout for ping
+                    timeout=_REMOTE_API_TIMEOUT_PING,
                 )
                 latency_ms = int((time.time() - start_time) * 1000)
                 if resp.status_code == 200:
@@ -338,9 +348,9 @@ def register_api_routes(app: Any) -> None:
             resp = requests.get(
                 f"{slave['url']}/remote-api/quotas",
                 auth=make_auth(slave),
-                timeout=_REMOTE_API_TIMEOUT,
+                timeout=_REMOTE_API_TIMEOUT_QUOTA,
             )
-        except OSError as e:
+        except (OSError, requests.exceptions.RequestException) as e:
             return jsonify(msg=str(e)), 502
         if resp.status_code // 100 != 2:
             return jsonify(msg="failed to fetch host quotas"), 502
@@ -524,9 +534,9 @@ def register_api_routes(app: Any) -> None:
                 resp = requests.get(
                     f"{slave['url']}/remote-api/quotas",
                     auth=make_auth(slave),
-                    timeout=_REMOTE_API_TIMEOUT,
+                    timeout=_REMOTE_API_TIMEOUT_QUOTA,
                 )
-            except OSError:
+            except (OSError, requests.exceptions.RequestException):
                 continue
             if resp.status_code // 100 != 2:
                 continue
