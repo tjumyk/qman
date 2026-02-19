@@ -92,6 +92,31 @@ def register_remote_api_routes(app: Any) -> None:
         """Lightweight ping endpoint for health checks. Returns {"status": "ok"}."""
         return jsonify({"status": "ok"})
 
+    @app.route("/remote-api/users")
+    @requires_api_key
+    def remote_get_users() -> Any:
+        """Return list of host user names that have quotas (lightweight, no quota details)."""
+        start_time = time.time()
+        users: set[str] = set()
+        
+        if current_app.config.get("MOCK_QUOTA"):
+            from app.quota_mock import _get_mock_state
+            mock_state = _get_mock_state()
+            users.update(mock_state["users"].values())
+            elapsed = time.time() - start_time
+            logger.info("Fetched %d users (mock) in %.2fs", len(users), elapsed)
+        else:
+            from app.quota_common import should_include_uid
+            for entry in pwd.getpwall():
+                uid = entry.pw_uid
+                if should_include_uid(uid):
+                    users.add(entry.pw_name)
+        
+        result = sorted(list(users))
+        total_time = time.time() - start_time
+        logger.info("Fetched %d unique users in %.2fs", len(result), total_time)
+        return jsonify(result)
+
     @app.route("/remote-api/users/resolve")
     @requires_api_key
     def remote_resolve_user() -> Any:

@@ -641,7 +641,7 @@ def register_api_routes(app: Any) -> None:
     @app.route("/api/admin/host-users")
     @oauth.requires_admin
     def get_admin_host_users() -> tuple[Any, int] | Any:
-        """For each slave, collect (host_id, host_user_name) from quotas in parallel; merge with mapped host users."""
+        """For each slave, collect (host_id, host_user_name) using lightweight /remote-api/users endpoint; merge with mapped host users."""
         start_time = time.time()
         seen: set[tuple[str, str]] = set()
         result: list[dict[str, str]] = []
@@ -649,25 +649,25 @@ def register_api_routes(app: Any) -> None:
         logger.info("Fetching host users from %d slave(s)", len(slaves))
         
         def fetch_slave_host_users(slave: dict[str, Any]) -> tuple[str, list[tuple[str, str]], float]:
-            """Fetch host users from a single slave. Returns (host_id, list of (host_id, host_user_name) tuples, elapsed_time)."""
+            """Fetch host users from a single slave using lightweight endpoint. Returns (host_id, list of (host_id, host_user_name) tuples, elapsed_time)."""
             host_id = slave["id"]
             slave_start = time.time()
             host_users: list[tuple[str, str]] = []
             try:
+                # Use lightweight /remote-api/users endpoint instead of /remote-api/quotas
                 resp = requests.get(
-                    f"{slave['url']}/remote-api/quotas",
+                    f"{slave['url']}/remote-api/users",
                     auth=make_auth(slave),
-                    timeout=_REMOTE_API_TIMEOUT_QUOTA,
+                    timeout=_REMOTE_API_TIMEOUT_USER_RESOLVE,  # Should be fast, use shorter timeout
                 )
                 elapsed = time.time() - slave_start
                 if resp.status_code // 100 != 2:
                     logger.warning("Slave %s returned error status %d when fetching host users (took %.2fs)", host_id, resp.status_code, elapsed)
                     return (host_id, host_users, elapsed)
-                for device in resp.json():
-                    for uq in device.get("user_quotas") or []:
-                        name = uq.get("name")
-                        if name:
-                            host_users.append((host_id, name))
+                # Response is a simple list of user names
+                user_names = resp.json()
+                if isinstance(user_names, list):
+                    host_users = [(host_id, name) for name in user_names]
                 logger.debug("Slave %s returned %d host users (took %.2fs)", host_id, len(host_users), elapsed)
                 return (host_id, host_users, elapsed)
             except (OSError, requests.exceptions.RequestException) as e:
