@@ -1,7 +1,9 @@
 """Master API routes: aggregate quotas from slaves, set user quota on slave."""
 
 import re
+import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import requests
@@ -9,6 +11,9 @@ from flask import current_app, g, jsonify, request
 
 from app.db import SessionLocal
 from app.models_db import OAuthHostUserMapping, OAuthUserCache
+from app.utils import get_logger
+
+logger = get_logger(__name__)
 
 # Timeout configuration: (connect_timeout, read_timeout) in seconds
 # Using separate timeouts allows faster detection of connection failures while allowing
@@ -41,62 +46,127 @@ def _slave_by_id(host_id: str) -> dict[str, Any] | None:
 
 def _fetch_quotas_for_host_user(host_id: str, host_user_name: str) -> dict[str, Any]:
     """Fetch quota for one (host_id, host_user_name) from that slave's by-name endpoint. Returns { host_id: { results } or { error } }."""
+    start_time = time.time()
     slave = _slave_by_id(host_id)
     if not slave:
+        logger.warning("Host %s not found for quota fetch", host_id)
         return {host_id: {"error": {"msg": "host not found"}}}
     encoded_name = urllib.parse.quote(host_user_name, safe="")
+    logger.debug("Fetching quota for host=%s, user=%s", host_id, host_user_name)
     try:
         resp = requests.get(
             f"{slave['url']}/remote-api/quotas/users/by-name/{encoded_name}",
             auth=make_auth(slave),
             timeout=_REMOTE_API_TIMEOUT_QUOTA,
         )
+        elapsed = time.time() - start_time
         if resp.status_code // 100 != 2:
+            logger.warning("Slave %s returned error status %d for user=%s (took %.2fs)", host_id, resp.status_code, host_user_name, elapsed)
             return {host_id: {"error": resp.json() if resp.content else {"msg": resp.reason}}}
+        logger.debug("Fetched quota for host=%s, user=%s (took %.2fs)", host_id, host_user_name, elapsed)
         return {host_id: {"results": resp.json()}}
     except (OSError, requests.exceptions.RequestException) as e:
+        elapsed = time.time() - start_time
+        logger.warning("Slave %s request failed for user=%s: %s (took %.2fs)", host_id, host_user_name, str(e), elapsed)
         return {host_id: {"error": {"msg": str(e)}}}
 
 
 def _fetch_all_quotas() -> dict[str, Any]:
-    """Fetch aggregated quotas from all slaves. Returns { host_id: { results: [...] } or { error: {...} } }."""
+    """Fetch aggregated quotas from all slaves in parallel. Returns { host_id: { results: [...] } or { error: {...} } }."""
+    start_time = time.time()
     results: dict[str, Any] = {}
-    for slave in current_app.config["SLAVES"]:
+    slaves = current_app.config["SLAVES"]
+    logger.info("Fetching quotas from %d slave(s)", len(slaves))
+    
+    def fetch_slave_quota(slave: dict[str, Any]) -> tuple[str, dict[str, Any], float]:
+        """Fetch quota from a single slave. Returns (slave_id, result_dict, elapsed_time)."""
         slave_id = slave["id"]
         slave_url = slave["url"]
+        slave_start = time.time()
         try:
             resp = requests.get(
                 f"{slave_url}/remote-api/quotas",
                 auth=make_auth(slave),
                 timeout=_REMOTE_API_TIMEOUT_QUOTA,
             )
+            elapsed = time.time() - slave_start
             if resp.status_code // 100 != 2:
-                results[slave_id] = {"error": resp.json()}
+                logger.warning("Slave %s returned error status %d (took %.2fs)", slave_id, resp.status_code, elapsed)
+                return (slave_id, {"error": resp.json()}, elapsed)
             else:
-                results[slave_id] = {"results": resp.json()}
+                logger.debug("Slave %s quota fetched successfully (took %.2fs)", slave_id, elapsed)
+                return (slave_id, {"results": resp.json()}, elapsed)
         except (OSError, requests.exceptions.RequestException) as e:
-            results[slave_id] = {"error": {"msg": str(e)}}
+            elapsed = time.time() - slave_start
+            logger.warning("Slave %s request failed: %s (took %.2fs)", slave_id, str(e), elapsed)
+            return (slave_id, {"error": {"msg": str(e)}}, elapsed)
+    
+    # Fetch from all slaves in parallel
+    slave_times: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=len(slaves)) as executor:
+        future_to_slave = {executor.submit(fetch_slave_quota, slave): slave for slave in slaves}
+        for future in as_completed(future_to_slave):
+            slave_id, result, elapsed = future.result()
+            results[slave_id] = result
+            slave_times[slave_id] = elapsed
+    
+    total_time = time.time() - start_time
+    logger.info(
+        "Fetched quotas from %d slave(s) in %.2fs (per-slave: %s)",
+        len(slaves),
+        total_time,
+        ", ".join(f"{sid}={t:.2fs}" for sid, t in slave_times.items()),
+    )
     return results
 
 
 def _fetch_quotas_for_uid(uid: int) -> dict[str, Any]:
-    """Fetch per-user quotas from all slaves (one GET per slave, no full scan). Returns same shape as _fetch_all_quotas."""
+    """Fetch per-user quotas from all slaves in parallel (one GET per slave, no full scan). Returns same shape as _fetch_all_quotas."""
+    start_time = time.time()
     results: dict[str, Any] = {}
-    for slave in current_app.config["SLAVES"]:
+    slaves = current_app.config["SLAVES"]
+    logger.info("Fetching quotas for uid=%d from %d slave(s)", uid, len(slaves))
+    
+    def fetch_slave_quota_for_uid(slave: dict[str, Any], uid: int) -> tuple[str, dict[str, Any], float]:
+        """Fetch quota for a uid from a single slave. Returns (slave_id, result_dict, elapsed_time)."""
         slave_id = slave["id"]
         slave_url = slave["url"]
+        slave_start = time.time()
         try:
             resp = requests.get(
                 f"{slave_url}/remote-api/quotas/users/{uid}",
                 auth=make_auth(slave),
                 timeout=_REMOTE_API_TIMEOUT_QUOTA,
             )
+            elapsed = time.time() - slave_start
             if resp.status_code // 100 != 2:
-                results[slave_id] = {"error": resp.json()}
+                logger.warning("Slave %s returned error status %d for uid=%d (took %.2fs)", slave_id, resp.status_code, uid, elapsed)
+                return (slave_id, {"error": resp.json()}, elapsed)
             else:
-                results[slave_id] = {"results": resp.json()}
+                logger.debug("Slave %s quota for uid=%d fetched successfully (took %.2fs)", slave_id, uid, elapsed)
+                return (slave_id, {"results": resp.json()}, elapsed)
         except (OSError, requests.exceptions.RequestException) as e:
-            results[slave_id] = {"error": {"msg": str(e)}}
+            elapsed = time.time() - slave_start
+            logger.warning("Slave %s request failed for uid=%d: %s (took %.2fs)", slave_id, uid, str(e), elapsed)
+            return (slave_id, {"error": {"msg": str(e)}}, elapsed)
+    
+    # Fetch from all slaves in parallel
+    slave_times: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=len(slaves)) as executor:
+        future_to_slave = {executor.submit(fetch_slave_quota_for_uid, slave, uid): slave for slave in slaves}
+        for future in as_completed(future_to_slave):
+            slave_id, result, elapsed = future.result()
+            results[slave_id] = result
+            slave_times[slave_id] = elapsed
+    
+    total_time = time.time() - start_time
+    logger.info(
+        "Fetched quotas for uid=%d from %d slave(s) in %.2fs (per-slave: %s)",
+        uid,
+        len(slaves),
+        total_time,
+        ", ".join(f"{sid}={t:.2fs}" for sid, t in slave_times.items()),
+    )
     return results
 
 
@@ -258,26 +328,36 @@ def register_api_routes(app: Any) -> None:
     @oauth.requires_admin
     def resolve_host_user(slave_id: str) -> tuple[Any, int] | Any:
         """Resolve username to uid and name on the given host. Query param: username=."""
+        start_time = time.time()
         slave = _slave_by_id(slave_id)
         if not slave:
+            logger.warning("Host %s not found for user resolve", slave_id)
             return jsonify(msg="host not found"), 404
         username = (request.args.get("username") or "").strip()
         if not username:
             return jsonify(msg="username query parameter required"), 400
+        logger.debug("Resolving username=%s on host=%s", username, slave_id)
         try:
             url = f"{slave['url']}/remote-api/users/resolve?username={urllib.parse.quote(username)}"
             resp = requests.get(url, auth=make_auth(slave), timeout=_REMOTE_API_TIMEOUT_USER_RESOLVE)
+            elapsed = time.time() - start_time
             if resp.status_code == 404:
+                logger.debug("User %s not found on host=%s (took %.2fs)", username, slave_id, elapsed)
                 return jsonify(msg=resp.json().get("msg", "user not found")), 404
             if resp.status_code // 100 != 2:
+                logger.warning("Slave %s returned error status %d when resolving username=%s (took %.2fs)", slave_id, resp.status_code, username, elapsed)
                 return jsonify(msg=resp.json().get("msg", "resolve failed")), resp.status_code
+            logger.debug("Resolved username=%s on host=%s (took %.2fs)", username, slave_id, elapsed)
             return jsonify(resp.json())
         except (OSError, requests.exceptions.RequestException) as e:
+            elapsed = time.time() - start_time
+            logger.warning("Failed to resolve username=%s on host=%s: %s (took %.2fs)", username, slave_id, str(e), elapsed)
             return jsonify(msg=str(e)), 502
 
     @app.route("/api/quotas/<string:slave_id>/users/<int:uid>", methods=["PUT"])
     @oauth.requires_admin
     def set_user_quota(slave_id: str, uid: int) -> tuple[Any, int]:
+        start_time = time.time()
         slave = None
         for _slave in current_app.config["SLAVES"]:
             if _slave["id"] == slave_id:
@@ -285,12 +365,14 @@ def register_api_routes(app: Any) -> None:
                 break
 
         if not slave:
+            logger.warning("Host %s not found for quota set", slave_id)
             return jsonify(msg="slave not found"), 404
 
         device = request.args.get("device")
         if not device:
             return jsonify(msg="device query parameter required"), 400
 
+        logger.info("Setting quota for host=%s, uid=%d, device=%s", slave_id, uid, device)
         try:
             url = f"{slave['url']}/remote-api/quotas/users/{uid}?device={urllib.parse.quote(device)}"
             resp = requests.put(
@@ -299,8 +381,15 @@ def register_api_routes(app: Any) -> None:
                 auth=make_auth(slave),
                 timeout=_REMOTE_API_TIMEOUT_SET_QUOTA,
             )
+            elapsed = time.time() - start_time
+            if resp.status_code // 100 == 2:
+                logger.info("Successfully set quota for host=%s, uid=%d, device=%s (took %.2fs)", slave_id, uid, device, elapsed)
+            else:
+                logger.warning("Slave %s returned error status %d when setting quota for uid=%d, device=%s (took %.2fs)", slave_id, resp.status_code, uid, device, elapsed)
             return jsonify(resp.json()), resp.status_code
         except (OSError, requests.exceptions.RequestException) as e:
+            elapsed = time.time() - start_time
+            logger.warning("Failed to set quota for host=%s, uid=%d, device=%s: %s (took %.2fs)", slave_id, uid, device, str(e), elapsed)
             return jsonify(msg=str(e)), 500
 
     @app.route("/api/hosts")
@@ -313,28 +402,55 @@ def register_api_routes(app: Any) -> None:
     @app.route("/api/hosts/ping")
     @oauth.requires_login
     def ping_hosts() -> tuple[Any, int] | Any:
-        """Ping all slaves to check connectivity. Returns { host_id: { status: "ok"|"error", latency_ms?: number, error?: string } }."""
-        import time
+        """Ping all slaves to check connectivity in parallel. Returns { host_id: { status: "ok"|"error", latency_ms?: number, error?: string } }."""
+        start_time = time.time()
         slaves = current_app.config.get("SLAVES", [])
+        logger.info("Pinging %d slave(s)", len(slaves))
         results: dict[str, Any] = {}
-        for slave in slaves:
+        
+        def ping_slave(slave: dict[str, Any]) -> tuple[str, dict[str, Any], float]:
+            """Ping a single slave. Returns (host_id, result_dict, elapsed_time)."""
             host_id = slave["id"]
-            start_time = time.time()
+            slave_start = time.time()
             try:
                 resp = requests.get(
                     f"{slave['url']}/remote-api/ping",
                     auth=make_auth(slave),
                     timeout=_REMOTE_API_TIMEOUT_PING,
                 )
-                latency_ms = int((time.time() - start_time) * 1000)
+                elapsed = time.time() - slave_start
+                latency_ms = int(elapsed * 1000)
                 if resp.status_code == 200:
-                    results[host_id] = {"status": "ok", "latency_ms": latency_ms}
+                    logger.debug("Slave %s ping successful (latency: %dms)", host_id, latency_ms)
+                    return (host_id, {"status": "ok", "latency_ms": latency_ms}, elapsed)
                 else:
-                    results[host_id] = {"status": "error", "error": f"HTTP {resp.status_code}"}
+                    logger.warning("Slave %s ping returned error status %d (took %.2fs)", host_id, resp.status_code, elapsed)
+                    return (host_id, {"status": "error", "error": f"HTTP {resp.status_code}"}, elapsed)
             except requests.exceptions.Timeout:
-                results[host_id] = {"status": "error", "error": "timeout"}
+                elapsed = time.time() - slave_start
+                logger.warning("Slave %s ping timeout (took %.2fs)", host_id, elapsed)
+                return (host_id, {"status": "error", "error": "timeout"}, elapsed)
             except Exception as e:
-                results[host_id] = {"status": "error", "error": str(e)}
+                elapsed = time.time() - slave_start
+                logger.warning("Slave %s ping failed: %s (took %.2fs)", host_id, str(e), elapsed)
+                return (host_id, {"status": "error", "error": str(e)}, elapsed)
+        
+        # Ping all slaves in parallel
+        slave_times: dict[str, float] = {}
+        with ThreadPoolExecutor(max_workers=len(slaves)) as executor:
+            future_to_slave = {executor.submit(ping_slave, slave): slave for slave in slaves}
+            for future in as_completed(future_to_slave):
+                host_id, result, elapsed = future.result()
+                results[host_id] = result
+                slave_times[host_id] = elapsed
+        
+        total_time = time.time() - start_time
+        logger.info(
+            "Pinged %d slave(s) in %.2fs (per-slave: %s)",
+            len(slaves),
+            total_time,
+            ", ".join(f"{sid}={t*1000:.0f}ms" for sid, t in slave_times.items()),
+        )
         return jsonify(results)
 
     @app.route("/api/hosts/<string:host_id>/users")
@@ -525,27 +641,60 @@ def register_api_routes(app: Any) -> None:
     @app.route("/api/admin/host-users")
     @oauth.requires_admin
     def get_admin_host_users() -> tuple[Any, int] | Any:
-        """For each slave, collect (host_id, host_user_name) from quotas; merge with mapped host users."""
+        """For each slave, collect (host_id, host_user_name) from quotas in parallel; merge with mapped host users."""
+        start_time = time.time()
         seen: set[tuple[str, str]] = set()
         result: list[dict[str, str]] = []
-        for slave in current_app.config.get("SLAVES", []):
+        slaves = current_app.config.get("SLAVES", [])
+        logger.info("Fetching host users from %d slave(s)", len(slaves))
+        
+        def fetch_slave_host_users(slave: dict[str, Any]) -> tuple[str, list[tuple[str, str]], float]:
+            """Fetch host users from a single slave. Returns (host_id, list of (host_id, host_user_name) tuples, elapsed_time)."""
             host_id = slave["id"]
+            slave_start = time.time()
+            host_users: list[tuple[str, str]] = []
             try:
                 resp = requests.get(
                     f"{slave['url']}/remote-api/quotas",
                     auth=make_auth(slave),
                     timeout=_REMOTE_API_TIMEOUT_QUOTA,
                 )
-            except (OSError, requests.exceptions.RequestException):
-                continue
-            if resp.status_code // 100 != 2:
-                continue
-            for device in resp.json():
-                for uq in device.get("user_quotas") or []:
-                    name = uq.get("name")
-                    if name and (host_id, name) not in seen:
-                        seen.add((host_id, name))
-                        result.append({"host_id": host_id, "host_user_name": name})
+                elapsed = time.time() - slave_start
+                if resp.status_code // 100 != 2:
+                    logger.warning("Slave %s returned error status %d when fetching host users (took %.2fs)", host_id, resp.status_code, elapsed)
+                    return (host_id, host_users, elapsed)
+                for device in resp.json():
+                    for uq in device.get("user_quotas") or []:
+                        name = uq.get("name")
+                        if name:
+                            host_users.append((host_id, name))
+                logger.debug("Slave %s returned %d host users (took %.2fs)", host_id, len(host_users), elapsed)
+                return (host_id, host_users, elapsed)
+            except (OSError, requests.exceptions.RequestException) as e:
+                elapsed = time.time() - slave_start
+                logger.warning("Slave %s request failed when fetching host users: %s (took %.2fs)", host_id, str(e), elapsed)
+                return (host_id, host_users, elapsed)
+        
+        # Fetch from all slaves in parallel
+        slave_times: dict[str, float] = {}
+        with ThreadPoolExecutor(max_workers=len(slaves)) as executor:
+            future_to_slave = {executor.submit(fetch_slave_host_users, slave): slave for slave in slaves}
+            for future in as_completed(future_to_slave):
+                host_id, host_users, elapsed = future.result()
+                slave_times[host_id] = elapsed
+                for hid, name in host_users:
+                    if (hid, name) not in seen:
+                        seen.add((hid, name))
+                        result.append({"host_id": hid, "host_user_name": name})
+        
+        total_time = time.time() - start_time
+        logger.info(
+            "Fetched host users from %d slave(s) in %.2fs, found %d unique users (per-slave: %s)",
+            len(slaves),
+            total_time,
+            len(result),
+            ", ".join(f"{sid}={t:.2fs}" for sid, t in slave_times.items()),
+        )
         db = SessionLocal()
         try:
             rows = db.query(OAuthHostUserMapping).distinct().all()
