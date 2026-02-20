@@ -136,6 +136,21 @@ def delete_container_attribution(container_id: str) -> None:
         db.close()
 
 
+def delete_layer_attribution(layer_id: str) -> None:
+    """Remove layer attribution (e.g. after image/layer removed)."""
+    db = SessionLocal()
+    try:
+        db.query(DockerLayerAttribution).filter(
+            DockerLayerAttribution.layer_id == layer_id
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def get_user_quota_limit(uid: int) -> int:
     """Return block_hard_limit (1K blocks) for uid. 0 if not set."""
     db = SessionLocal()

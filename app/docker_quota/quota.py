@@ -12,6 +12,7 @@ from app.docker_quota.attribution_store import (
     set_user_quota_limit,
     get_all_user_quota_limits,
     get_layer_attributions,
+    delete_layer_attribution,
 )
 from app.docker_quota.docker_client import (
     get_docker_data_root,
@@ -60,6 +61,27 @@ def _reconcile_attributions(
         if cid not in container_ids_from_docker:
             delete_container_attribution(cid)
             logger.info("Removed attribution for gone container %s", cid[:12])
+
+
+def _reconcile_layer_attributions(layers_from_docker: set[str]) -> int:
+    """Remove layer attribution rows for layers that no longer exist in any Docker image.
+    
+    Args:
+        layers_from_docker: Set of layer IDs that exist in Docker (from all images).
+    
+    Returns:
+        Number of layer attributions removed.
+    """
+    layer_attributions = get_layer_attributions()
+    removed_count = 0
+    for layer_att in layer_attributions:
+        layer_id = layer_att["layer_id"]
+        if layer_id not in layers_from_docker:
+            delete_layer_attribution(layer_id)
+            removed_count += 1
+            logger.info("Removed attribution for gone layer %s (was attributed to uid=%s)", 
+                       layer_id[:12], layer_att.get("first_puller_uid"))
+    return removed_count
 
 
 def _aggregate_usage_by_uid(

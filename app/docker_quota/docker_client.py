@@ -5,6 +5,10 @@ function has a configurable timeout (default 90s). Other Docker SDK calls (list_
 get_system_df, etc.) use the SDK's default timeout (no timeout by default, waits indefinitely).
 If you need explicit timeouts for all Docker operations, configure the Docker client with
 timeout parameters when creating it.
+
+Note on caching: list_containers() and list_images() use Redis cache with 10-minute TTL.
+Cache is invalidated when Docker events indicate container/image changes. This significantly
+reduces Docker API load while maintaining freshness through event-driven invalidation.
 """
 
 import time
@@ -30,13 +34,32 @@ def get_docker_data_root(base_url: str = "unix://var/run/docker.sock") -> str:
     return "/var/lib/docker"
 
 
-def list_containers(all_containers: bool = True) -> list[dict[str, Any]]:
+def list_containers(all_containers: bool = True, use_cache: bool = True) -> list[dict[str, Any]]:
     """List containers (running and stopped). Returns list of {id, name, image_id, created, labels}.
     
     Note: Avoids accessing c.image.id (which triggers expensive inspect_image API call). Instead uses
     image ID from container attributes (c.attrs) which is already loaded.
+    
+    Args:
+        all_containers: If True, include stopped containers.
+        use_cache: If True, check Redis cache first (default True). Set False to force fresh fetch.
+    
+    Returns:
+        List of container dicts. Uses cache if available and not expired (10-minute TTL).
+        Cache is invalidated when Docker events indicate container changes.
     """
     start_time = time.time()
+    
+    # Try cache first (if enabled)
+    if use_cache:
+        from app.docker_quota.cache import get_cached_containers, set_cached_containers
+        cached = get_cached_containers()
+        if cached is not None:
+            elapsed = time.time() - start_time
+            logger.debug("Docker list_containers: cache hit (took %.3fs, count=%d)", elapsed, len(cached))
+            return cached
+    
+    # Cache miss or cache disabled: fetch from Docker API
     try:
         import docker
         client_start = time.time()
@@ -70,6 +93,10 @@ def list_containers(all_containers: bool = True) -> list[dict[str, Any]]:
             })
         parse_time = time.time() - parse_start
         
+        # Cache the result
+        if use_cache:
+            set_cached_containers(result)
+        
         total_time = time.time() - start_time
         logger.debug(
             "Docker list_containers: total=%.2fs (client_init=%.2fs, list=%.2fs, parse=%.2fs, count=%d)",
@@ -82,14 +109,34 @@ def list_containers(all_containers: bool = True) -> list[dict[str, Any]]:
         return []
 
 
-def list_images() -> list[dict[str, Any]]:
-    """List images. Returns list of {id, short_id, size, created}."""
+def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
+    """List images. Returns list of {id, short_id, size, created}.
+    
+    Args:
+        use_cache: If True, check Redis cache first (default True). Set False to force fresh fetch.
+    
+    Returns:
+        List of image dicts. Uses cache if available and not expired (10-minute TTL).
+        Cache is invalidated when Docker events indicate image changes.
+    """
+    start_time = time.time()
+    
+    # Try cache first (if enabled)
+    if use_cache:
+        from app.docker_quota.cache import get_cached_images, set_cached_images
+        cached = get_cached_images()
+        if cached is not None:
+            elapsed = time.time() - start_time
+            logger.debug("Docker list_images: cache hit (took %.3fs, count=%d)", elapsed, len(cached))
+            return cached
+    
+    # Cache miss or cache disabled: fetch from Docker API
     try:
         import docker
         client = docker.from_env()
         try:
             images = client.images.list()
-            return [
+            result = [
                 {
                     "id": img.id,
                     "short_id": img.short_id,
@@ -98,10 +145,17 @@ def list_images() -> list[dict[str, Any]]:
                 }
                 for img in images
             ]
+            # Cache the result
+            if use_cache:
+                set_cached_images(result)
+            elapsed = time.time() - start_time
+            logger.debug("Docker list_images: total=%.2fs (count=%d)", elapsed, len(result))
+            return result
         finally:
             client.close()
     except Exception as e:
-        logger.warning("Docker list images failed: %s", e)
+        elapsed = time.time() - start_time
+        logger.warning("Docker list images failed: %s (took %.2fs)", e, elapsed)
         return []
 
 

@@ -16,6 +16,8 @@ from app.docker_quota.attribution_store import (
     attribute_image_layers,
     get_layers_for_image,
 )
+from app.docker_quota.quota import _reconcile_layer_attributions
+from app.docker_quota.cache import invalidate_container_cache, invalidate_image_cache
 from app.docker_quota.docker_client import (
     list_containers,
     list_images,
@@ -207,12 +209,23 @@ def sync_from_docker_events() -> int:
     attributions = {a["container_id"]: a for a in get_container_attributions()}
     image_attributions = {a["image_id"]: a for a in get_image_attributions()}
     set_count = 0
+    cache_invalidated = False
     for ev in events:
         typ = (ev.get("type") or "").lower()
         action = (ev.get("action") or "").lower()
         eid = ev.get("id")
         if not eid:
             continue
+        
+        # Invalidate cache when container/image events occur (event-driven cache invalidation)
+        if not cache_invalidated:
+            if typ == "container" and action in ("create", "destroy", "die", "kill", "start", "stop"):
+                invalidate_container_cache()
+                cache_invalidated = True
+            elif typ == "image" and action in ("pull", "push", "tag", "untag", "delete", "remove"):
+                invalidate_image_cache()
+                cache_invalidated = True
+        
         time_nano = ev.get("time_nano")
         try:
             ev_ts = int(time_nano) / 1e9 if time_nano else 0
@@ -363,6 +376,8 @@ def sync_from_docker_events() -> int:
 
 def sync_existing_images() -> int:
     """Sync layers for all existing images in DockerImageAttribution that don't have layers attributed yet."""
+    import time
+    start_time = time.time()
     image_attributions = get_image_attributions()
     layer_attributions = {r["layer_id"] for r in get_layer_attributions()}
     df = get_system_df()
@@ -392,6 +407,31 @@ def sync_existing_images() -> int:
             if new_layers_count > 0:
                 count += 1
                 logger.info("Attributed %s new layers for existing image %s", new_layers_count, image_id[:12])
+    
+    # Reconcile layer attributions: remove layers that no longer exist in any image
+    # Use fresh image list (no cache) to ensure we see all current images
+    reconcile_start = time.time()
+    all_layers_in_docker: set[str] = set()
+    # Collect layers from all existing images (not just those referenced by containers)
+    # Force fresh fetch (use_cache=False) to ensure accurate reconciliation
+    all_images = list_images(use_cache=False)
+    for img in all_images:
+        img_id = img["id"]
+        try:
+            layers = get_layers_for_image(img_id)
+            all_layers_in_docker.update(layers)
+        except Exception as e:
+            logger.warning("Failed to get layers for image %s: %s", img_id[:12], e)
+    
+    # Remove layer attributions for layers that no longer exist
+    removed_count = _reconcile_layer_attributions(all_layers_in_docker)
+    reconcile_time = time.time() - reconcile_start
+    if removed_count > 0:
+        logger.info("Reconciled layer attributions: removed %d layers that no longer exist (took %.2fs)", 
+                   removed_count, reconcile_time)
+    total_time = time.time() - start_time
+    logger.debug("sync_existing_images: total=%.2fs (attributed=%d images, removed=%d layers)", 
+                total_time, count, removed_count)
     return count
 
 

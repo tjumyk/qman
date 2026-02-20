@@ -37,6 +37,7 @@ class AppConfig(BaseModel):
     CELERY_RESULT_BACKEND: str | None = None  # Optional
     DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS: int | None = None  # Celery beat interval (default 300)
     DOCKER_QUOTA_ENFORCEMENT_ORDER: str | None = None  # newest_first | oldest_first | largest_first (default newest_first)
+    DOCKER_QUOTA_CACHE_TTL_SECONDS: int | None = None  # Container/image list cache TTL (default 600 = 10 minutes)
     SLAVE_HOST_ID: str | None = None  # Slave's own id for event payloads (env SLAVE_HOST_ID overrides)
     MASTER_EVENT_CALLBACK_URL: str | None = None  # Slave: master URL to POST events (env overrides)
     MASTER_EVENT_CALLBACK_SECRET: str | None = None  # Slave: secret for X-API-Key (env overrides)
