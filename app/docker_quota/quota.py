@@ -65,17 +65,21 @@ def _reconcile_attributions(
 def _aggregate_usage_by_uid(
     data_root: str,
     reserved_bytes: int | None,
+    container_ids: list[str] | None = None,
 ) -> tuple[dict[int, int], int, int]:
     """Aggregate Docker disk usage per uid. Returns (uid -> used_bytes, total_used, unattributed_bytes).
     total_used = sum of all container sizes + sum of all image layer sizes; 
     usage_by_uid = container usage + image layer usage (where user is first creator);
     unattributed = total_used - sum(usage_by_uid).
+    
+    Args:
+        container_ids: Optional list of container IDs to avoid duplicate list_containers() call in get_system_df().
     """
     start_time = time.time()
     timings: dict[str, float] = {}
     
     df_start = time.time()
-    df = get_system_df()
+    df = get_system_df(container_ids=container_ids)
     timings["get_system_df"] = time.time() - df_start
     
     container_sizes = df.get("containers") or {}
@@ -222,7 +226,9 @@ def collect_remote_quotas(
     timings["backfill_labels"] = time.time() - backfill_start
     
     root = data_root or get_docker_data_root()
-    usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(root, reserved_bytes)
+    # Pass container IDs to avoid duplicate list_containers() call in get_system_df()
+    container_ids = [c["id"] for c in containers]
+    usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(root, reserved_bytes, container_ids=container_ids)
     
     build_quotas_start = time.time()
     attributed = sum(usage_by_uid.values())

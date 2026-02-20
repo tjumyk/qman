@@ -119,8 +119,13 @@ def _parse_created_iso(created: str | None) -> float:
         return 0.0
 
 
-def get_system_df() -> dict[str, Any]:
-    """Run 'docker system df -v' equivalent: per-container and per-image sizes. Returns dict with Containers, Images."""
+def get_system_df(container_ids: list[str] | None = None) -> dict[str, Any]:
+    """Run 'docker system df -v' equivalent: per-container and per-image sizes. Returns dict with Containers, Images.
+    
+    Args:
+        container_ids: Optional list of container IDs to inspect. If None, will list all containers first.
+                       This avoids duplicate list_containers() calls when container list is already known.
+    """
     start_time = time.time()
     try:
         import docker
@@ -129,9 +134,14 @@ def get_system_df() -> dict[str, Any]:
         client_init_time = time.time() - client_start
         
         # Docker SDK doesn't expose "system df -v" directly; build from containers + images
-        list_containers_start = time.time()
-        containers = client.containers.list(all=True)
-        list_containers_time = time.time() - list_containers_start
+        if container_ids is None:
+            list_containers_start = time.time()
+            containers = client.containers.list(all=True)
+            list_containers_time = time.time() - list_containers_start
+            container_ids_list = [c.id for c in containers]
+        else:
+            list_containers_time = 0.0
+            container_ids_list = container_ids
         
         list_images_start = time.time()
         images = client.images.list()
@@ -141,14 +151,14 @@ def get_system_df() -> dict[str, Any]:
         inspect_start = time.time()
         container_sizes: dict[str, int] = {}
         inspect_times: list[float] = []
-        for c in containers:
+        for cid in container_ids_list:
             inspect_one_start = time.time()
             try:
-                inspect = client.api.inspect_container(c.id, size=True)
+                inspect = client.api.inspect_container(cid, size=True)
                 size_rw = inspect.get("SizeRw") or 0
-                container_sizes[c.id] = size_rw
+                container_sizes[cid] = size_rw
             except Exception:
-                container_sizes[c.id] = 0
+                container_sizes[cid] = 0
             inspect_times.append(time.time() - inspect_one_start)
         inspect_time = time.time() - inspect_start
         
@@ -163,7 +173,7 @@ def get_system_df() -> dict[str, Any]:
             "Docker get_system_df: total=%.2fs (client_init=%.2fs, list_containers=%.2fs, list_images=%.2fs, "
             "inspect_containers=%.2fs [avg=%.3fs, max=%.3fs, count=%d], parse_images=%.2fs)",
             total_time, client_init_time, list_containers_time, list_images_time,
-            inspect_time, avg_inspect, max_inspect, len(containers), parse_images_time
+            inspect_time, avg_inspect, max_inspect, len(container_ids_list), parse_images_time
         )
         return {
             "containers": container_sizes,
