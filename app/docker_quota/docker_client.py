@@ -7,6 +7,7 @@ If you need explicit timeouts for all Docker operations, configure the Docker cl
 timeout parameters when creating it.
 """
 
+import time
 from typing import Any
 
 from app.utils import get_logger
@@ -35,36 +36,49 @@ def list_containers(all_containers: bool = True) -> list[dict[str, Any]]:
     Note: Avoids accessing c.image.id (which triggers expensive inspect_image API call). Instead uses
     image ID from container attributes (c.attrs) which is already loaded.
     """
+    start_time = time.time()
     try:
         import docker
+        client_start = time.time()
         client = docker.from_env()
-        try:
-            containers = client.containers.list(all=all_containers)
-            result = []
-            for c in containers:
-                # Get image ID from attrs to avoid lazy-loading API call (c.image.id triggers inspect_image)
-                # Image ID is in c.attrs["Image"] (short ID) or c.attrs["Config"]["Image"] (image name)
-                # For full image ID, we'd need inspect, but short ID is usually sufficient
-                image_id = None
-                attrs = c.attrs
-                if "Image" in attrs:
-                    image_id = attrs["Image"]  # Short image ID (e.g. "sha256:abc123...")
-                elif "Config" in attrs and "Image" in attrs["Config"]:
-                    # Fallback: image name/tag (less ideal but avoids API call)
-                    image_id = attrs["Config"]["Image"]
-                result.append({
-                    "id": c.id,
-                    "short_id": c.short_id,
-                    "name": (c.name or ""),
-                    "image": image_id,
-                    "created": attrs.get("Created"),
-                    "labels": attrs.get("Labels") or {},
-                })
-            return result
-        finally:
-            client.close()
+        client_init_time = time.time() - client_start
+        
+        list_start = time.time()
+        containers = client.containers.list(all=all_containers)
+        list_time = time.time() - list_start
+        
+        parse_start = time.time()
+        result = []
+        for c in containers:
+            # Get image ID from attrs to avoid lazy-loading API call (c.image.id triggers inspect_image)
+            # Image ID is in c.attrs["Image"] (short ID) or c.attrs["Config"]["Image"] (image name)
+            # For full image ID, we'd need inspect, but short ID is usually sufficient
+            image_id = None
+            attrs = c.attrs
+            if "Image" in attrs:
+                image_id = attrs["Image"]  # Short image ID (e.g. "sha256:abc123...")
+            elif "Config" in attrs and "Image" in attrs["Config"]:
+                # Fallback: image name/tag (less ideal but avoids API call)
+                image_id = attrs["Config"]["Image"]
+            result.append({
+                "id": c.id,
+                "short_id": c.short_id,
+                "name": (c.name or ""),
+                "image": image_id,
+                "created": attrs.get("Created"),
+                "labels": attrs.get("Labels") or {},
+            })
+        parse_time = time.time() - parse_start
+        
+        total_time = time.time() - start_time
+        logger.debug(
+            "Docker list_containers: total=%.2fs (client_init=%.2fs, list=%.2fs, parse=%.2fs, count=%d)",
+            total_time, client_init_time, list_time, parse_time, len(result)
+        )
+        return result
     except Exception as e:
-        logger.warning("Docker list containers failed: %s", e)
+        elapsed = time.time() - start_time
+        logger.warning("Docker list containers failed: %s (took %.2fs)", e, elapsed)
         return []
 
 
@@ -107,31 +121,57 @@ def _parse_created_iso(created: str | None) -> float:
 
 def get_system_df() -> dict[str, Any]:
     """Run 'docker system df -v' equivalent: per-container and per-image sizes. Returns dict with Containers, Images."""
+    start_time = time.time()
     try:
         import docker
+        client_start = time.time()
         client = docker.from_env()
-        try:
-            # Docker SDK doesn't expose "system df -v" directly; build from containers + images
-            containers = client.containers.list(all=True)
-            images = client.images.list()
-            # Size of a container = size of its writable layer (from inspect)
-            container_sizes: dict[str, int] = {}
-            for c in containers:
-                try:
-                    inspect = client.api.inspect_container(c.id, size=True)
-                    size_rw = inspect.get("SizeRw") or 0
-                    container_sizes[c.id] = size_rw
-                except Exception:
-                    container_sizes[c.id] = 0
-            image_sizes = {img.id: (img.attrs.get("Size") or 0) for img in images}
-            return {
-                "containers": container_sizes,
-                "images": image_sizes,
-            }
-        finally:
-            client.close()
+        client_init_time = time.time() - client_start
+        
+        # Docker SDK doesn't expose "system df -v" directly; build from containers + images
+        list_containers_start = time.time()
+        containers = client.containers.list(all=True)
+        list_containers_time = time.time() - list_containers_start
+        
+        list_images_start = time.time()
+        images = client.images.list()
+        list_images_time = time.time() - list_images_start
+        
+        # Size of a container = size of its writable layer (from inspect)
+        inspect_start = time.time()
+        container_sizes: dict[str, int] = {}
+        inspect_times: list[float] = []
+        for c in containers:
+            inspect_one_start = time.time()
+            try:
+                inspect = client.api.inspect_container(c.id, size=True)
+                size_rw = inspect.get("SizeRw") or 0
+                container_sizes[c.id] = size_rw
+            except Exception:
+                container_sizes[c.id] = 0
+            inspect_times.append(time.time() - inspect_one_start)
+        inspect_time = time.time() - inspect_start
+        
+        parse_images_start = time.time()
+        image_sizes = {img.id: (img.attrs.get("Size") or 0) for img in images}
+        parse_images_time = time.time() - parse_images_start
+        
+        total_time = time.time() - start_time
+        avg_inspect = sum(inspect_times) / len(inspect_times) if inspect_times else 0
+        max_inspect = max(inspect_times) if inspect_times else 0
+        logger.info(
+            "Docker get_system_df: total=%.2fs (client_init=%.2fs, list_containers=%.2fs, list_images=%.2fs, "
+            "inspect_containers=%.2fs [avg=%.3fs, max=%.3fs, count=%d], parse_images=%.2fs)",
+            total_time, client_init_time, list_containers_time, list_images_time,
+            inspect_time, avg_inspect, max_inspect, len(containers), parse_images_time
+        )
+        return {
+            "containers": container_sizes,
+            "images": image_sizes,
+        }
     except Exception as e:
-        logger.warning("Docker system df failed: %s", e)
+        elapsed = time.time() - start_time
+        logger.warning("Docker system df failed: %s (took %.2fs)", e, elapsed)
         return {"containers": {}, "images": {}}
 
 
@@ -222,29 +262,48 @@ def get_image_layers_with_sizes(image_id: str) -> list[tuple[str, int]]:
     Uses Docker API's inspect_image for layer IDs and history() for layer sizes.
     Note: history() returns layers in reverse order (newest first), so we reverse to match RootFS.Layers order.
     """
+    start_time = time.time()
     try:
         import docker
+        client_start = time.time()
         client = docker.from_env()
-        try:
-            # Get layer IDs (oldest first)
-            inspect = client.api.inspect_image(image_id)
-            rootfs = inspect.get("RootFS", {})
-            layer_ids = rootfs.get("Layers", [])
-            if not layer_ids:
-                return []
-            # Get layer sizes from history (newest first, so reverse)
-            history = client.api.history(image_id)
-            # history returns list of dicts with 'Size' field (incremental size added by each layer)
-            # Match layers: RootFS.Layers[0] (oldest) -> history[-1] (oldest), RootFS.Layers[-1] (newest) -> history[0] (newest)
-            history_sizes = [h.get("Size", 0) for h in reversed(history)]  # Reverse to oldest first
-            # Match layer_ids with sizes (pad if mismatch)
-            result: list[tuple[str, int]] = []
-            for i, layer_id in enumerate(layer_ids):
-                size = history_sizes[i] if i < len(history_sizes) else 0
-                result.append((layer_id, size))
-            return result
-        finally:
-            client.close()
+        client_init_time = time.time() - client_start
+        
+        # Get layer IDs (oldest first)
+        inspect_start = time.time()
+        inspect = client.api.inspect_image(image_id)
+        inspect_time = time.time() - inspect_start
+        
+        rootfs = inspect.get("RootFS", {})
+        layer_ids = rootfs.get("Layers", [])
+        if not layer_ids:
+            elapsed = time.time() - start_time
+            logger.debug("Docker get_image_layers_with_sizes %s: total=%.2fs (no layers)", image_id[:12], elapsed)
+            return []
+        
+        # Get layer sizes from history (newest first, so reverse)
+        history_start = time.time()
+        history = client.api.history(image_id)
+        history_time = time.time() - history_start
+        
+        # history returns list of dicts with 'Size' field (incremental size added by each layer)
+        # Match layers: RootFS.Layers[0] (oldest) -> history[-1] (oldest), RootFS.Layers[-1] (newest) -> history[0] (newest)
+        parse_start = time.time()
+        history_sizes = [h.get("Size", 0) for h in reversed(history)]  # Reverse to oldest first
+        # Match layer_ids with sizes (pad if mismatch)
+        result: list[tuple[str, int]] = []
+        for i, layer_id in enumerate(layer_ids):
+            size = history_sizes[i] if i < len(history_sizes) else 0
+            result.append((layer_id, size))
+        parse_time = time.time() - parse_start
+        
+        total_time = time.time() - start_time
+        logger.debug(
+            "Docker get_image_layers_with_sizes %s: total=%.2fs (client_init=%.2fs, inspect=%.2fs, history=%.2fs, parse=%.2fs, layers=%d)",
+            image_id[:12], total_time, client_init_time, inspect_time, history_time, parse_time, len(result)
+        )
+        return result
     except Exception as e:
-        logger.warning("Docker get image layers failed for %s: %s", image_id[:12], e)
+        elapsed = time.time() - start_time
+        logger.warning("Docker get image layers failed for %s: %s (took %.2fs)", image_id[:12], e, elapsed)
         return []

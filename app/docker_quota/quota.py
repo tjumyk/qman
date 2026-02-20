@@ -1,6 +1,7 @@
 """Docker virtual device and user quota reporting (same shape as quota.py / quota_zfs)."""
 
 import pwd
+import time
 from typing import Any
 
 from app.docker_quota.attribution_store import (
@@ -70,11 +71,22 @@ def _aggregate_usage_by_uid(
     usage_by_uid = container usage + image layer usage (where user is first creator);
     unattributed = total_used - sum(usage_by_uid).
     """
+    start_time = time.time()
+    timings: dict[str, float] = {}
+    
+    df_start = time.time()
     df = get_system_df()
+    timings["get_system_df"] = time.time() - df_start
+    
     container_sizes = df.get("containers") or {}
     image_sizes = df.get("images") or {}
+    
+    attrib_start = time.time()
     attributions = get_container_attributions()
     layer_attributions = get_layer_attributions()
+    timings["get_attributions"] = time.time() - attrib_start
+    
+    build_map_start = time.time()
     cid_to_user: dict[str, tuple[str, int | None]] = {}
     for att in attributions:
         cid_to_user[att["container_id"]] = (att["host_user_name"], att.get("uid"))
@@ -92,7 +104,10 @@ def _aggregate_usage_by_uid(
             name_to_uid[name] = entry.pw_uid
         except KeyError:
             pass
+    timings["build_maps"] = time.time() - build_map_start
+    
     # Container usage
+    container_agg_start = time.time()
     usage_by_uid: dict[int, int] = {}
     total_container_used = 0
     for cid, size in container_sizes.items():
@@ -106,7 +121,10 @@ def _aggregate_usage_by_uid(
         elif _name in name_to_uid:
             u = name_to_uid[_name]
             usage_by_uid[u] = usage_by_uid.get(u, 0) + size
+    timings["container_aggregation"] = time.time() - container_agg_start
+    
     # Image layer usage (first creator owns the layer)
+    layer_agg_start = time.time()
     total_layer_used = 0
     for layer_att in layer_attributions:
         layer_size = layer_att.get("size_bytes", 0)
@@ -114,10 +132,19 @@ def _aggregate_usage_by_uid(
         uid = layer_att.get("first_puller_uid")
         if uid is not None:
             usage_by_uid[uid] = usage_by_uid.get(uid, 0) + layer_size
+    timings["layer_aggregation"] = time.time() - layer_agg_start
+    
     # Total used = containers + image layers
     total_used = total_container_used + total_layer_used
     attributed_sum = sum(usage_by_uid.values())
     unattributed_bytes = max(0, total_used - attributed_sum)
+    
+    total_time = time.time() - start_time
+    timing_str = ", ".join(f"{k}={v:.2f}s" for k, v in timings.items())
+    logger.debug(
+        "Docker _aggregate_usage_by_uid: total=%.2fs [%s] (containers=%d, layers=%d, users=%d)",
+        total_time, timing_str, len(container_sizes), len(layer_attributions), len(usage_by_uid)
+    )
     return usage_by_uid, total_used, unattributed_bytes
 
 
@@ -161,12 +188,24 @@ def collect_remote_quotas(
     reserved_bytes: int | None = None,
 ) -> list[dict[str, Any]]:
     """Build list with one Docker device and user_quotas (same shape as quota.collect_remote_quotas)."""
+    start_time = time.time()
+    timings: dict[str, float] = {}
+    
+    list_start = time.time()
     containers = list_containers(all_containers=True)
+    timings["list_containers"] = time.time() - list_start
+    
     container_ids = {c["id"] for c in containers}
     host_user_by_uid: dict[int, str] = {}
+    
+    reconcile_start = time.time()
     _reconcile_attributions(container_ids, host_user_by_uid)
+    timings["reconcile_attributions"] = time.time() - reconcile_start
+    
     # Ensure every container has an attribution when label present (backfill from labels)
+    backfill_start = time.time()
     attributions_by_cid = {a["container_id"]: a for a in get_container_attributions()}
+    backfill_count = 0
     for c in containers:
         cid = c["id"]
         if cid in attributions_by_cid:
@@ -179,8 +218,13 @@ def collect_remote_quotas(
             except KeyError:
                 uid = None
             set_container_attribution(cid, qman_user, uid, c.get("image"), 0)
+            backfill_count += 1
+    timings["backfill_labels"] = time.time() - backfill_start
+    
     root = data_root or get_docker_data_root()
     usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(root, reserved_bytes)
+    
+    build_quotas_start = time.time()
     attributed = sum(usage_by_uid.values())
     limits = get_all_user_quota_limits()
     uids = set(limits.keys()) | set(usage_by_uid.keys())
@@ -191,6 +235,8 @@ def collect_remote_quotas(
         used = usage_by_uid.get(uid, 0)
         limit_1k = limits.get(uid, 0)
         user_quotas.append(_user_quota_dict_docker(uid, used, limit_1k))
+    timings["build_user_quotas"] = time.time() - build_quotas_start
+    
     if reserved_bytes is not None and reserved_bytes > 0:
         total = reserved_bytes
         used = attributed
@@ -213,6 +259,13 @@ def collect_remote_quotas(
     }
     if unattributed_bytes > 0:
         device["unattributed_usage"] = unattributed_bytes
+    
+    total_time = time.time() - start_time
+    timing_str = ", ".join(f"{k}={v:.2f}s" for k, v in timings.items())
+    logger.info(
+        "Docker collect_remote_quotas: total=%.2fs [%s] (containers=%d, users=%d, backfilled=%d)",
+        total_time, timing_str, len(containers), len(user_quotas), backfill_count
+    )
     return [device]
 
 
