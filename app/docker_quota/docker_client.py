@@ -185,12 +185,17 @@ def _parse_created_iso(created: str | None) -> float:
         return 0.0
 
 
-def get_system_df(container_ids: list[str] | None = None) -> dict[str, Any]:
+def get_system_df(
+    container_ids: list[str] | None = None,
+    image_sizes: dict[str, int] | None = None,
+) -> dict[str, Any]:
     """Run 'docker system df -v' equivalent: per-container and per-image sizes. Returns dict with Containers, Images.
-    
+
     Args:
         container_ids: Optional list of container IDs to inspect. If None, will list all containers first.
                        This avoids duplicate list_containers() calls when container list is already known.
+        image_sizes: Optional precomputed map image_id -> size in bytes. When provided, skips client.images.list()
+                     to avoid redundant list_images() when the caller already has image list/sizes.
     """
     start_time = time.time()
     try:
@@ -198,7 +203,7 @@ def get_system_df(container_ids: list[str] | None = None) -> dict[str, Any]:
         client_start = time.time()
         client = docker.from_env()
         client_init_time = time.time() - client_start
-        
+
         # Docker SDK doesn't expose "system df -v" directly; build from containers + images
         if container_ids is None:
             list_containers_start = time.time()
@@ -208,30 +213,33 @@ def get_system_df(container_ids: list[str] | None = None) -> dict[str, Any]:
         else:
             list_containers_time = 0.0
             container_ids_list = container_ids
-        
-        list_images_start = time.time()
-        images = client.images.list()
-        list_images_time = time.time() - list_images_start
-        
+
+        if image_sizes is not None:
+            list_images_time = 0.0
+            parse_images_time = 0.0
+        else:
+            list_images_start = time.time()
+            images = client.images.list()
+            list_images_time = time.time() - list_images_start
+            parse_images_start = time.time()
+            image_sizes = {img.id: (img.attrs.get("Size") or 0) for img in images}
+            parse_images_time = time.time() - parse_images_start
+
         # Size of a container = size of its writable layer (from inspect)
         inspect_start = time.time()
-        container_sizes: dict[str, int] = {}
+        container_sizes_dict: dict[str, int] = {}
         inspect_times: list[float] = []
         for cid in container_ids_list:
             inspect_one_start = time.time()
             try:
                 inspect = client.api.inspect_container(cid, size=True)
                 size_rw = inspect.get("SizeRw") or 0
-                container_sizes[cid] = size_rw
+                container_sizes_dict[cid] = size_rw
             except Exception:
-                container_sizes[cid] = 0
+                container_sizes_dict[cid] = 0
             inspect_times.append(time.time() - inspect_one_start)
         inspect_time = time.time() - inspect_start
-        
-        parse_images_start = time.time()
-        image_sizes = {img.id: (img.attrs.get("Size") or 0) for img in images}
-        parse_images_time = time.time() - parse_images_start
-        
+
         total_time = time.time() - start_time
         avg_inspect = sum(inspect_times) / len(inspect_times) if inspect_times else 0
         max_inspect = max(inspect_times) if inspect_times else 0
@@ -242,7 +250,7 @@ def get_system_df(container_ids: list[str] | None = None) -> dict[str, Any]:
             inspect_time, avg_inspect, max_inspect, len(container_ids_list), parse_images_time
         )
         return {
-            "containers": container_sizes,
+            "containers": container_sizes_dict,
             "images": image_sizes,
         }
     except Exception as e:

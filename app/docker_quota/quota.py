@@ -183,7 +183,9 @@ def get_devices(
     - If not set: total=sum(user quota limits in bytes)+unattributed, used=attributed, free=max(0, total - attributed - unattributed), percent=(total-free)/total in [0,100].
     """
     root = data_root or get_docker_data_root()
-    usage_by_uid, total_used, unattributed = _aggregate_usage_by_uid(root, reserved_bytes)
+    containers = list_containers(all_containers=True)
+    container_ids = [c["id"] for c in containers]
+    usage_by_uid, total_used, unattributed = _aggregate_usage_by_uid(root, reserved_bytes, container_ids=container_ids)
     attributed = sum(usage_by_uid.values())
     if reserved_bytes is not None and reserved_bytes > 0:
         total = reserved_bytes
@@ -305,15 +307,17 @@ def collect_remote_quotas_for_uid(
     """Return Docker device only if this user has usage or quota (same shape as quota.collect_remote_quotas_for_uid)."""
     if not should_include_uid(uid):
         return []
+    root = data_root or get_docker_data_root()
+    containers = list_containers(all_containers=True)
+    container_ids = [c["id"] for c in containers]
     usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(
-        data_root or get_docker_data_root(), reserved_bytes
+        root, reserved_bytes, container_ids=container_ids
     )
     attributed_total = sum(usage_by_uid.values())
     used = usage_by_uid.get(uid, 0)
     limit_1k = get_user_quota_limit(uid)
     if used == 0 and limit_1k == 0:
         return []
-    root = data_root or get_docker_data_root()
     if reserved_bytes is not None and reserved_bytes > 0:
         total = reserved_bytes
         free = max(0, total - attributed_total - unattributed_bytes)
@@ -342,6 +346,8 @@ def collect_remote_quotas_for_uid(
 def set_user_quota(uid: int, block_hard_limit: int, block_soft_limit: int) -> dict[str, Any]:
     """Set Docker quota for uid (1K blocks). Ignores inode. Returns updated UserQuota-shaped dict."""
     set_user_quota_limit(uid, block_hard_limit)
-    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(None, None)
+    containers = list_containers(all_containers=True)
+    container_ids = [c["id"] for c in containers]
+    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
     used = usage_by_uid.get(uid, 0)
     return _user_quota_dict_docker(uid, used, block_hard_limit)

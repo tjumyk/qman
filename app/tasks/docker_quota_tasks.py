@@ -51,11 +51,17 @@ def _load_slave_config() -> tuple[str, str, str, str]:
 
 def _containers_by_uid_with_created(
     order: str,
+    containers_list: list[dict[str, Any]] | None = None,
 ) -> dict[int, list[tuple[str, int, float]]]:
-    """Return {uid: [(container_id, size_bytes, created_ts), ...]} sorted by order (newest_first, oldest_first, largest_first)."""
-    df = get_system_df()
+    """Return {uid: [(container_id, size_bytes, created_ts), ...]} sorted by order (newest_first, oldest_first, largest_first).
+    If containers_list is provided, use it and pass container_ids to get_system_df to avoid duplicate list_containers."""
+    if containers_list is not None:
+        container_ids = [c["id"] for c in containers_list]
+        df = get_system_df(container_ids=container_ids)
+    else:
+        containers_list = list_containers(all_containers=True, use_cache=False)
+        df = get_system_df()
     container_sizes = df.get("containers") or {}
-    containers_list = list_containers(all_containers=True)
     cid_to_created: dict[str, float] = {}
     for c in containers_list:
         cid_to_created[c["id"]] = _parse_created_iso(c.get("created"))
@@ -110,15 +116,21 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
     limits = get_all_user_quota_limits()
     if not limits:
         return {"enforced": 0, "events": 0}
-    # Get total usage per uid (containers + image layers)
+    # Get containers once; pass container_ids to avoid duplicate list_containers inside get_system_df / _aggregate.
+    # use_cache=False so the task always sees current state (correctness for enforcement).
     from app.docker_quota.quota import _aggregate_usage_by_uid
-    usage_by_uid, _total_used, _unattributed = _aggregate_usage_by_uid(None, None)
-    uid_to_containers = _containers_by_uid_with_created(order)
+    containers_list = list_containers(all_containers=True, use_cache=False)
+    container_ids = [c["id"] for c in containers_list]
+    usage_by_uid, _total_used, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
+    uid_to_containers = _containers_by_uid_with_created(order, containers_list=containers_list)
     events: list[dict[str, Any]] = []
     total_removed = 0
     for uid, limit_1k in limits.items():
         if limit_1k <= 0:
             continue
+        # Refresh container list each uid in case previous uid removed containers
+        containers_list = list_containers(all_containers=True, use_cache=False)
+        container_ids = [c["id"] for c in containers_list]
         limit_bytes = limit_1k * 1024
         # Total usage includes containers + image layers
         total_used = usage_by_uid.get(uid, 0)
@@ -138,7 +150,7 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
         containers = uid_to_containers.get(uid, [])
         for cid, size, _created in containers:
             # Recompute total_used after each removal (includes image layers)
-            current_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None)
+            current_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
             current_total_used = current_usage_by_uid.get(uid, 0)
             if current_total_used <= limit_bytes:
                 break
@@ -149,8 +161,10 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
             if stop_container(cid):
                 if remove_container(cid, force=True):
                     delete_container_attribution(cid)
-                    # Recompute after removal
-                    updated_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None)
+                    # Recompute after removal; refresh container list
+                    containers_list = list_containers(all_containers=True, use_cache=False)
+                    container_ids = [c["id"] for c in containers_list]
+                    updated_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
                     new_total_used = updated_usage_by_uid.get(uid, 0)
                     total_removed += 1
                     removed.append(cid)

@@ -104,7 +104,8 @@ def _parse_audit_timestamp(ev: dict[str, Any]) -> float | None:
 def sync_containers_from_audit() -> int:
     """Find containers without attribution; match Created time to audit events (docker-socket, docker-client); set attribution. Returns count set."""
     attributions = {a["container_id"]: a for a in get_container_attributions()}
-    containers = list_containers(all_containers=True)
+    # use_cache=False: background sync must see current Docker state for correct attribution
+    containers = list_containers(all_containers=True, use_cache=False)
     df = get_system_df()
     container_sizes = df.get("containers") or {}
     audit_events = parse_audit_logs(keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK)
@@ -380,8 +381,9 @@ def sync_existing_images() -> int:
     start_time = time.time()
     image_attributions = get_image_attributions()
     layer_attributions = {r["layer_id"] for r in get_layer_attributions()}
-    df = get_system_df()
-    image_sizes = df.get("images") or {}
+    # Fetch image list once; use for sizes and for reconciliation (no get_system_df call needed here)
+    all_images = list_images(use_cache=False)
+    image_sizes = {img["id"]: (img.get("size") or 0) for img in all_images}
     count = 0
     for img_att in image_attributions:
         image_id = img_att["image_id"]
@@ -409,12 +411,9 @@ def sync_existing_images() -> int:
                 logger.info("Attributed %s new layers for existing image %s", new_layers_count, image_id[:12])
     
     # Reconcile layer attributions: remove layers that no longer exist in any image
-    # Use fresh image list (no cache) to ensure we see all current images
+    # Use the same all_images we already fetched above
     reconcile_start = time.time()
     all_layers_in_docker: set[str] = set()
-    # Collect layers from all existing images (not just those referenced by containers)
-    # Force fresh fetch (use_cache=False) to ensure accurate reconciliation
-    all_images = list_images(use_cache=False)
     for img in all_images:
         img_id = img["id"]
         try:
