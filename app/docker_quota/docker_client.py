@@ -52,12 +52,15 @@ def list_containers(all_containers: bool = True, use_cache: bool = True) -> list
     
     # Try cache first (if enabled)
     if use_cache:
-        from app.docker_quota.cache import get_cached_containers, set_cached_containers
-        cached = get_cached_containers()
-        if cached is not None:
-            elapsed = time.time() - start_time
-            logger.debug("Docker list_containers: cache hit (took %.3fs, count=%d)", elapsed, len(cached))
-            return cached
+        try:
+            from app.docker_quota.cache import get_cached_containers, set_cached_containers
+            cached = get_cached_containers()
+            if cached is not None:
+                elapsed = time.time() - start_time
+                logger.info("Docker list_containers: cache hit (took %.3fs, count=%d)", elapsed, len(cached))
+                return cached
+        except Exception as e:
+            logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
     # Cache miss or cache disabled: fetch from Docker API
     try:
@@ -95,7 +98,10 @@ def list_containers(all_containers: bool = True, use_cache: bool = True) -> list
         
         # Cache the result
         if use_cache:
-            set_cached_containers(result)
+            try:
+                set_cached_containers(result)
+            except Exception as e:
+                logger.debug("Failed to cache containers list: %s", e)
         
         total_time = time.time() - start_time
         logger.debug(
@@ -123,12 +129,15 @@ def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
     
     # Try cache first (if enabled)
     if use_cache:
-        from app.docker_quota.cache import get_cached_images, set_cached_images
-        cached = get_cached_images()
-        if cached is not None:
-            elapsed = time.time() - start_time
-            logger.debug("Docker list_images: cache hit (took %.3fs, count=%d)", elapsed, len(cached))
-            return cached
+        try:
+            from app.docker_quota.cache import get_cached_images, set_cached_images
+            cached = get_cached_images()
+            if cached is not None:
+                elapsed = time.time() - start_time
+                logger.info("Docker list_images: cache hit (took %.3fs, count=%d)", elapsed, len(cached))
+                return cached
+        except Exception as e:
+            logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
     # Cache miss or cache disabled: fetch from Docker API
     try:
@@ -147,7 +156,10 @@ def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
             ]
             # Cache the result
             if use_cache:
-                set_cached_images(result)
+                try:
+                    set_cached_images(result)
+                except Exception as e:
+                    logger.debug("Failed to cache images list: %s", e)
             elapsed = time.time() - start_time
             logger.debug("Docker list_images: total=%.2fs (count=%d)", elapsed, len(result))
             return result

@@ -47,8 +47,15 @@ def _get_redis_client():
         from flask import current_app
         
         # Try to get Redis URL from Flask app config (Celery broker URL)
-        broker_url = current_app.config.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        try:
+            broker_url = current_app.config.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        except RuntimeError:
+            # current_app not available (e.g., outside Flask request context)
+            logger.debug("Redis cache: Flask app context not available")
+            return None
+        
         if not broker_url or not broker_url.startswith("redis://"):
+            logger.debug("Redis cache: CELERY_BROKER_URL not set or not a redis:// URL")
             return None
         
         # Parse Redis URL and create client
@@ -72,6 +79,9 @@ def _get_redis_client():
         # Test connection
         client.ping()
         return client
+    except ImportError:
+        logger.warning("Redis cache: redis module not installed")
+        return None
     except Exception as e:
         logger.debug("Redis cache unavailable: %s", e)
         return None
@@ -93,20 +103,26 @@ def get_cached_containers(ttl_seconds: int | None = None) -> list[dict[str, Any]
             cached_time = data.get("timestamp", 0)
             age_seconds = time.time() - cached_time
             if age_seconds < ttl_seconds:
-                logger.debug("Cache hit: containers list (age=%.1fs)", age_seconds)
+                logger.info("Cache hit: containers list (age=%.1fs, count=%d)", age_seconds, len(data.get("containers", [])))
                 return data.get("containers", [])
             else:
-                logger.debug("Cache expired: containers list (age=%.1fs, ttl=%ds)", age_seconds, ttl_seconds)
+                logger.info("Cache expired: containers list (age=%.1fs, ttl=%ds)", age_seconds, ttl_seconds)
+        else:
+            logger.debug("Cache miss: containers list (no cached data)")
         return None
     except Exception as e:
-        logger.debug("Cache read failed: %s", e)
+        logger.warning("Cache read failed: %s", e)
         return None
 
 
 def set_cached_containers(containers: list[dict[str, Any]], ttl_seconds: int | None = None) -> None:
     """Cache container list with TTL."""
+    if ttl_seconds is None:
+        ttl_seconds = _get_cache_ttl()
+    
     redis_client = _get_redis_client()
     if not redis_client:
+        logger.debug("Cache write skipped: Redis unavailable")
         return
     
     try:
@@ -119,9 +135,9 @@ def set_cached_containers(containers: list[dict[str, Any]], ttl_seconds: int | N
             ttl_seconds,
             json.dumps(data),
         )
-        logger.debug("Cached containers list (%d containers, ttl=%ds)", len(containers), ttl_seconds)
+        logger.info("Cached containers list (%d containers, ttl=%ds)", len(containers), ttl_seconds)
     except Exception as e:
-        logger.debug("Cache write failed: %s", e)
+        logger.warning("Cache write failed: %s", e)
 
 
 def invalidate_container_cache() -> None:
