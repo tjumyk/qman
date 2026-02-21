@@ -109,6 +109,17 @@ def sync_containers_from_audit() -> int:
     df = get_system_df()
     container_sizes = df.get("containers") or {}
     audit_events = parse_audit_logs(keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK)
+    
+    # Count containers by status for logging
+    already_attributed = sum(1 for c in containers if c["id"] in attributions)
+    has_qman_label = sum(1 for c in containers if c["id"] not in attributions and (c.get("labels") or {}).get("qman.user"))
+    needs_audit = len(containers) - already_attributed - has_qman_label
+    
+    logger.info(
+        "sync_containers_from_audit: containers=%d (already_attributed=%d, needs_label_sync=%d, needs_audit=%d), audit_events=%d",
+        len(containers), already_attributed, has_qman_label, needs_audit, len(audit_events)
+    )
+    
     if not audit_events:
         logger.debug("No audit events for container correlation")
     # Build list of (uid, timestamp) from audit for time matching
@@ -147,7 +158,19 @@ def sync_containers_from_audit() -> int:
                 )
             continue
         labels = c.get("labels") or {}
-        if labels.get("qman.user"):
+        qman_user = labels.get("qman.user")
+        if qman_user:
+            # Container has explicit label - attribute it directly (no audit needed)
+            try:
+                uid = pwd.getpwuid(int(qman_user)).pw_uid if qman_user.isdigit() else pwd.getpwnam(qman_user).pw_uid
+                name = pwd.getpwuid(uid).pw_name
+            except (KeyError, ValueError):
+                uid = None
+                name = qman_user
+            size_bytes = container_sizes.get(cid, 0)
+            set_container_attribution(cid, name, uid, c.get("image"), size_bytes)
+            set_count += 1
+            logger.info("Attributed container %s to %s from qman.user label", cid[:12], name)
             continue
         created_str = c.get("created")
         created_ts = _parse_created_iso(created_str)
@@ -170,6 +193,12 @@ def sync_containers_from_audit() -> int:
             set_container_attribution(cid, name, best_uid, c.get("image"), size_bytes)
             set_count += 1
             logger.info("Attributed container %s to uid=%s from audit (time window)", cid[:12], best_uid)
+    
+    if set_count == 0 and needs_audit > 0:
+        logger.info(
+            "sync_containers_from_audit: %d containers need audit attribution but no audit match (audit events may be outside %ds window or auditd not configured)",
+            needs_audit, TIME_WINDOW_SECONDS
+        )
     return set_count
 
 
@@ -185,6 +214,16 @@ def sync_from_docker_events() -> int:
             pass
     events = collect_events_since(since_ts, max_seconds=90.0, max_events=500)
     audit_events = parse_audit_logs(keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK)
+    
+    # Log event counts by type for diagnosis
+    container_events = sum(1 for e in events if (e.get("type") or "").lower() == "container")
+    image_events = sum(1 for e in events if (e.get("type") or "").lower() == "image")
+    from datetime import datetime
+    since_dt = datetime.fromtimestamp(since_ts).strftime("%Y-%m-%d %H:%M:%S")
+    logger.info(
+        "sync_from_docker_events: docker_events=%d (container=%d, image=%d) since %s, audit_events=%d",
+        len(events), container_events, image_events, since_dt, len(audit_events)
+    )
     df = get_system_df()
     container_sizes = df.get("containers") or {}
     image_sizes = df.get("images") or {}
@@ -384,6 +423,11 @@ def sync_existing_images() -> int:
     # Fetch image list once; use for sizes and for reconciliation (no get_system_df call needed here)
     all_images = list_images(use_cache=False)
     image_sizes = {img["id"]: (img.get("size") or 0) for img in all_images}
+    
+    logger.info(
+        "sync_existing_images: image_attributions=%d, layer_attributions=%d, docker_images=%d",
+        len(image_attributions), len(layer_attributions), len(all_images)
+    )
     count = 0
     for img_att in image_attributions:
         image_id = img_att["image_id"]
@@ -436,7 +480,9 @@ def sync_existing_images() -> int:
 
 def run_sync_docker_attribution() -> dict[str, int]:
     """Run both audit-based and Docker-events-based sync, plus sync existing images. Returns counts."""
+    logger.info("Starting Docker attribution sync")
     a = sync_containers_from_audit()
     b = sync_from_docker_events()
     c = sync_existing_images()
+    logger.info("Docker attribution sync complete: from_audit=%d, from_events=%d, existing_images=%d", a, b, c)
     return {"from_audit": a, "from_events": b, "existing_images": c}
