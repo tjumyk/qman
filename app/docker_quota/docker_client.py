@@ -243,11 +243,16 @@ def get_system_df(
         total_time = time.time() - start_time
         avg_inspect = sum(inspect_times) / len(inspect_times) if inspect_times else 0
         max_inspect = max(inspect_times) if inspect_times else 0
+        total_container_bytes = sum(container_sizes_dict.values())
+        total_image_bytes = sum(image_sizes.values()) if image_sizes else 0
+        containers_with_size = sum(1 for s in container_sizes_dict.values() if s > 0)
         logger.info(
             "Docker get_system_df: total=%.2fs (client_init=%.2fs, list_containers=%.2fs, list_images=%.2fs, "
-            "inspect_containers=%.2fs [avg=%.3fs, max=%.3fs, count=%d], parse_images=%.2fs)",
+            "inspect_containers=%.2fs [avg=%.3fs, max=%.3fs, count=%d], parse_images=%.2fs) "
+            "sizes: containers=%d bytes (%d with data), images=%d bytes (%d images)",
             total_time, client_init_time, list_containers_time, list_images_time,
-            inspect_time, avg_inspect, max_inspect, len(container_ids_list), parse_images_time
+            inspect_time, avg_inspect, max_inspect, len(container_ids_list), parse_images_time,
+            total_container_bytes, containers_with_size, total_image_bytes, len(image_sizes) if image_sizes else 0
         )
         return {
             "containers": container_sizes_dict,

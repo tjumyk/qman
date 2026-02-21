@@ -150,26 +150,38 @@ def _aggregate_usage_by_uid(
     timings["container_aggregation"] = time.time() - container_agg_start
     
     # Image layer usage (first creator owns the layer)
+    # total_image_used = ALL images from Docker (for total calculation)
+    # attributed_layer_used = only layers with attribution (for user breakdown)
     layer_agg_start = time.time()
-    total_layer_used = 0
+    total_image_used = sum(image_sizes.values())  # All Docker images
+    attributed_layer_used = 0
     for layer_att in layer_attributions:
         layer_size = layer_att.get("size_bytes", 0)
-        total_layer_used += layer_size
+        attributed_layer_used += layer_size
         uid = layer_att.get("first_puller_uid")
         if uid is not None:
             usage_by_uid[uid] = usage_by_uid.get(uid, 0) + layer_size
     timings["layer_aggregation"] = time.time() - layer_agg_start
     
-    # Total used = containers + image layers
-    total_used = total_container_used + total_layer_used
+    # Total used = containers (all) + images (all from Docker)
+    # Attributed = containers (with attribution) + layers (with attribution)
+    # Unattributed = total - attributed
+    total_used = total_container_used + total_image_used
     attributed_sum = sum(usage_by_uid.values())
     unattributed_bytes = max(0, total_used - attributed_sum)
     
     total_time = time.time() - start_time
     timing_str = ", ".join(f"{k}={v:.2f}s" for k, v in timings.items())
-    logger.debug(
-        "Docker _aggregate_usage_by_uid: total=%.2fs [%s] (containers=%d, layers=%d, users=%d)",
-        total_time, timing_str, len(container_sizes), len(layer_attributions), len(usage_by_uid)
+    logger.info(
+        "Docker _aggregate_usage_by_uid: total=%.2fs [%s] "
+        "(container_count=%d, container_bytes=%d, image_count=%d, image_bytes=%d, "
+        "attributed_layers=%d, attributed_layer_bytes=%d, "
+        "total_used=%d, attributed=%d, unattributed=%d, users_with_usage=%d)",
+        total_time, timing_str,
+        len(container_sizes), total_container_used,
+        len(image_sizes), total_image_used,
+        len(layer_attributions), attributed_layer_used,
+        total_used, attributed_sum, unattributed_bytes, len(usage_by_uid)
     )
     return usage_by_uid, total_used, unattributed_bytes
 
@@ -272,12 +284,20 @@ def collect_remote_quotas(
         used = attributed
         free = max(0, total - attributed - unattributed_bytes)
         percent = ((total - free) / total * 100.0) if total else 0.0
+        logger.info(
+            "Docker device total: mode=reserved_bytes, total=%d, attributed=%d, unattributed=%d, free=%d",
+            total, attributed, unattributed_bytes, free
+        )
     else:
         sum_quotas_bytes = sum(limit_1k * 1024 for limit_1k in limits.values())
         total = max(sum_quotas_bytes + unattributed_bytes, 1)
         used = attributed
         free = max(0, total - attributed - unattributed_bytes)
         percent = ((total - free) / total * 100.0) if total else 0.0
+        logger.info(
+            "Docker device total: mode=sum_quotas, sum_quotas_bytes=%d (from %d user limits), unattributed=%d, total=%d, attributed=%d, free=%d",
+            sum_quotas_bytes, len(limits), unattributed_bytes, total, attributed, free
+        )
     device: dict[str, Any] = {
         "name": "docker",
         "mount_points": [root],
