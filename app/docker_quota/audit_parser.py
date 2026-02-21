@@ -70,6 +70,7 @@ def parse_audit_logs(
         cmd.extend(["--input", audit_path])
     env = dict(os.environ)
     env["LC_TIME"] = "en_US.UTF-8"
+    cmd_str = " ".join(cmd)
     try:
         result = subprocess.run(
             cmd,
@@ -78,18 +79,35 @@ def parse_audit_logs(
             timeout=60,
             env=env,
         )
-        if result.returncode != 0:
-            logger.warning("ausearch failed: %s", result.stderr or result.stdout)
+        # ausearch exit codes: 0=matches found, 1=no matches (not an error), 2+=error
+        if result.returncode == 1:
+            # No matches is normal when there are no Docker audit events in the time window
+            output = (result.stderr or result.stdout or "").strip()
+            if "no matches" in output.lower():
+                logger.debug("ausearch: no audit events found (cmd: %s)", cmd_str)
+            else:
+                logger.info("ausearch returned no matches: %s (cmd: %s)", output, cmd_str)
             return []
-        return _parse_ausearch_output(result.stdout, keys)
+        if result.returncode != 0:
+            # Actual error (exit code 2+)
+            logger.warning(
+                "ausearch failed (exit=%d): %s (cmd: %s)",
+                result.returncode,
+                result.stderr or result.stdout,
+                cmd_str,
+            )
+            return []
+        events = _parse_ausearch_output(result.stdout, keys)
+        logger.debug("ausearch found %d events (cmd: %s)", len(events), cmd_str)
+        return events
     except FileNotFoundError:
-        logger.debug("ausearch not available; audit attribution disabled")
+        logger.info("ausearch not available (not installed); audit attribution disabled")
         return []
     except subprocess.TimeoutExpired:
-        logger.warning("ausearch timed out")
+        logger.warning("ausearch timed out after 60s (cmd: %s)", cmd_str)
         return []
     except Exception as e:
-        logger.warning("audit parse failed: %s", e)
+        logger.warning("audit parse failed: %s (cmd: %s)", e, cmd_str)
         return []
 
 
