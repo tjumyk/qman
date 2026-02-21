@@ -337,7 +337,26 @@ def register_remote_api_routes(app: Any) -> None:
         else:
             use_pyquota = current_app.config.get("USE_PYQUOTA", True)
             use_zfs = current_app.config.get("USE_ZFS", False)
-            # Block device (ext4/xfs with usrquota) -> pyquota; dataset name -> ZFS when USE_ZFS
+            
+            # Check Docker virtual device first (before ZFS, since "docker" is not a ZFS dataset)
+            if current_app.config.get("USE_DOCKER_QUOTA", False) and device == "docker":
+                docker_start = time.time()
+                from app.docker_quota import docker_set_user_quota
+                try:
+                    quota_dict = docker_set_user_quota(
+                        uid=uid,
+                        block_hard_limit=params.block_hard_limit or 0,
+                        block_soft_limit=params.block_soft_limit or 0,
+                    )
+                    elapsed = time.time() - docker_start
+                    logger.info("Set quota for uid=%d, device=%s (Docker) in %.2fs", uid, device, elapsed)
+                    return jsonify(quota_dict)
+                except Exception as e:
+                    elapsed = time.time() - start_time
+                    logger.warning("Failed to set quota for uid=%d, device=%s (Docker): %s (took %.2fs)", uid, device, str(e), elapsed)
+                    return jsonify(msg=str(e)), 500
+            
+            # Block device (ext4/xfs with usrquota) -> pyquota
             if device.startswith("/dev/"):
                 if not use_pyquota:
                     return jsonify(msg="USE_PYQUOTA is disabled; cannot set quota on block device"), 400
@@ -363,6 +382,8 @@ def register_remote_api_routes(app: Any) -> None:
                     elapsed = time.time() - start_time
                     logger.warning("Failed to set quota for uid=%d, device=%s (pyquota): %s (took %.2fs)", uid, device, str(e), elapsed)
                     return jsonify(msg=str(e)), 500
+            
+            # Dataset name -> ZFS when USE_ZFS
             if use_zfs:
                 zfs_start = time.time()
                 from app.quota_zfs import set_user_quota as zfs_set_user_quota
@@ -383,22 +404,7 @@ def register_remote_api_routes(app: Any) -> None:
                     elapsed = time.time() - start_time
                     logger.warning("Failed to set quota for uid=%d, device=%s (ZFS): %s (took %.2fs)", uid, device, str(e), elapsed)
                     return jsonify(msg=str(e)), 500
-            if current_app.config.get("USE_DOCKER_QUOTA", False) and device == "docker":
-                docker_start = time.time()
-                from app.docker_quota import docker_set_user_quota
-                try:
-                    quota_dict = docker_set_user_quota(
-                        uid=uid,
-                        block_hard_limit=params.block_hard_limit or 0,
-                        block_soft_limit=params.block_soft_limit or 0,
-                    )
-                    elapsed = time.time() - docker_start
-                    logger.info("Set quota for uid=%d, device=%s (Docker) in %.2fs", uid, device, elapsed)
-                    return jsonify(quota_dict)
-                except Exception as e:
-                    elapsed = time.time() - start_time
-                    logger.warning("Failed to set quota for uid=%d, device=%s (Docker): %s (took %.2fs)", uid, device, str(e), elapsed)
-                    return jsonify(msg=str(e)), 500
+            
             elapsed = time.time() - start_time
             logger.warning("Device %s not recognized for uid=%d (took %.2fs)", device, uid, elapsed)
             return jsonify(
