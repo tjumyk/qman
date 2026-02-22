@@ -97,3 +97,74 @@ export const meMappingSchema = z.object({
   host_user_name: z.string(),
 })
 export type MeMapping = z.infer<typeof meMappingSchema>
+
+// Docker container detail
+export const dockerContainerSchema = z.object({
+  container_id: z.string(),
+  name: z.string(),
+  image: z.string(),
+  status: z.string(),
+  host_user_name: z.string().nullable(),
+  uid: z.number().nullable(),
+  size_bytes: z.number(),
+  created_at: z.string().nullable(),
+})
+export type DockerContainer = z.infer<typeof dockerContainerSchema>
+
+export const dockerContainersResponseSchema = z.object({
+  containers: z.array(dockerContainerSchema),
+  total_bytes: z.number(),
+  attributed_bytes: z.number(),
+  unattributed_bytes: z.number(),
+})
+export type DockerContainersResponse = z.infer<typeof dockerContainersResponseSchema>
+
+// Docker image detail
+export const dockerImageSchema = z.object({
+  image_id: z.string(),
+  tags: z.array(z.string()),
+  size_bytes: z.number(),
+  created: z.string().nullable(),
+})
+export type DockerImage = z.infer<typeof dockerImageSchema>
+
+// Docker layer detail
+export const dockerLayerSchema = z.object({
+  layer_id: z.string(),
+  size_bytes: z.number(),
+  first_puller_host_user_name: z.string().nullable(),
+  first_puller_uid: z.number().nullable(),
+  creation_method: z.string().nullable(),
+  first_seen_at: z.string().nullable(),
+})
+export type DockerLayer = z.infer<typeof dockerLayerSchema>
+
+export const dockerImagesResponseSchema = z.object({
+  images: z.array(dockerImageSchema),
+  layers: z.array(dockerLayerSchema),
+  total_image_bytes: z.number(),
+  attributed_layer_bytes: z.number(),
+  unattributed_layer_bytes: z.number(),
+  layers_by_user: z.record(z.string(), z.number()),
+})
+export type DockerImagesResponse = z.infer<typeof dockerImagesResponseSchema>
+
+// Docker volume detail
+export const dockerVolumeSchema = z.object({
+  volume_name: z.string(),
+  size_bytes: z.number(),
+  host_user_name: z.string().nullable(),
+  uid: z.number().nullable(),
+  attribution_source: z.string().nullable(),
+  ref_count: z.number(),
+  first_seen_at: z.string().nullable(),
+})
+export type DockerVolume = z.infer<typeof dockerVolumeSchema>
+
+export const dockerVolumesResponseSchema = z.object({
+  volumes: z.array(dockerVolumeSchema),
+  total_bytes: z.number(),
+  attributed_bytes: z.number(),
+  unattributed_bytes: z.number(),
+})
+export type DockerVolumesResponse = z.infer<typeof dockerVolumesResponseSchema>

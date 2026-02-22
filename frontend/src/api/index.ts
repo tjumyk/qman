@@ -1,8 +1,26 @@
 import axios, { isAxiosError } from 'axios'
 import { z } from 'zod'
-import { meMappingSchema, meSchema, quotasResponseSchema, userQuotaSchema } from './schemas'
-import type { Me, MeMapping, QuotasResponse, ResolveUserResponse, SetUserQuotaBody, UserQuota } from './schemas'
-import { resolveUserResponseSchema } from './schemas'
+import {
+  meMappingSchema,
+  meSchema,
+  quotasResponseSchema,
+  userQuotaSchema,
+  resolveUserResponseSchema,
+  dockerContainersResponseSchema,
+  dockerImagesResponseSchema,
+  dockerVolumesResponseSchema,
+} from './schemas'
+import type {
+  Me,
+  MeMapping,
+  QuotasResponse,
+  ResolveUserResponse,
+  SetUserQuotaBody,
+  UserQuota,
+  DockerContainersResponse,
+  DockerImagesResponse,
+  DockerVolumesResponse,
+} from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
 
@@ -190,4 +208,29 @@ export async function pingHosts(): Promise<HostPingResponse> {
       error: z.string().optional(),
     })
   ).parse(data)
+}
+
+// Docker detail APIs
+export async function fetchDockerContainers(hostId: string): Promise<DockerContainersResponse> {
+  const { data } = await api.get<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/docker/containers`,
+    { timeout: TIMEOUT_QUOTA }
+  )
+  return dockerContainersResponseSchema.parse(data)
+}
+
+export async function fetchDockerImages(hostId: string): Promise<DockerImagesResponse> {
+  const { data } = await api.get<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/docker/images`,
+    { timeout: TIMEOUT_QUOTA }
+  )
+  return dockerImagesResponseSchema.parse(data)
+}
+
+export async function fetchDockerVolumes(hostId: string): Promise<DockerVolumesResponse> {
+  const { data } = await api.get<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/docker/volumes`,
+    { timeout: TIMEOUT_QUOTA }
+  )
+  return dockerVolumesResponseSchema.parse(data)
 }

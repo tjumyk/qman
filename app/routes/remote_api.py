@@ -410,3 +410,207 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(
                 msg="device not recognized: use /dev/... for block devices, USE_ZFS for ZFS datasets, or device=docker when USE_DOCKER_QUOTA is enabled"
             ), 400
+
+    @app.route("/remote-api/docker/containers")
+    @requires_api_key
+    def remote_get_docker_containers() -> Any:
+        """Return detailed Docker container information with attribution."""
+        start_time = time.time()
+        
+        if not current_app.config.get("USE_DOCKER_QUOTA", False):
+            return jsonify(msg="Docker quota not enabled on this host"), 400
+        
+        from app.docker_quota.docker_client import get_container_details, get_system_df
+        from app.docker_quota.attribution_store import get_container_attributions
+        
+        # Get container details from Docker API
+        containers = get_container_details()
+        container_ids = [c["id"] for c in containers]
+        
+        # Get container sizes
+        df = get_system_df(container_ids=container_ids)
+        container_sizes = df.get("containers", {})
+        
+        # Get attributions from database
+        attributions = {a["container_id"]: a for a in get_container_attributions()}
+        
+        # Merge data
+        result_containers = []
+        total_bytes = 0
+        attributed_bytes = 0
+        
+        for c in containers:
+            cid = c["id"]
+            size = container_sizes.get(cid, 0)
+            total_bytes += size
+            
+            att = attributions.get(cid)
+            host_user_name = att["host_user_name"] if att else None
+            uid = att["uid"] if att else None
+            created_at = att["created_at"].isoformat() if att and att.get("created_at") else None
+            
+            if att:
+                attributed_bytes += size
+            
+            result_containers.append({
+                "container_id": cid,
+                "name": c.get("name", ""),
+                "image": c.get("image", ""),
+                "status": c.get("status", "unknown"),
+                "host_user_name": host_user_name,
+                "uid": uid,
+                "size_bytes": size,
+                "created_at": created_at,
+            })
+        
+        unattributed_bytes = total_bytes - attributed_bytes
+        
+        elapsed = time.time() - start_time
+        logger.info(
+            "Docker containers detail: %.2fs (count=%d, total=%d, attributed=%d, unattributed=%d)",
+            elapsed, len(result_containers), total_bytes, attributed_bytes, unattributed_bytes
+        )
+        
+        return jsonify({
+            "containers": result_containers,
+            "total_bytes": total_bytes,
+            "attributed_bytes": attributed_bytes,
+            "unattributed_bytes": unattributed_bytes,
+        })
+
+    @app.route("/remote-api/docker/images")
+    @requires_api_key
+    def remote_get_docker_images() -> Any:
+        """Return detailed Docker image and layer information with attribution."""
+        start_time = time.time()
+        
+        if not current_app.config.get("USE_DOCKER_QUOTA", False):
+            return jsonify(msg="Docker quota not enabled on this host"), 400
+        
+        from app.docker_quota.docker_client import get_image_details
+        from app.docker_quota.attribution_store import get_layer_attributions
+        
+        # Get image details from Docker API
+        images = get_image_details()
+        
+        # Get layer attributions from database
+        layer_attributions = get_layer_attributions()
+        
+        # Build images response
+        result_images = []
+        total_image_bytes = 0
+        
+        for img in images:
+            size = img.get("size_bytes", 0)
+            total_image_bytes += size
+            result_images.append({
+                "image_id": img["id"],
+                "tags": img.get("tags", []),
+                "size_bytes": size,
+                "created": img.get("created"),
+            })
+        
+        # Build layers response with attribution
+        result_layers = []
+        attributed_layer_bytes = 0
+        layers_by_user: dict[int, int] = {}
+        
+        for layer in layer_attributions:
+            size = layer.get("size_bytes", 0)
+            uid = layer.get("first_puller_uid")
+            
+            attributed_layer_bytes += size
+            if uid is not None:
+                layers_by_user[uid] = layers_by_user.get(uid, 0) + size
+            
+            first_seen = layer.get("first_seen_at")
+            result_layers.append({
+                "layer_id": layer["layer_id"],
+                "size_bytes": size,
+                "first_puller_host_user_name": layer.get("first_puller_host_user_name"),
+                "first_puller_uid": uid,
+                "creation_method": layer.get("creation_method"),
+                "first_seen_at": first_seen.isoformat() if first_seen else None,
+            })
+        
+        # Note: total_image_bytes is sum of image sizes (which includes shared layers counted multiple times)
+        # attributed_layer_bytes is sum of unique layer sizes that have attribution
+        # unattributed = layers that exist but have no attribution entry
+        unattributed_layer_bytes = max(0, total_image_bytes - attributed_layer_bytes)
+        
+        elapsed = time.time() - start_time
+        logger.info(
+            "Docker images detail: %.2fs (images=%d, layers=%d, total=%d, attributed=%d, unattributed=%d)",
+            elapsed, len(result_images), len(result_layers), total_image_bytes, attributed_layer_bytes, unattributed_layer_bytes
+        )
+        
+        return jsonify({
+            "images": result_images,
+            "layers": result_layers,
+            "total_image_bytes": total_image_bytes,
+            "attributed_layer_bytes": attributed_layer_bytes,
+            "unattributed_layer_bytes": unattributed_layer_bytes,
+            "layers_by_user": {str(k): v for k, v in layers_by_user.items()},
+        })
+
+    @app.route("/remote-api/docker/volumes")
+    @requires_api_key
+    def remote_get_docker_volumes() -> Any:
+        """Return detailed Docker volume information with attribution."""
+        start_time = time.time()
+        
+        if not current_app.config.get("USE_DOCKER_QUOTA", False):
+            return jsonify(msg="Docker quota not enabled on this host"), 400
+        
+        from app.docker_quota.docker_client import get_system_df
+        from app.docker_quota.attribution_store import get_volume_attributions
+        
+        # Get volume data from Docker API
+        df = get_system_df(include_volumes=True)
+        volumes_data = df.get("volumes", {})
+        
+        # Get attributions from database
+        attributions = {a["volume_name"]: a for a in get_volume_attributions()}
+        
+        # Build response
+        result_volumes = []
+        total_bytes = 0
+        attributed_bytes = 0
+        
+        for vol_name, vol_info in volumes_data.items():
+            size = vol_info.get("size", 0)
+            total_bytes += size
+            
+            att = attributions.get(vol_name)
+            host_user_name = att["host_user_name"] if att else None
+            uid = att["uid"] if att else None
+            attribution_source = att["attribution_source"] if att else None
+            first_seen = att.get("first_seen_at") if att else None
+            
+            if att:
+                attributed_bytes += size
+            
+            result_volumes.append({
+                "volume_name": vol_name,
+                "size_bytes": size,
+                "host_user_name": host_user_name,
+                "uid": uid,
+                "attribution_source": attribution_source,
+                "ref_count": vol_info.get("ref_count", 0),
+                "first_seen_at": first_seen.isoformat() if first_seen else None,
+            })
+        
+        unattributed_bytes = total_bytes - attributed_bytes
+        
+        elapsed = time.time() - start_time
+        logger.info(
+            "Docker volumes detail: %.2fs (count=%d, total=%d, attributed=%d, unattributed=%d)",
+            elapsed, len(result_volumes), total_bytes, attributed_bytes, unattributed_bytes
+        )
+        
+        return jsonify({
+            "volumes": result_volumes,
+            "total_bytes": total_bytes,
+            "attributed_bytes": attributed_bytes,
+            "unattributed_bytes": unattributed_bytes,
+        })

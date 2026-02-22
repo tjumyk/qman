@@ -21,6 +21,7 @@ import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../
 import { useI18n } from '../i18n'
 import { EditQuotaModal } from '../components/EditQuotaModal'
 import { DeviceUsage } from '../components/DeviceUsage'
+import { DockerDetailTabs } from '../components/docker/DockerDetailTabs'
 import type { UserQuota } from '../api/schemas'
 
 function syntheticUserQuota(uid: number, name: string): UserQuota {
@@ -86,6 +87,25 @@ export function DeviceUserListPage() {
   }
   if (!device) {
     return <Alert color="red">{t('deviceNotFound')}</Alert>
+  }
+
+  // Docker devices use special tabbed view with containers, images, volumes
+  const isDockerDevice = device.fstype === 'docker'
+
+  if (isDockerDevice) {
+    return (
+      <Stack gap="md">
+        <Group justify="space-between" gap="sm">
+          <Group gap="sm">
+            <IconDisc size={24} />
+            <Text size="lg" fw={600}>
+              {hostId} › {deviceName}
+            </Text>
+          </Group>
+        </Group>
+        <DockerDetailTabs hostId={hostId} device={device} />
+      </Stack>
+    )
   }
 
   async function handleAddQuotaContinue() {

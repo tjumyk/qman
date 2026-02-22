@@ -638,6 +638,84 @@ def register_api_routes(app: Any) -> None:
             return jsonify(msg=str(e)), 502
         return jsonify([{"id": u.id, "name": u.name} for u in users])
 
+    @app.route("/api/quotas/<string:slave_id>/docker/containers")
+    @oauth.requires_admin
+    def get_docker_containers(slave_id: str) -> tuple[Any, int] | Any:
+        """Proxy to slave's Docker container detail endpoint."""
+        start_time = time.time()
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            logger.warning("Host %s not found for Docker containers fetch", slave_id)
+            return jsonify(msg="host not found"), 404
+        try:
+            resp = requests.get(
+                f"{slave['url']}/remote-api/docker/containers",
+                auth=make_auth(slave),
+                timeout=_REMOTE_API_TIMEOUT_QUOTA,
+            )
+            elapsed = time.time() - start_time
+            if resp.status_code // 100 != 2:
+                logger.warning("Slave %s returned error status %d for Docker containers (took %.2fs)", slave_id, resp.status_code, elapsed)
+                return jsonify(resp.json()), resp.status_code
+            logger.debug("Fetched Docker containers from slave %s (took %.2fs)", slave_id, elapsed)
+            return jsonify(resp.json())
+        except (OSError, requests.exceptions.RequestException) as e:
+            elapsed = time.time() - start_time
+            logger.warning("Failed to fetch Docker containers from slave %s: %s (took %.2fs)", slave_id, str(e), elapsed)
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/api/quotas/<string:slave_id>/docker/images")
+    @oauth.requires_admin
+    def get_docker_images(slave_id: str) -> tuple[Any, int] | Any:
+        """Proxy to slave's Docker image detail endpoint."""
+        start_time = time.time()
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            logger.warning("Host %s not found for Docker images fetch", slave_id)
+            return jsonify(msg="host not found"), 404
+        try:
+            resp = requests.get(
+                f"{slave['url']}/remote-api/docker/images",
+                auth=make_auth(slave),
+                timeout=_REMOTE_API_TIMEOUT_QUOTA,
+            )
+            elapsed = time.time() - start_time
+            if resp.status_code // 100 != 2:
+                logger.warning("Slave %s returned error status %d for Docker images (took %.2fs)", slave_id, resp.status_code, elapsed)
+                return jsonify(resp.json()), resp.status_code
+            logger.debug("Fetched Docker images from slave %s (took %.2fs)", slave_id, elapsed)
+            return jsonify(resp.json())
+        except (OSError, requests.exceptions.RequestException) as e:
+            elapsed = time.time() - start_time
+            logger.warning("Failed to fetch Docker images from slave %s: %s (took %.2fs)", slave_id, str(e), elapsed)
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/api/quotas/<string:slave_id>/docker/volumes")
+    @oauth.requires_admin
+    def get_docker_volumes(slave_id: str) -> tuple[Any, int] | Any:
+        """Proxy to slave's Docker volume detail endpoint."""
+        start_time = time.time()
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            logger.warning("Host %s not found for Docker volumes fetch", slave_id)
+            return jsonify(msg="host not found"), 404
+        try:
+            resp = requests.get(
+                f"{slave['url']}/remote-api/docker/volumes",
+                auth=make_auth(slave),
+                timeout=_REMOTE_API_TIMEOUT_QUOTA,
+            )
+            elapsed = time.time() - start_time
+            if resp.status_code // 100 != 2:
+                logger.warning("Slave %s returned error status %d for Docker volumes (took %.2fs)", slave_id, resp.status_code, elapsed)
+                return jsonify(resp.json()), resp.status_code
+            logger.debug("Fetched Docker volumes from slave %s (took %.2fs)", slave_id, elapsed)
+            return jsonify(resp.json())
+        except (OSError, requests.exceptions.RequestException) as e:
+            elapsed = time.time() - start_time
+            logger.warning("Failed to fetch Docker volumes from slave %s: %s (took %.2fs)", slave_id, str(e), elapsed)
+            return jsonify(msg=str(e)), 502
+
     @app.route("/api/admin/host-users")
     @oauth.requires_admin
     def get_admin_host_users() -> tuple[Any, int] | Any:

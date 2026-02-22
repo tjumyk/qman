@@ -449,6 +449,74 @@ def get_image_layers_with_sizes(image_id: str) -> list[tuple[str, int]]:
         return []
 
 
+def get_container_details() -> list[dict[str, Any]]:
+    """Get detailed container info for display. Returns list of {id, name, image, status, created}.
+    
+    Fetches additional fields not included in list_containers() for UI display purposes.
+    """
+    start_time = time.time()
+    try:
+        import docker
+        client = docker.from_env()
+        try:
+            containers = client.containers.list(all=True)
+            result = []
+            for c in containers:
+                attrs = c.attrs
+                config = attrs.get("Config") or {}
+                state = attrs.get("State") or {}
+                result.append({
+                    "id": c.id,
+                    "short_id": c.short_id,
+                    "name": c.name or "",
+                    "image": config.get("Image") or attrs.get("Image") or "",
+                    "status": state.get("Status") or c.status or "unknown",
+                    "created": attrs.get("Created"),
+                    "labels": config.get("Labels") or {},
+                })
+            elapsed = time.time() - start_time
+            logger.debug("Docker get_container_details: total=%.2fs (count=%d)", elapsed, len(result))
+            return result
+        finally:
+            client.close()
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.warning("Docker get_container_details failed: %s (took %.2fs)", e, elapsed)
+        return []
+
+
+def get_image_details() -> list[dict[str, Any]]:
+    """Get detailed image info for display. Returns list of {id, tags, size_bytes, created}.
+    
+    Fetches additional fields not included in list_images() for UI display purposes.
+    """
+    start_time = time.time()
+    try:
+        import docker
+        client = docker.from_env()
+        try:
+            images = client.images.list()
+            result = []
+            for img in images:
+                attrs = img.attrs
+                result.append({
+                    "id": img.id,
+                    "short_id": img.short_id,
+                    "tags": attrs.get("RepoTags") or [],
+                    "size_bytes": attrs.get("Size") or 0,
+                    "created": attrs.get("Created"),
+                })
+            elapsed = time.time() - start_time
+            logger.debug("Docker get_image_details: total=%.2fs (count=%d)", elapsed, len(result))
+            return result
+        finally:
+            client.close()
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.warning("Docker get_image_details failed: %s (took %.2fs)", e, elapsed)
+        return []
+
+
 def get_container_volume_mounts() -> dict[str, list[dict[str, Any]]]:
     """Get volume mounts for all containers. Returns {volume_name: [{container_id, container_created}, ...]}.
     
