@@ -281,7 +281,7 @@ def collect_remote_quotas(
     
     if reserved_bytes is not None and reserved_bytes > 0:
         total = reserved_bytes
-        used = attributed
+        used = attributed + unattributed_bytes
         free = max(0, total - attributed - unattributed_bytes)
         percent = ((total - free) / total * 100.0) if total else 0.0
         logger.info(
@@ -291,7 +291,7 @@ def collect_remote_quotas(
     else:
         sum_quotas_bytes = sum(limit_1k * 1024 for limit_1k in limits.values())
         total = max(sum_quotas_bytes + unattributed_bytes, 1)
-        used = attributed
+        used = attributed + unattributed_bytes
         free = max(0, total - attributed - unattributed_bytes)
         percent = ((total - free) / total * 100.0) if total else 0.0
         logger.info(
