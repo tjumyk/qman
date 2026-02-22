@@ -36,15 +36,14 @@ interface DeviceUsageProps {
   otherUsageBytes?: number
 }
 
-export function DeviceUsage({ usage, userQuotas, otherUsageLabelOverride, otherUsageBytes }: DeviceUsageProps) {
+export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
   const { t } = useI18n()
-  const otherLabel = otherUsageLabelOverride ?? t('otherUsageLabel')
+  const otherLabel = t('otherUsageLabel')
   const { used, total, free: userFree } = usage
   const physicalFree = total - used
   const rootReserved = Math.max(0, physicalFree - userFree)
   const hasFree = userFree > 0
-  /** For Docker, used = attributed only; total consumption = used + (otherUsageBytes ?? 0). For pyquota/ZFS, used = device used. */
-  const displayUsed = otherUsageBytes != null ? used + otherUsageBytes : used
+  const displayUsed = used
   const displayPercent = total > 0 ? Math.round((displayUsed / total) * 100) : 0
 
   const simple = (
@@ -75,7 +74,7 @@ export function DeviceUsage({ usage, userQuotas, otherUsageLabelOverride, otherU
   }
 
   const { reservedSoft, reservedHard, trackedUsage } = computeReservedAndTracked(userQuotas)
-  const otherUsage = otherUsageBytes != null ? Math.max(0, otherUsageBytes) : Math.max(0, used - trackedUsage)
+  const otherUsage = Math.max(0, used - trackedUsage)
   // Demand = other + root reserved + quota reserved; over-sold when demand > total (exceeds user-addressable pool)
   const totalDemandSoft = otherUsage + rootReserved + reservedSoft
   const totalDemandHard = otherUsage + rootReserved + reservedHard
