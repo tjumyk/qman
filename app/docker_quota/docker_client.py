@@ -86,13 +86,15 @@ def list_containers(all_containers: bool = True, use_cache: bool = True) -> list
             elif "Config" in attrs and "Image" in attrs["Config"]:
                 # Fallback: image name/tag (less ideal but avoids API call)
                 image_id = attrs["Config"]["Image"]
+            # Labels are in Config.Labels, not directly in attrs.Labels
+            config_labels = (attrs.get("Config") or {}).get("Labels") or {}
             result.append({
                 "id": c.id,
                 "short_id": c.short_id,
                 "name": (c.name or ""),
                 "image": image_id,
                 "created": attrs.get("Created"),
-                "labels": attrs.get("Labels") or {},
+                "labels": config_labels,
             })
         parse_time = time.time() - parse_start
         
