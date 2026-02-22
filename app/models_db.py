@@ -85,3 +85,24 @@ class DockerLayerAttribution(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)  # incremental size from history
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     creation_method: Mapped[str | None] = mapped_column(String(32), nullable=True)  # 'pull', 'build', 'commit', 'import', 'load'
+
+
+class DockerVolumeAttribution(Base):
+    """Attribution of a Docker volume to a user. Persisted on slave.
+    
+    Attribution priority:
+    1. qman.user label on volume (source='label')
+    2. First container (by creation time) that mounts it (source='container')
+    3. Unattributed (not stored - handled as unattributed_bytes)
+    
+    Once attributed, ownership persists even if the container is removed (dangling volume).
+    """
+
+    __tablename__ = "docker_volume_attribution"
+
+    volume_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    attribution_source: Mapped[str] = mapped_column(String(32), default="container")  # 'label', 'container'
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

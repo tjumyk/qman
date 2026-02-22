@@ -8,6 +8,7 @@ from app.models_db import (
     DockerImageAttribution,
     DockerLayerAttribution,
     DockerUserQuotaLimit,
+    DockerVolumeAttribution,
 )
 from app.utils import get_logger
 
@@ -281,3 +282,134 @@ def attribute_image_layers(
             set_layer_attribution(layer_id, creator_host_user_name, creator_uid, size_bytes, creation_method)
             new_count += 1
     return new_count
+
+
+# --- Volume attribution ---
+
+
+def get_volume_attributions() -> list[dict[str, Any]]:
+    """Return all volume attributions: volume_name -> host_user_name, uid, size_bytes, etc."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DockerVolumeAttribution).all()
+        return [
+            {
+                "volume_name": r.volume_name,
+                "host_user_name": r.host_user_name,
+                "uid": r.uid,
+                "size_bytes": r.size_bytes,
+                "attribution_source": r.attribution_source,
+                "first_seen_at": r.first_seen_at,
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def get_volume_attribution(volume_name: str) -> dict[str, Any] | None:
+    """Return attribution for a specific volume, or None if not attributed."""
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeAttribution).filter(
+            DockerVolumeAttribution.volume_name == volume_name
+        ).first()
+        if not row:
+            return None
+        return {
+            "volume_name": row.volume_name,
+            "host_user_name": row.host_user_name,
+            "uid": row.uid,
+            "size_bytes": row.size_bytes,
+            "attribution_source": row.attribution_source,
+            "first_seen_at": row.first_seen_at,
+        }
+    finally:
+        db.close()
+
+
+def set_volume_attribution(
+    volume_name: str,
+    host_user_name: str,
+    uid: int | None,
+    size_bytes: int = 0,
+    attribution_source: str = "container",
+) -> None:
+    """Upsert volume attribution.
+    
+    Attribution sources:
+    - 'label': from qman.user label on volume (takes priority, can change owner)
+    - 'container': from first container that mounts the volume
+    
+    If source='label', always updates the attribution.
+    If source='container' and attribution already exists, only updates size_bytes (preserves existing owner).
+    """
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeAttribution).filter(
+            DockerVolumeAttribution.volume_name == volume_name
+        ).first()
+        if row:
+            # Label attribution takes priority and can change owner
+            if attribution_source == "label":
+                row.host_user_name = host_user_name
+                row.uid = uid
+                row.attribution_source = attribution_source
+            # Container attribution preserves existing owner, only update size
+            row.size_bytes = size_bytes
+        else:
+            db.add(
+                DockerVolumeAttribution(
+                    volume_name=volume_name,
+                    host_user_name=host_user_name,
+                    uid=uid,
+                    size_bytes=size_bytes,
+                    attribution_source=attribution_source,
+                )
+            )
+        db.commit()
+        logger.debug(
+            "Volume attribution set: volume=%s, user=%s, uid=%s, size=%d, source=%s",
+            volume_name, host_user_name, uid, size_bytes, attribution_source
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def update_volume_size(volume_name: str, size_bytes: int) -> bool:
+    """Update only the size_bytes for an existing volume attribution.
+    Returns True if updated, False if volume not found.
+    """
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeAttribution).filter(
+            DockerVolumeAttribution.volume_name == volume_name
+        ).first()
+        if not row:
+            return False
+        row.size_bytes = size_bytes
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_volume_attribution(volume_name: str) -> None:
+    """Remove volume attribution (e.g. after volume removed via docker volume rm)."""
+    db = SessionLocal()
+    try:
+        db.query(DockerVolumeAttribution).filter(
+            DockerVolumeAttribution.volume_name == volume_name
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

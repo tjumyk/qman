@@ -12,12 +12,16 @@ from app.docker_quota.attribution_store import (
     get_container_attributions,
     get_image_attributions,
     get_layer_attributions,
+    get_volume_attributions,
+    get_volume_attribution,
     set_container_attribution,
     set_image_attribution,
+    set_volume_attribution,
+    update_volume_size,
     attribute_image_layers,
     get_layers_for_image,
 )
-from app.docker_quota.quota import _reconcile_layer_attributions, _reconcile_image_attributions
+from app.docker_quota.quota import _reconcile_layer_attributions, _reconcile_image_attributions, _reconcile_volume_attributions
 from app.docker_quota.cache import invalidate_container_cache, invalidate_image_cache
 from app.docker_quota.docker_client import (
     list_containers,
@@ -25,6 +29,7 @@ from app.docker_quota.docker_client import (
     collect_events_since,
     _parse_created_iso,
     get_system_df,
+    get_container_volume_mounts,
 )
 from app.docker_quota.audit_parser import parse_audit_logs, DEFAULT_AUDIT_KEYS, check_auditd_status
 from app.utils import get_logger
@@ -593,8 +598,108 @@ def sync_existing_images() -> int:
     return count
 
 
+def sync_volume_attributions() -> dict[str, int]:
+    """Sync volume attributions from Docker volumes.
+    
+    Attribution priority:
+    1. qman.user label on volume -> explicit owner (source='label')
+    2. Existing attribution in DB -> preserved (only update size)
+    3. First container (by creation time) that mounts it -> use container's attributed owner
+    4. Unattributed -> volume not stored (counted in unattributed_bytes)
+    
+    Returns dict with counts: new_from_label, new_from_container, updated_size, unattributed.
+    """
+    start_time = time.time()
+    
+    # Get volume data from Docker
+    df = get_system_df(include_volumes=True)
+    volumes = df.get("volumes") or {}
+    if not volumes:
+        logger.info("sync_volume_attributions: no volumes found")
+        return {"new_from_label": 0, "new_from_container": 0, "updated_size": 0, "unattributed": 0}
+    
+    # Get container attributions (for resolving volume -> container -> user)
+    container_attributions = {att["container_id"]: att for att in get_container_attributions()}
+    
+    # Get existing volume attributions
+    existing_vol_attributions = {att["volume_name"]: att for att in get_volume_attributions()}
+    
+    # Get volume -> container mappings (sorted by container creation time)
+    volume_to_containers = get_container_volume_mounts()
+    
+    counts = {"new_from_label": 0, "new_from_container": 0, "updated_size": 0, "unattributed": 0}
+    
+    for vol_name, vol_info in volumes.items():
+        size_bytes = vol_info.get("size", 0)
+        labels = vol_info.get("labels") or {}
+        
+        # Priority 1: qman.user label on volume
+        qman_user = labels.get("qman.user")
+        if qman_user:
+            uid = None
+            try:
+                uid = pwd.getpwnam(qman_user).pw_uid
+            except KeyError:
+                logger.debug("Volume %s has qman.user=%s but user not found in passwd", vol_name, qman_user)
+            set_volume_attribution(vol_name, qman_user, uid, size_bytes, attribution_source="label")
+            if vol_name not in existing_vol_attributions:
+                counts["new_from_label"] += 1
+                logger.info("Attributed volume %s to %s (uid=%s) via label", vol_name, qman_user, uid)
+            else:
+                counts["updated_size"] += 1
+            continue
+        
+        # Priority 2: Existing attribution in DB (preserve owner, update size)
+        if vol_name in existing_vol_attributions:
+            update_volume_size(vol_name, size_bytes)
+            counts["updated_size"] += 1
+            continue
+        
+        # Priority 3: First container (by creation time) that mounts this volume
+        containers_for_vol = volume_to_containers.get(vol_name, [])
+        attributed = False
+        for container_info in containers_for_vol:
+            cid = container_info["container_id"]
+            container_att = container_attributions.get(cid)
+            if container_att:
+                host_user_name = container_att["host_user_name"]
+                uid = container_att.get("uid")
+                set_volume_attribution(vol_name, host_user_name, uid, size_bytes, attribution_source="container")
+                counts["new_from_container"] += 1
+                logger.info(
+                    "Attributed volume %s to %s (uid=%s) via first container %s",
+                    vol_name, host_user_name, uid, cid[:12]
+                )
+                attributed = True
+                break
+        
+        if not attributed:
+            # Priority 4: Unattributed (no label, no attributed container)
+            counts["unattributed"] += 1
+            logger.debug("Volume %s is unattributed (no label, no attributed container)", vol_name)
+    
+    # Reconcile: remove attributions for volumes that no longer exist
+    reconcile_start = time.time()
+    volume_names_in_docker = set(volumes.keys())
+    removed_volumes = _reconcile_volume_attributions(volume_names_in_docker)
+    reconcile_time = time.time() - reconcile_start
+    if removed_volumes > 0:
+        logger.info("Reconciled volume attributions: removed %d volumes that no longer exist (took %.2fs)",
+                   removed_volumes, reconcile_time)
+    counts["removed"] = removed_volumes
+    
+    elapsed = time.time() - start_time
+    logger.info(
+        "sync_volume_attributions: total=%.2fs (volumes=%d, new_from_label=%d, new_from_container=%d, "
+        "updated_size=%d, unattributed=%d, removed=%d)",
+        elapsed, len(volumes), counts["new_from_label"], counts["new_from_container"], 
+        counts["updated_size"], counts["unattributed"], counts["removed"]
+    )
+    return counts
+
+
 def run_sync_docker_attribution() -> dict[str, int]:
-    """Run both audit-based and Docker-events-based sync, plus sync existing images. Returns counts."""
+    """Run all Docker attribution syncs: audit-based, events-based, images, and volumes. Returns counts."""
     logger.info("Starting Docker attribution sync")
     
     # Check auditd status on first run or periodically for diagnostics
@@ -611,5 +716,18 @@ def run_sync_docker_attribution() -> dict[str, int]:
     a = sync_containers_from_audit()
     b = sync_from_docker_events()
     c = sync_existing_images()
-    logger.info("Docker attribution sync complete: from_audit=%d, from_events=%d, existing_images=%d", a, b, c)
-    return {"from_audit": a, "from_events": b, "existing_images": c}
+    d = sync_volume_attributions()
+    logger.info(
+        "Docker attribution sync complete: from_audit=%d, from_events=%d, existing_images=%d, "
+        "volumes(new_label=%d, new_container=%d, updated=%d, unattributed=%d)",
+        a, b, c, d["new_from_label"], d["new_from_container"], d["updated_size"], d["unattributed"]
+    )
+    return {
+        "from_audit": a, 
+        "from_events": b, 
+        "existing_images": c,
+        "volumes_new_label": d["new_from_label"],
+        "volumes_new_container": d["new_from_container"],
+        "volumes_updated": d["updated_size"],
+        "volumes_unattributed": d["unattributed"],
+    }

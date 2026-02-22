@@ -4,11 +4,16 @@ This note outlines how to **include Docker volume disk usage** in the existing D
 
 ---
 
+## Status: IMPLEMENTED
+
+Volume quota support has been implemented. See the Implementation section below for details.
+
+---
+
 ## Current behaviour
 
-- **Counted today:** container writable layer size (`SizeRw`) + image layer sizes (first-creator attribution).
-- **Not counted:** Docker named and anonymous volumes.
-- **Source:** `get_system_df()` builds container/image sizes from the Docker API; volumes are not queried.
+- **Counted:** container writable layer size (`SizeRw`) + image layer sizes (first-creator attribution) + **volume sizes**.
+- **Source:** `get_system_df(include_volumes=True)` builds container/image/volume sizes from the Docker API.
 
 ---
 
@@ -21,86 +26,116 @@ This note outlines how to **include Docker volume disk usage** in the existing D
 
 ## Data source for volume sizes
 
-- **Docker Engine API:** `GET /system/df` (in Python: `client.api.df()`) returns a **`Volumes`** list (and `VolumeUsage`).
+- **Docker Engine API:** `GET /system/df` (in Python: `client.api.df()`) returns a **`Volumes`** list.
 - Each entry has: `Name`, `Mountpoint`, `UsageData.Size` (bytes), `UsageData.RefCount`, `CreatedAt`, `Labels`.
 - No extra subprocess or host filesystem access is needed; the daemon reports size.
 
-**Implementation:** Add a function (e.g. in `docker_client.py`) that calls `client.api.df()` and returns a dict `volume_name -> size_bytes` (and optionally the full volume list for attribution). Use this in the same code paths that today call `get_system_df()` so one API call can feed both container/image and volume data.
-
 ---
 
-## Attribution: who “owns” a volume
+## Attribution: who "owns" a volume
 
-Volumes can be:
+Volume attribution is **persisted** in the `docker_volume_attribution` table. Attribution priority:
 
-1. **Named volumes** – created explicitly or by Compose; can be used by one or many containers.
-2. **Anonymous volumes** – created with a container (e.g. `docker run -v /data`); typically one container.
+1. **`qman.user` label** on the volume (source='label') – explicit owner, highest priority, can change ownership
+2. **Existing attribution in DB** – preserved even if the original container is removed (supports dangling volumes)
+3. **First container (by creation time)** that mounts it (source='container') – initial attribution for new volumes
+4. **Unattributed** – volume not stored in DB, counted in `unattributed_bytes`
 
-Attribution options:
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| **A. Same as (first) using container** | Reuses existing container attribution; no new event parsing for volume create. | Need to resolve “first” or “primary” container when multiple use the volume. |
-| **B. Volume create event + audit** | Can attribute at create time, like containers. | Volume create events; need to correlate with audit; anonymous volumes created with container. |
-| **C. Label on volume** | Explicit owner (e.g. `qman.user=alice`). | Requires users/Compose to set labels; not set by default. |
-| **D. First container (by creation time)** | Deterministic: first container that mounted it “owns” it. | Need to inspect container Mounts and creation time. |
-
-**Recommendation:** **A + D combined**
-
-- **Primary:** Attribute each volume to the **owner of the first container** that uses it (first by container creation time). Containers are already attributed (including audit/events); we have container ↔ volume from `inspect_container` Mounts and container creation time.
-- **Fallback:** If a volume is not used by any container (dangling), treat as **unattributed** (count in total and in “unattributed”, not in any user’s usage). Optionally later: volume create event + audit to attribute at create time.
-- **Optional:** If we later support volume labels (e.g. `qman.user`), they can override the “first container” rule.
-
-So:
-
-- **Per volume:** Get list of containers that mount this volume (from container inspect Mounts). Among them, take the one with earliest `Created`; get that container’s attribution (uid/host_user_name). That uid gets this volume’s `UsageData.Size` in their usage.
-- **Unattributed:** Volume size is unattributed if no container uses it or no container using it has attribution.
+This ensures:
+- A user who creates a volume and later removes the container still owns the volume
+- Labels can override/change ownership at any time
+- Dangling volumes retain their original owner
 
 ---
 
 ## Persistence
 
-- **Option 1 – No persistence:** Compute volume attribution on each run from current containers + current attributions. Simpler; no new tables; always consistent with current container list.
-- **Option 2 – Persist volume attribution:** New table e.g. `docker_volume_attribution` (volume_name, host_user_name, uid, size_bytes, first_seen_at). Update on sync; reconcile when volume is removed (like layer cleanup). Allows attributing dangling volumes and faster aggregation.
+Volume attribution is persisted in the `docker_volume_attribution` table:
 
-**Recommendation:** Start with **Option 1** (compute from current containers + attributions). If we need to attribute dangling volumes or optimize, add Option 2 later.
+```sql
+CREATE TABLE docker_volume_attribution (
+    volume_name VARCHAR(255) PRIMARY KEY,
+    host_user_name VARCHAR(255) NOT NULL,
+    uid INTEGER,
+    size_bytes INTEGER DEFAULT 0,
+    attribution_source VARCHAR(32) DEFAULT 'container',  -- 'label' or 'container'
+    first_seen_at DATETIME
+);
+```
+
+Reconciliation removes attributions for volumes that no longer exist in Docker.
 
 ---
 
-## Where to plug in
+## Implementation
 
-1. **`docker_client.py`**
-   - Add something like `get_volume_sizes()` that returns `dict[str, int]` (name → size) from `api.df()` (and optionally a list of volume infos with Name, Size, RefCount, CreatedAt for attribution).
-   - Optionally extend `get_system_df()` to also return a `"volumes"` key (name → size), so a single “system df” concept includes containers, images, and volumes.
+### Files modified
 
-2. **`quota.py` – `_aggregate_usage_by_uid()`**
-   - Take volume sizes (name → size).
-   - Resolve volume → first container (by creation) → that container’s uid (from existing container attribution).
-   - Add `total_volume_used` and per-uid volume usage; include in `total_used` and in `usage_by_uid`. Add volume share to `unattributed_bytes` when a volume has no attributed owner.
+| File | Changes |
+|------|---------|
+| `app/models_db.py` | Added `DockerVolumeAttribution` model |
+| `app/docker_quota/docker_client.py` | Extended `get_system_df(include_volumes=True)` to fetch volume data; added `get_container_volume_mounts()` |
+| `app/docker_quota/attribution_store.py` | Added volume CRUD: `get_volume_attributions()`, `get_volume_attribution()`, `set_volume_attribution()`, `update_volume_size()`, `delete_volume_attribution()` |
+| `app/docker_quota/attribution_sync.py` | Added `sync_volume_attributions()` with label and container-based attribution |
+| `app/docker_quota/quota.py` | Added `_reconcile_volume_attributions()`; updated `_aggregate_usage_by_uid()` to include volume usage |
+| `alembic/versions/e3f5a7b9c812_*.py` | Migration for `docker_volume_attribution` table |
 
-3. **`get_system_df()`**
-   - Either call `api.df()` once and derive containers, images, and volumes from it, or keep building containers/images as today and add a separate call to get volume sizes. Prefer one `api.df()` call if the response includes everything we need (containers, images, volumes) to avoid extra round-trips.
+### Data flow
 
-4. **Enforcement**
-   - Current enforcement: remove containers when over quota. Volume usage is already part of the user’s usage, so we still enforce by removing containers. We do **not** automatically delete volumes (data loss risk). Optionally: when reporting “over quota”, include a note that the user has volume usage and that removing containers may free container+image space but not volume space until they remove or prune volumes.
+1. **Sync** (`sync_volume_attributions()` in Celery task):
+   - Fetch volumes from Docker API with sizes and labels
+   - For each volume: check label → check existing DB attribution → check first container mount
+   - Persist attribution in `docker_volume_attribution`
+   - Reconcile: remove attributions for deleted volumes
 
-5. **Reconciliation**
-   - If we persist volume attribution (Option 2): when a volume is removed from the daemon (e.g. `docker volume rm`), remove its row (like layer reconciliation). If we don’t persist, no reconciliation needed.
+2. **Aggregation** (`_aggregate_usage_by_uid()`):
+   - Fetch volume data with `get_system_df(include_volumes=True)`
+   - Fetch volume attributions from DB
+   - Add volume sizes to per-uid usage and total_used
+   - Unattributed volumes count in `unattributed_bytes`
+
+### Enforcement
+
+- Current enforcement: remove containers when over quota
+- Volume usage is part of the user's total Docker usage
+- Volumes are **NOT** automatically deleted (data loss risk)
+- Users must manually remove or prune volumes to free space
 
 ---
 
 ## Edge cases
 
-- **Anonymous volumes:** Have generated names (long hash). Attributed the same way: first container that uses them (the creating container).
-- **Shared volumes:** Multiple containers (same or different users) using one volume. We attribute the whole volume size to one owner (first container by creation). No double-counting: volume size is in total once and in one user’s usage.
-- **Dangling volumes:** Not used by any container. Count in total Docker usage and in unattributed; no per-user usage.
-- **Bind mounts:** Host paths mounted into containers are not Docker volumes; they are not stored under the Docker data root in the same way. We do **not** include them in Docker volume quota (they could be covered by existing filesystem/quota if applicable).
+- **Anonymous volumes:** Have generated names (long hash). Attributed the same way: first container that uses them.
+- **Shared volumes:** Multiple containers using one volume. Attributed to first container's owner (by creation time). No double-counting.
+- **Dangling volumes:** Keep their original owner attribution. If never attributed, count as unattributed.
+- **Bind mounts:** Not included (not Docker volumes, covered by filesystem quota if applicable).
+- **Volume removed:** Reconciliation removes the attribution row.
 
 ---
 
-## Summary
+## Usage
 
-- **Include volume sizes** in Docker quota: get them from `client.api.df()` and add to total and per-uid usage.
-- **Attribution:** Volume → first container (by creation) that mounts it → that container’s attributed uid; if no such container or no attribution, count as unattributed.
-- **Enforcement:** Unchanged (remove containers only); volume usage is part of the same quota number; optionally document that volume data is not removed by enforcement.
-- **Implementation order:** (1) Get volume sizes from API and add to `get_system_df()` or a small helper; (2) In `_aggregate_usage_by_uid()`, resolve volume→container→uid and add volume usage to totals and per-uid; (3) Optionally persist volume attribution and reconcile removed volumes later.
+### Set explicit volume owner via label
+
+When creating a volume with Docker Compose:
+
+```yaml
+volumes:
+  my_data:
+    labels:
+      qman.user: alice
+```
+
+Or with Docker CLI:
+
+```bash
+docker volume create --label qman.user=alice my_data
+```
+
+### Apply migration
+
+```bash
+alembic upgrade head
+```
+
+The sync task will automatically start attributing volumes on the next run.

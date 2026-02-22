@@ -190,14 +190,22 @@ def _parse_created_iso(created: str | None) -> float:
 def get_system_df(
     container_ids: list[str] | None = None,
     image_sizes: dict[str, int] | None = None,
+    include_volumes: bool = False,
 ) -> dict[str, Any]:
-    """Run 'docker system df -v' equivalent: per-container and per-image sizes. Returns dict with Containers, Images.
+    """Run 'docker system df -v' equivalent: per-container, per-image, and optionally per-volume sizes.
 
     Args:
         container_ids: Optional list of container IDs to inspect. If None, will list all containers first.
                        This avoids duplicate list_containers() calls when container list is already known.
         image_sizes: Optional precomputed map image_id -> size in bytes. When provided, skips client.images.list()
                      to avoid redundant list_images() when the caller already has image list/sizes.
+        include_volumes: If True, also fetch volume sizes and info from api.df().
+
+    Returns:
+        dict with keys:
+        - "containers": {container_id: size_bytes}
+        - "images": {image_id: size_bytes}
+        - "volumes": {volume_name: {"size": int, "labels": dict, "ref_count": int}} (only if include_volumes=True)
     """
     start_time = time.time()
     try:
@@ -242,24 +250,61 @@ def get_system_df(
             inspect_times.append(time.time() - inspect_one_start)
         inspect_time = time.time() - inspect_start
 
+        # Fetch volume sizes if requested (from api.df() which includes Volumes)
+        volumes_dict: dict[str, dict[str, Any]] = {}
+        volumes_time = 0.0
+        if include_volumes:
+            volumes_start = time.time()
+            try:
+                df_result = client.api.df()
+                volumes_list = df_result.get("Volumes") or []
+                for vol in volumes_list:
+                    vol_name = vol.get("Name")
+                    if not vol_name:
+                        continue
+                    usage_data = vol.get("UsageData") or {}
+                    volumes_dict[vol_name] = {
+                        "size": usage_data.get("Size", 0) or 0,
+                        "labels": vol.get("Labels") or {},
+                        "ref_count": usage_data.get("RefCount", 0) or 0,
+                    }
+            except Exception as vol_err:
+                logger.warning("Failed to fetch volume sizes: %s", vol_err)
+            volumes_time = time.time() - volumes_start
+
         total_time = time.time() - start_time
         avg_inspect = sum(inspect_times) / len(inspect_times) if inspect_times else 0
         max_inspect = max(inspect_times) if inspect_times else 0
         total_container_bytes = sum(container_sizes_dict.values())
         total_image_bytes = sum(image_sizes.values()) if image_sizes else 0
+        total_volume_bytes = sum(v["size"] for v in volumes_dict.values()) if volumes_dict else 0
         containers_with_size = sum(1 for s in container_sizes_dict.values() if s > 0)
-        logger.info(
+        
+        log_msg = (
             "Docker get_system_df: total=%.2fs (client_init=%.2fs, list_containers=%.2fs, list_images=%.2fs, "
-            "inspect_containers=%.2fs [avg=%.3fs, max=%.3fs, count=%d], parse_images=%.2fs) "
-            "sizes: containers=%d bytes (%d with data), images=%d bytes (%d images)",
-            total_time, client_init_time, list_containers_time, list_images_time,
-            inspect_time, avg_inspect, max_inspect, len(container_ids_list), parse_images_time,
-            total_container_bytes, containers_with_size, total_image_bytes, len(image_sizes) if image_sizes else 0
+            "inspect_containers=%.2fs [avg=%.3fs, max=%.3fs, count=%d], parse_images=%.2fs"
         )
-        return {
+        log_args: list[Any] = [
+            total_time, client_init_time, list_containers_time, list_images_time,
+            inspect_time, avg_inspect, max_inspect, len(container_ids_list), parse_images_time
+        ]
+        if include_volumes:
+            log_msg += ", volumes=%.2fs"
+            log_args.append(volumes_time)
+        log_msg += ") sizes: containers=%d bytes (%d with data), images=%d bytes (%d images)"
+        log_args.extend([total_container_bytes, containers_with_size, total_image_bytes, len(image_sizes) if image_sizes else 0])
+        if include_volumes:
+            log_msg += ", volumes=%d bytes (%d volumes)"
+            log_args.extend([total_volume_bytes, len(volumes_dict)])
+        logger.info(log_msg, *log_args)
+        
+        result: dict[str, Any] = {
             "containers": container_sizes_dict,
             "images": image_sizes,
         }
+        if include_volumes:
+            result["volumes"] = volumes_dict
+        return result
     except Exception as e:
         elapsed = time.time() - start_time
         logger.warning("Docker system df failed: %s (took %.2fs)", e, elapsed)
@@ -402,3 +447,49 @@ def get_image_layers_with_sizes(image_id: str) -> list[tuple[str, int]]:
         elapsed = time.time() - start_time
         logger.warning("Docker get image layers failed for %s: %s (took %.2fs)", image_id[:12], e, elapsed)
         return []
+
+
+def get_container_volume_mounts() -> dict[str, list[dict[str, Any]]]:
+    """Get volume mounts for all containers. Returns {volume_name: [{container_id, container_created}, ...]}.
+    
+    Only includes mounts of type 'volume' (not bind mounts).
+    Used for volume attribution: first container (by creation time) that mounts a volume owns it.
+    """
+    start_time = time.time()
+    try:
+        import docker
+        client = docker.from_env()
+        try:
+            containers = client.containers.list(all=True)
+            volume_to_containers: dict[str, list[dict[str, Any]]] = {}
+            for c in containers:
+                mounts = c.attrs.get("Mounts") or []
+                created = c.attrs.get("Created")
+                created_ts = _parse_created_iso(created)
+                for mount in mounts:
+                    if mount.get("Type") != "volume":
+                        continue
+                    vol_name = mount.get("Name")
+                    if not vol_name:
+                        continue
+                    if vol_name not in volume_to_containers:
+                        volume_to_containers[vol_name] = []
+                    volume_to_containers[vol_name].append({
+                        "container_id": c.id,
+                        "container_created": created_ts,
+                    })
+            # Sort each volume's containers by creation time (oldest first)
+            for vol_name in volume_to_containers:
+                volume_to_containers[vol_name].sort(key=lambda x: x["container_created"])
+            elapsed = time.time() - start_time
+            logger.debug(
+                "Docker get_container_volume_mounts: total=%.2fs (containers=%d, volumes_with_mounts=%d)",
+                elapsed, len(containers), len(volume_to_containers)
+            )
+            return volume_to_containers
+        finally:
+            client.close()
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.warning("Docker get container volume mounts failed: %s (took %.2fs)", e, elapsed)
+        return {}

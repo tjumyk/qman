@@ -10,6 +10,8 @@ from app.docker_quota.attribution_store import (
     delete_container_attribution,
     get_image_attributions,
     delete_image_attribution,
+    get_volume_attributions,
+    delete_volume_attribution,
     get_user_quota_limit,
     set_user_quota_limit,
     get_all_user_quota_limits,
@@ -107,14 +109,35 @@ def _reconcile_image_attributions(image_ids_from_docker: set[str]) -> int:
     return removed_count
 
 
+def _reconcile_volume_attributions(volume_names_from_docker: set[str]) -> int:
+    """Remove volume attribution rows for volumes that no longer exist in Docker.
+    
+    Args:
+        volume_names_from_docker: Set of volume names that exist in Docker.
+    
+    Returns:
+        Number of volume attributions removed.
+    """
+    volume_attributions = get_volume_attributions()
+    removed_count = 0
+    for vol_att in volume_attributions:
+        volume_name = vol_att["volume_name"]
+        if volume_name not in volume_names_from_docker:
+            delete_volume_attribution(volume_name)
+            removed_count += 1
+            logger.info("Removed attribution for gone volume %s (was attributed to uid=%s)", 
+                       volume_name, vol_att.get("uid"))
+    return removed_count
+
+
 def _aggregate_usage_by_uid(
     data_root: str,
     reserved_bytes: int | None,
     container_ids: list[str] | None = None,
 ) -> tuple[dict[int, int], int, int]:
     """Aggregate Docker disk usage per uid. Returns (uid -> used_bytes, total_used, unattributed_bytes).
-    total_used = sum of all container sizes + sum of all image layer sizes; 
-    usage_by_uid = container usage + image layer usage (where user is first creator);
+    total_used = sum of all container sizes + sum of all image layer sizes + sum of all volume sizes; 
+    usage_by_uid = container usage + image layer usage + volume usage (where user is attributed);
     unattributed = total_used - sum(usage_by_uid).
     
     Args:
@@ -124,15 +147,17 @@ def _aggregate_usage_by_uid(
     timings: dict[str, float] = {}
     
     df_start = time.time()
-    df = get_system_df(container_ids=container_ids)
+    df = get_system_df(container_ids=container_ids, include_volumes=True)
     timings["get_system_df"] = time.time() - df_start
     
     container_sizes = df.get("containers") or {}
     image_sizes = df.get("images") or {}
+    volume_data = df.get("volumes") or {}
     
     attrib_start = time.time()
     attributions = get_container_attributions()
     layer_attributions = get_layer_attributions()
+    volume_attributions = get_volume_attributions()
     timings["get_attributions"] = time.time() - attrib_start
     
     build_map_start = time.time()
@@ -186,10 +211,31 @@ def _aggregate_usage_by_uid(
             usage_by_uid[uid] = usage_by_uid.get(uid, 0) + layer_size
     timings["layer_aggregation"] = time.time() - layer_agg_start
     
-    # Total used = containers (all) + images (all from Docker)
-    # Attributed = containers (with attribution) + layers (with attribution)
+    # Volume usage (attributed volumes count toward user, unattributed count in total)
+    volume_agg_start = time.time()
+    total_volume_used = sum(v.get("size", 0) for v in volume_data.values())
+    attributed_volume_used = 0
+    vol_att_by_name = {att["volume_name"]: att for att in volume_attributions}
+    for vol_name, vol_info in volume_data.items():
+        vol_size = vol_info.get("size", 0)
+        vol_att = vol_att_by_name.get(vol_name)
+        if vol_att:
+            attributed_volume_used += vol_size
+            uid = vol_att.get("uid")
+            if uid is not None:
+                usage_by_uid[uid] = usage_by_uid.get(uid, 0) + vol_size
+            else:
+                # Try to resolve from host_user_name
+                host_name = vol_att.get("host_user_name")
+                if host_name and host_name in name_to_uid:
+                    u = name_to_uid[host_name]
+                    usage_by_uid[u] = usage_by_uid.get(u, 0) + vol_size
+    timings["volume_aggregation"] = time.time() - volume_agg_start
+    
+    # Total used = containers (all) + images (all from Docker) + volumes (all)
+    # Attributed = containers (with attribution) + layers (with attribution) + volumes (with attribution)
     # Unattributed = total - attributed
-    total_used = total_container_used + total_image_used
+    total_used = total_container_used + total_image_used + total_volume_used
     attributed_sum = sum(usage_by_uid.values())
     unattributed_bytes = max(0, total_used - attributed_sum)
     
@@ -199,11 +245,13 @@ def _aggregate_usage_by_uid(
         "Docker _aggregate_usage_by_uid: total=%.2fs [%s] "
         "(container_count=%d, container_bytes=%d, image_count=%d, image_bytes=%d, "
         "attributed_layers=%d, attributed_layer_bytes=%d, "
+        "volume_count=%d, volume_bytes=%d, attributed_volume_bytes=%d, "
         "total_used=%d, attributed=%d, unattributed=%d, users_with_usage=%d)",
         total_time, timing_str,
         len(container_sizes), total_container_used,
         len(image_sizes), total_image_used,
         len(layer_attributions), attributed_layer_used,
+        len(volume_data), total_volume_used, attributed_volume_used,
         total_used, attributed_sum, unattributed_bytes, len(usage_by_uid)
     )
     return usage_by_uid, total_used, unattributed_bytes
