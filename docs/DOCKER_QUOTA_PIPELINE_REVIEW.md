@@ -117,11 +117,11 @@
 - ✅ Installation instructions in comments
 
 ### 14. Frontend Integration
-- ✅ `DeviceUsage` component handles `unattributed_usage`
+- ✅ `DeviceUsage` component handles usage breakdown (tracked vs other)
 - ✅ `deviceTypeDocker` i18n strings
-- ✅ `unattributedUsageLabel` i18n strings
 - ✅ `containerRemovedDueToQuota` i18n strings
 - ✅ Frontend displays Docker device correctly
+- ✅ Simplified: backend `used` now includes attributed + unattributed (consistent with pyquota/ZFS)
 
 ---
 
@@ -144,7 +144,8 @@
 
 **Quota Computation**:
 - User's total usage = container writable layers + image layers (where user is first creator)
-- Device total = sum of all container sizes + sum of all image layer sizes
+- Device total = sum of all container sizes + sum of all image sizes
+- Device used = attributed + unattributed (consistent with pyquota/ZFS: `used + free = total`)
 - Unattributed = total - sum of attributed usage (containers + layers)
 
 **Enforcement**:
