@@ -1,6 +1,7 @@
 """Sync Docker attribution from audit logs and Docker events (container create, image pull)."""
 
 import time
+from datetime import datetime
 from typing import Any
 
 import pwd
@@ -25,7 +26,7 @@ from app.docker_quota.docker_client import (
     _parse_created_iso,
     get_system_df,
 )
-from app.docker_quota.audit_parser import parse_audit_logs, DEFAULT_AUDIT_KEYS
+from app.docker_quota.audit_parser import parse_audit_logs, DEFAULT_AUDIT_KEYS, check_auditd_status
 from app.utils import get_logger
 
 logger = get_logger(__name__)
@@ -64,7 +65,6 @@ def _audit_events_by_time_window(
     audit_events: list[dict[str, Any]],
 ) -> dict[int, int]:
     """Build approximate (time_bucket_sec -> uid) from audit events. time_bucket_sec = floor(timestamp/60)."""
-    from datetime import datetime
     bucket_to_uid: dict[int, int] = {}
     for ev in audit_events:
         uid = ev.get("uid")
@@ -93,7 +93,6 @@ def _parse_audit_timestamp(ev: dict[str, Any]) -> float | None:
         return float(ts)
     # ausearch -i may output "time" as date string
     try:
-        from datetime import datetime
         if ts.isdigit():
             return float(ts)
         return None
@@ -121,28 +120,71 @@ def sync_containers_from_audit() -> int:
     )
     
     if not audit_events:
-        logger.debug("No audit events for container correlation")
+        logger.info("No audit events for container correlation (auditd may not be configured or no Docker activity in time window)")
+    
     # Build list of (uid, timestamp) from audit for time matching
+    # Try multiple UID sources: uid, auid (audit uid - who initiated), euid
     audit_by_ts: list[tuple[float, int]] = []
+    parse_failures = 0
+    uid_missing = 0
+    ts_missing = 0
+    
     for ev in audit_events:
-        uid = ev.get("uid")
+        # Prefer auid (audit uid) over uid for attribution - it tracks who initiated the action
+        uid = ev.get("auid") or ev.get("uid") or ev.get("euid")
         if uid is None:
+            # Try to resolve uid from name if -i flag gave us names
+            uid_name = ev.get("auid_name") or ev.get("uid_name")
+            if uid_name:
+                try:
+                    uid = pwd.getpwnam(uid_name).pw_uid
+                except KeyError:
+                    pass
+        if uid is None:
+            uid_missing += 1
             continue
-        # ausearch output often has 'time' field with format like "02/16/2026 12:34:56"
-        ts_str = ev.get("timestamp")
-        if not ts_str:
+        
+        # Get timestamp - try multiple sources
+        ts_float: float | None = None
+        
+        # First try Unix timestamp (most reliable)
+        if ev.get("timestamp_unix"):
+            ts_float = ev["timestamp_unix"]
+        elif ev.get("timestamp"):
+            ts_str = ev["timestamp"]
+            try:
+                # Format: "02/16/2026 12:34:56"
+                if " " in str(ts_str):
+                    dt = datetime.strptime(ts_str.strip(), "%m/%d/%Y %H:%M:%S")
+                    ts_float = dt.timestamp()
+            except Exception as e:
+                logger.debug("Failed to parse audit timestamp '%s': %s", ts_str, e)
+                parse_failures += 1
+        
+        if ts_float is None:
+            ts_missing += 1
             continue
-        try:
-            from datetime import datetime
-            if " " in str(ts_str):
-                dt = datetime.strptime(ts_str.strip(), "%m/%d/%Y %H:%M:%S")
-            else:
-                continue
-            audit_by_ts.append((dt.timestamp(), uid))
-        except Exception:
-            continue
+        
+        audit_by_ts.append((ts_float, uid))
+    
     audit_by_ts.sort(key=lambda x: x[0])
+    
+    if audit_events:
+        logger.info(
+            "Audit events processed: total=%d, usable=%d (uid_missing=%d, ts_missing=%d, parse_failures=%d)",
+            len(audit_events), len(audit_by_ts), uid_missing, ts_missing, parse_failures
+        )
+        if audit_by_ts:
+            # Log time range of usable events
+            oldest = datetime.fromtimestamp(audit_by_ts[0][0]).strftime("%Y-%m-%d %H:%M:%S")
+            newest = datetime.fromtimestamp(audit_by_ts[-1][0]).strftime("%Y-%m-%d %H:%M:%S")
+            unique_uids = set(uid for _, uid in audit_by_ts)
+            logger.info("Audit time range: %s to %s, unique_uids=%s", oldest, newest, list(unique_uids))
     set_count = 0
+    containers_checked = 0
+    containers_no_created_ts = 0
+    containers_no_audit_match = 0
+    
     for c in containers:
         cid = c["id"]
         if cid in attributions:
@@ -172,10 +214,15 @@ def sync_containers_from_audit() -> int:
             set_count += 1
             logger.info("Attributed container %s to %s from qman.user label", cid[:12], name)
             continue
+        
+        containers_checked += 1
         created_str = c.get("created")
         created_ts = _parse_created_iso(created_str)
         if created_ts <= 0:
+            containers_no_created_ts += 1
+            logger.debug("Container %s has invalid/missing created timestamp: %s", cid[:12], created_str)
             continue
+        
         # Find audit event within TIME_WINDOW_SECONDS
         best_uid: int | None = None
         best_delta = float("inf")
@@ -184,6 +231,7 @@ def sync_containers_from_audit() -> int:
             if delta <= TIME_WINDOW_SECONDS and delta < best_delta:
                 best_delta = delta
                 best_uid = uid
+        
         if best_uid is not None:
             try:
                 name = pwd.getpwuid(best_uid).pw_name
@@ -192,11 +240,32 @@ def sync_containers_from_audit() -> int:
             size_bytes = container_sizes.get(cid, 0)
             set_container_attribution(cid, name, best_uid, c.get("image"), size_bytes)
             set_count += 1
-            logger.info("Attributed container %s to uid=%s from audit (time window)", cid[:12], best_uid)
+            logger.info(
+                "Attributed container %s to uid=%s from audit (delta=%.1fs, created=%s)",
+                cid[:12], best_uid, best_delta,
+                datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S")
+            )
+        else:
+            containers_no_audit_match += 1
+            if containers_no_audit_match <= 5:  # Log first few unmatched for debugging
+                logger.debug(
+                    "Container %s (created %s) has no audit match within %ds window",
+                    cid[:12],
+                    datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                    TIME_WINDOW_SECONDS
+                )
+    
+    logger.info(
+        "sync_containers_from_audit result: attributed=%d, checked_for_audit=%d (no_created_ts=%d, no_audit_match=%d)",
+        set_count, containers_checked, containers_no_created_ts, containers_no_audit_match
+    )
     
     if set_count == 0 and needs_audit > 0:
         logger.info(
-            "sync_containers_from_audit: %d containers need audit attribution but no audit match (audit events may be outside %ds window or auditd not configured)",
+            "Troubleshooting: %d containers need audit attribution but no matches found. "
+            "Possible causes: (1) auditd not configured - check /etc/audit/rules.d/, "
+            "(2) audit events outside %ds time window, "
+            "(3) containers created before auditd was enabled",
             needs_audit, TIME_WINDOW_SECONDS
         )
     return set_count
@@ -218,7 +287,6 @@ def sync_from_docker_events() -> int:
     # Log event counts by type for diagnosis
     container_events = sum(1 for e in events if (e.get("type") or "").lower() == "container")
     image_events = sum(1 for e in events if (e.get("type") or "").lower() == "image")
-    from datetime import datetime
     since_dt = datetime.fromtimestamp(since_ts).strftime("%Y-%m-%d %H:%M:%S")
     logger.info(
         "sync_from_docker_events: docker_events=%d (container=%d, image=%d) since %s, audit_events=%d",
@@ -236,7 +304,6 @@ def sync_from_docker_events() -> int:
         if not ts_str:
             continue
         try:
-            from datetime import datetime
             s = str(ts_str).strip()
             if s.replace(".", "", 1).isdigit():
                 audit_by_ts.append((float(s), uid))
@@ -481,6 +548,18 @@ def sync_existing_images() -> int:
 def run_sync_docker_attribution() -> dict[str, int]:
     """Run both audit-based and Docker-events-based sync, plus sync existing images. Returns counts."""
     logger.info("Starting Docker attribution sync")
+    
+    # Check auditd status on first run or periodically for diagnostics
+    try:
+        audit_status = check_auditd_status()
+        if not audit_status.get("docker_rules_found"):
+            logger.warning(
+                "No Docker audit rules found - audit-based attribution will not work. "
+                "See deploy/auditd-docker-quota.rules for setup instructions."
+            )
+    except Exception as e:
+        logger.debug("Auditd status check failed: %s", e)
+    
     a = sync_containers_from_audit()
     b = sync_from_docker_events()
     c = sync_existing_images()
