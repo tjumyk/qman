@@ -83,16 +83,6 @@ export function HostDetailPage() {
                   <DeviceUsage
                     usage={dev.usage}
                     userQuotas={dev.user_quotas}
-                    otherUsageLabelOverride={
-                      dev.fstype === 'docker' && dev.unattributed_usage
-                        ? t('unattributedUsageLabel')
-                        : undefined
-                    }
-                    otherUsageBytes={
-                      dev.fstype === 'docker' && dev.unattributed_usage != null
-                        ? dev.unattributed_usage
-                        : undefined
-                    }
                   />
                 )}
               </Stack>

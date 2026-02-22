@@ -126,16 +126,6 @@ export function DeviceUserListPage() {
           <DeviceUsage
             usage={device.usage}
             userQuotas={device.user_quotas}
-            otherUsageLabelOverride={
-              device.fstype === 'docker' && device.unattributed_usage
-                ? t('unattributedUsageLabel')
-                : undefined
-            }
-            otherUsageBytes={
-              device.fstype === 'docker' && device.unattributed_usage != null
-                ? device.unattributed_usage
-                : undefined
-            }
           />
         )}
       </Stack>
