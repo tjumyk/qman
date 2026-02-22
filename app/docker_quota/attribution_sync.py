@@ -17,7 +17,7 @@ from app.docker_quota.attribution_store import (
     attribute_image_layers,
     get_layers_for_image,
 )
-from app.docker_quota.quota import _reconcile_layer_attributions
+from app.docker_quota.quota import _reconcile_layer_attributions, _reconcile_image_attributions
 from app.docker_quota.cache import invalidate_container_cache, invalidate_image_cache
 from app.docker_quota.docker_client import (
     list_containers,
@@ -562,9 +562,17 @@ def sync_existing_images() -> int:
                 count += 1
                 logger.info("Attributed %s new layers for existing image %s", new_layers_count, image_id[:12])
     
-    # Reconcile layer attributions: remove layers that no longer exist in any image
+    # Reconcile attributions: remove entries for images/layers that no longer exist
     # Use the same all_images we already fetched above
     reconcile_start = time.time()
+    image_ids_in_docker = {img["id"] for img in all_images}
+    
+    # Reconcile image attributions first
+    removed_images = _reconcile_image_attributions(image_ids_in_docker)
+    if removed_images > 0:
+        logger.info("Reconciled image attributions: removed %d images that no longer exist", removed_images)
+    
+    # Then reconcile layer attributions
     all_layers_in_docker: set[str] = set()
     for img in all_images:
         img_id = img["id"]
@@ -574,15 +582,14 @@ def sync_existing_images() -> int:
         except Exception as e:
             logger.warning("Failed to get layers for image %s: %s", img_id[:12], e)
     
-    # Remove layer attributions for layers that no longer exist
-    removed_count = _reconcile_layer_attributions(all_layers_in_docker)
+    removed_layers = _reconcile_layer_attributions(all_layers_in_docker)
     reconcile_time = time.time() - reconcile_start
-    if removed_count > 0:
+    if removed_layers > 0:
         logger.info("Reconciled layer attributions: removed %d layers that no longer exist (took %.2fs)", 
-                   removed_count, reconcile_time)
+                   removed_layers, reconcile_time)
     total_time = time.time() - start_time
-    logger.debug("sync_existing_images: total=%.2fs (attributed=%d images, removed=%d layers)", 
-                total_time, count, removed_count)
+    logger.debug("sync_existing_images: total=%.2fs (attributed=%d images, removed=%d images, removed=%d layers)", 
+                total_time, count, removed_images, removed_layers)
     return count
 
 

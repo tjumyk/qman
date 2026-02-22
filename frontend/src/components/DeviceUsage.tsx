@@ -45,6 +45,8 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
   const hasFree = userFree > 0
   const displayUsed = used
   const displayPercent = total > 0 ? Math.round((displayUsed / total) * 100) : 0
+  // Over-use: used > total (e.g., Docker virtual device with no reserved bytes set)
+  const isOverUse = used > total
 
   const simple = (
     <Stack gap={4}>
@@ -52,15 +54,17 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
         {t('diskUsageLabel')}
       </Text>
       <Progress
-        value={displayPercent}
+        value={Math.min(displayPercent, 100)}
         size="sm"
-        color={hasFree ? 'green' : 'red'}
+        color={isOverUse ? 'red' : (hasFree ? 'green' : 'orange')}
       />
       <Group gap="xs">
         <Text size="xs" c="dimmed">
-          <BlockSize size={displayUsed} /> / <BlockSize size={total} /> ({Math.round(displayPercent)}%)
+          <BlockSize size={displayUsed} /> / <BlockSize size={total} /> ({displayPercent}%)
         </Text>
-        {hasFree ? (
+        {isOverUse ? (
+          <Badge size="xs" color="red" variant="light">{t('overUseLabel')}</Badge>
+        ) : hasFree ? (
           <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>
         ) : (
           <Badge size="xs" color="red" variant="light">{t('noFreeSpaceLabel')}</Badge>
@@ -75,6 +79,8 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
 
   const { reservedSoft, reservedHard, trackedUsage } = computeReservedAndTracked(userQuotas)
   const otherUsage = Math.max(0, used - trackedUsage)
+  // Over-use: actual used > total (e.g. Docker virtual device)
+  const diskOverUse = used > total
   // Demand = other + root reserved + quota reserved; over-sold when demand > total (exceeds user-addressable pool)
   const totalDemandSoft = otherUsage + rootReserved + reservedSoft
   const totalDemandHard = otherUsage + rootReserved + reservedHard
@@ -83,7 +89,7 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
   const freeSoft = Math.max(0, total - totalDemandSoft)
   const freeHard = Math.max(0, total - totalDemandHard)
 
-  const maxBytes = Math.max(total, totalDemandSoft, totalDemandHard, 1)
+  const maxBytes = Math.max(total, used, totalDemandSoft, totalDemandHard, 1)
   const toScalePct = (bytes: number) => pct(maxBytes, bytes)
 
   const barHeight = 'sm'
@@ -165,31 +171,33 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
       <BarRow
         label={t('diskUsageLabel')}
         bar={
-          <Progress.Root size={barHeight}>
-            {diskRootReservedPct > 0 && (
-              <Tooltip withArrow label={segmentTooltip(t('rootReservedLabel'), rootReserved)}>
-                <Progress.Section value={diskRootReservedPct} color="yellow" />
-              </Tooltip>
-            )}
-            {diskOtherPct > 0 && (
-              <Tooltip withArrow label={segmentTooltip(t('otherUsageLabel'), otherUsage)}>
-                <Progress.Section value={diskOtherPct} color="gray" />
-              </Tooltip>
-            )}
-            {diskTrackedPct > 0 && (
-              <Tooltip withArrow label={segmentTooltip(t('trackedUsageLabel'), trackedUsage)}>
-                <Progress.Section value={diskTrackedPct} color="blue" />
-              </Tooltip>
-            )}
-            {diskUserFreePct > 0 && (
-              <Tooltip withArrow label={segmentTooltip(t('freeSpaceLabel'), userFree)}>
-                <Progress.Section value={diskUserFreePct} color="green" />
-              </Tooltip>
-            )}
-          </Progress.Root>
+          <BarWithMarker showDiskLimit={diskOverUse}>
+            <Progress.Root size={barHeight}>
+              {diskRootReservedPct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('rootReservedLabel'), rootReserved)}>
+                  <Progress.Section value={diskRootReservedPct} color="yellow" />
+                </Tooltip>
+              )}
+              {diskOtherPct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('otherUsageLabel'), otherUsage)}>
+                  <Progress.Section value={diskOtherPct} color="gray" />
+                </Tooltip>
+              )}
+              {diskTrackedPct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('trackedUsageLabel'), trackedUsage)}>
+                  <Progress.Section value={diskTrackedPct} color="blue" />
+                </Tooltip>
+              )}
+              {diskUserFreePct > 0 && (
+                <Tooltip withArrow label={segmentTooltip(t('freeSpaceLabel'), userFree)}>
+                  <Progress.Section value={diskUserFreePct} color="green" />
+                </Tooltip>
+              )}
+            </Progress.Root>
+          </BarWithMarker>
         }
-        summary={<>{t('captionEqualsTotal')} <BlockSize size={total} /></>}
-        badge={hasFree ? <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge> : <Badge size="xs" color="red" variant="light">{t('noFreeSpaceLabel')}</Badge>}
+        summary={diskOverUse ? <>{t('usedLabel')} <BlockSize size={used} /> / {t('captionEqualsTotal')} <BlockSize size={total} /> ({total > 0 ? Math.round((used / total) * 100) : 0}%)</> : <>{t('captionEqualsTotal')} <BlockSize size={total} /></>}
+        badge={diskOverUse ? <Badge size="xs" color="red" variant="light">{t('overUseLabel')}</Badge> : hasFree ? <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge> : <Badge size="xs" color="red" variant="light">{t('noFreeSpaceLabel')}</Badge>}
       />
 
       <BarRow

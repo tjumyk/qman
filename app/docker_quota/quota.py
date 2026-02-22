@@ -8,6 +8,8 @@ from app.docker_quota.attribution_store import (
     get_container_attributions,
     set_container_attribution,
     delete_container_attribution,
+    get_image_attributions,
+    delete_image_attribution,
     get_user_quota_limit,
     set_user_quota_limit,
     get_all_user_quota_limits,
@@ -81,6 +83,27 @@ def _reconcile_layer_attributions(layers_from_docker: set[str]) -> int:
             removed_count += 1
             logger.info("Removed attribution for gone layer %s (was attributed to uid=%s)", 
                        layer_id[:12], layer_att.get("first_puller_uid"))
+    return removed_count
+
+
+def _reconcile_image_attributions(image_ids_from_docker: set[str]) -> int:
+    """Remove image attribution rows for images that no longer exist in Docker.
+    
+    Args:
+        image_ids_from_docker: Set of image IDs that exist in Docker.
+    
+    Returns:
+        Number of image attributions removed.
+    """
+    image_attributions = get_image_attributions()
+    removed_count = 0
+    for img_att in image_attributions:
+        image_id = img_att["image_id"]
+        if image_id not in image_ids_from_docker:
+            delete_image_attribution(image_id)
+            removed_count += 1
+            logger.info("Removed attribution for gone image %s (was attributed to uid=%s)", 
+                       image_id[:12], img_att.get("puller_uid"))
     return removed_count
 
 
