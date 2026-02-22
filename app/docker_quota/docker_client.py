@@ -305,12 +305,16 @@ def collect_events_since(since_ts: float, max_seconds: float = 90.0, max_events:
                 for ev in client.events(since=since_dt, decode=True):
                     if done.is_set() or len(out) >= max_events:
                         break
+                    # ID is in Actor.ID, not directly in the event
+                    actor = ev.get("Actor") or {}
+                    actor_id = actor.get("ID") or ev.get("id") or ev.get("ID")
                     out.append({
                         "type": ev.get("Type"),
                         "action": ev.get("Action"),
-                        "id": ev.get("id") or ev.get("ID"),
+                        "id": actor_id,
                         "time_nano": ev.get("timeNano") or ev.get("time"),
                         "from": ev.get("from"),
+                        "actor_attributes": actor.get("Attributes") or {},
                     })
             except Exception as e:
                 logger.warning("Docker events stream error: %s", e)

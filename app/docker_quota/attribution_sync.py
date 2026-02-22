@@ -36,6 +36,33 @@ TIME_WINDOW_SECONDS = 120  # Match container/image event to audit event within Â
 AUDIT_LOOKBACK = "60m"  # ausearch -ts recent -ts 60m (if supported)
 
 
+def _resolve_image_id(image_ref: str) -> str | None:
+    """Resolve an image reference (name:tag or partial ID) to its full image ID (sha256:...).
+    
+    Docker events use image name:tag (e.g. 'busybox:latest') while our internal storage
+    uses full image IDs (sha256:...). This function bridges that gap.
+    """
+    if not image_ref:
+        return None
+    # Already a full ID
+    if image_ref.startswith("sha256:"):
+        return image_ref
+    try:
+        import docker
+        client = docker.from_env()
+        try:
+            img = client.images.get(image_ref)
+            return img.id  # Returns full sha256:... ID
+        except docker.errors.ImageNotFound:
+            logger.debug("Image not found for ref: %s", image_ref)
+            return None
+        finally:
+            client.close()
+    except Exception as e:
+        logger.debug("Failed to resolve image ref %s: %s", image_ref, e)
+        return None
+
+
 def _get_setting(key: str) -> str | None:
     db = SessionLocal()
     try:
@@ -297,7 +324,16 @@ def sync_from_docker_events() -> int:
     image_sizes = df.get("images") or {}
     audit_by_ts: list[tuple[float, int]] = []
     for ev in audit_events:
-        uid = ev.get("uid")
+        # Get UID from auid (preferred) or uid; fall back to name resolution
+        uid = ev.get("auid") or ev.get("uid") or ev.get("euid")
+        if uid is None:
+            # ausearch -i converts UIDs to names, try to resolve them
+            uid_name = ev.get("auid_name") or ev.get("uid_name")
+            if uid_name:
+                try:
+                    uid = pwd.getpwnam(uid_name).pw_uid
+                except KeyError:
+                    continue
         if uid is None:
             continue
         ts_str = ev.get("timestamp")
@@ -408,6 +444,11 @@ def sync_from_docker_events() -> int:
                         logger.info("Attributed committed image %s to uid=%s from audit", committed_image_id[:12], best_uid)
         # Image events: pull, tag (for new images from build), import, load
         elif typ == "image":
+            # Resolve image name/tag to full ID (Docker events use name:tag, we store sha256:...)
+            resolved_id = _resolve_image_id(eid) if eid else None
+            if resolved_id:
+                eid = resolved_id
+            
             if action == "pull":
                 if eid in image_attributions:
                     # Update size if image already attributed
