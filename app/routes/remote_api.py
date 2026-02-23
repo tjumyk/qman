@@ -481,24 +481,31 @@ def register_remote_api_routes(app: Any) -> None:
     @app.route("/remote-api/docker/images")
     @requires_api_key
     def remote_get_docker_images() -> Any:
-        """Return detailed Docker image and layer information with attribution."""
+        """Return detailed Docker image and layer information with attribution.
+        
+        Returns ALL layers from Docker (not just attributed ones), with attribution
+        info merged in where available. This allows the frontend to show both
+        attributed and unattributed layers.
+        """
         start_time = time.time()
         
         if not current_app.config.get("USE_DOCKER_QUOTA", False):
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
-        from app.docker_quota.docker_client import get_image_details
+        from app.docker_quota.docker_client import get_image_details, get_image_layers_with_sizes
         from app.docker_quota.attribution_store import get_layer_attributions
         
         # Get image details from Docker API
         images = get_image_details()
         
-        # Get layer attributions from database
-        layer_attributions = get_layer_attributions()
+        # Get layer attributions from database (indexed by layer_id for lookup)
+        layer_attributions_list = get_layer_attributions()
+        layer_attributions_map = {la["layer_id"]: la for la in layer_attributions_list}
         
-        # Build images response
+        # Build images response and collect ALL unique layers from Docker
         result_images = []
         total_image_bytes = 0
+        all_layers: dict[str, int] = {}  # layer_id -> size_bytes (deduplicated)
         
         for img in images:
             size = img.get("size_bytes", 0)
@@ -509,45 +516,67 @@ def register_remote_api_routes(app: Any) -> None:
                 "size_bytes": size,
                 "created": img.get("created"),
             })
+            
+            # Collect layers from this image
+            try:
+                layers_with_sizes = get_image_layers_with_sizes(img["id"])
+                for layer_id, layer_size in layers_with_sizes:
+                    if layer_id not in all_layers:
+                        all_layers[layer_id] = layer_size
+            except Exception as e:
+                logger.warning("Failed to get layers for image %s: %s", img["id"][:12], e)
         
-        # Build layers response with attribution
+        # Build layers response: ALL layers from Docker, with attribution info if available
         result_layers = []
         attributed_layer_bytes = 0
+        unattributed_layer_bytes = 0
         layers_by_user: dict[int, int] = {}
         
-        for layer in layer_attributions:
-            size = layer.get("size_bytes", 0)
-            uid = layer.get("first_puller_uid")
+        for layer_id, size in all_layers.items():
+            att = layer_attributions_map.get(layer_id)
             
-            attributed_layer_bytes += size
-            if uid is not None:
-                layers_by_user[uid] = layers_by_user.get(uid, 0) + size
-            
-            first_seen = layer.get("first_seen_at")
-            result_layers.append({
-                "layer_id": layer["layer_id"],
-                "size_bytes": size,
-                "first_puller_host_user_name": layer.get("first_puller_host_user_name"),
-                "first_puller_uid": uid,
-                "creation_method": layer.get("creation_method"),
-                "first_seen_at": first_seen.isoformat() if first_seen else None,
-            })
+            if att:
+                # Layer has attribution
+                attributed_layer_bytes += size
+                uid = att.get("first_puller_uid")
+                if uid is not None:
+                    layers_by_user[uid] = layers_by_user.get(uid, 0) + size
+                
+                first_seen = att.get("first_seen_at")
+                result_layers.append({
+                    "layer_id": layer_id,
+                    "size_bytes": size,
+                    "first_puller_host_user_name": att.get("first_puller_host_user_name"),
+                    "first_puller_uid": uid,
+                    "creation_method": att.get("creation_method"),
+                    "first_seen_at": first_seen.isoformat() if first_seen else None,
+                })
+            else:
+                # Layer has no attribution
+                unattributed_layer_bytes += size
+                result_layers.append({
+                    "layer_id": layer_id,
+                    "size_bytes": size,
+                    "first_puller_host_user_name": None,
+                    "first_puller_uid": None,
+                    "creation_method": None,
+                    "first_seen_at": None,
+                })
         
-        # Note: total_image_bytes is sum of image sizes (which includes shared layers counted multiple times)
-        # attributed_layer_bytes is sum of unique layer sizes that have attribution
-        # unattributed = layers that exist but have no attribution entry
-        unattributed_layer_bytes = max(0, total_image_bytes - attributed_layer_bytes)
+        # total_layer_bytes is the sum of unique layer sizes
+        total_layer_bytes = attributed_layer_bytes + unattributed_layer_bytes
         
         elapsed = time.time() - start_time
         logger.info(
-            "Docker images detail: %.2fs (images=%d, layers=%d, total=%d, attributed=%d, unattributed=%d)",
-            elapsed, len(result_images), len(result_layers), total_image_bytes, attributed_layer_bytes, unattributed_layer_bytes
+            "Docker images detail: %.2fs (images=%d, layers=%d, total_layer=%d, attributed=%d, unattributed=%d)",
+            elapsed, len(result_images), len(result_layers), total_layer_bytes, attributed_layer_bytes, unattributed_layer_bytes
         )
         
         return jsonify({
             "images": result_images,
             "layers": result_layers,
             "total_image_bytes": total_image_bytes,
+            "total_layer_bytes": total_layer_bytes,
             "attributed_layer_bytes": attributed_layer_bytes,
             "unattributed_layer_bytes": unattributed_layer_bytes,
             "layers_by_user": {str(k): v for k, v in layers_by_user.items()},

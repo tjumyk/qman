@@ -197,7 +197,7 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
   return (
     <Stack gap="md">
       <UsageSummaryCards
-        totalBytes={data.total_image_bytes}
+        totalBytes={data.total_layer_bytes}
         attributedBytes={data.attributed_layer_bytes}
         unattributedBytes={data.unattributed_layer_bytes}
       />

@@ -143,6 +143,7 @@ export const dockerImagesResponseSchema = z.object({
   images: z.array(dockerImageSchema),
   layers: z.array(dockerLayerSchema),
   total_image_bytes: z.number(),
+  total_layer_bytes: z.number(),
   attributed_layer_bytes: z.number(),
   unattributed_layer_bytes: z.number(),
   layers_by_user: z.record(z.string(), z.number()),
