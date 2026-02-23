@@ -235,14 +235,20 @@ def get_system_df(
             image_sizes = {img.id: (img.attrs.get("Size") or 0) for img in images}
             parse_images_time = time.time() - parse_images_start
 
-        # Size of a container = size of its writable layer (from inspect)
+        # Size of a container = size of its writable layer (from inspect with size=true)
+        # Note: Docker SDK 7.x removed the size parameter from inspect_container(),
+        # so we use the low-level _get API directly with the size query parameter.
         inspect_start = time.time()
         container_sizes_dict: dict[str, int] = {}
         inspect_times: list[float] = []
         for cid in container_ids_list:
             inspect_one_start = time.time()
             try:
-                inspect = client.api.inspect_container(cid, size=True)
+                response = client.api._get(
+                    client.api._url("/containers/{0}/json", cid),
+                    params={"size": True}
+                )
+                inspect = client.api._result(response, True)
                 size_rw = inspect.get("SizeRw") or 0
                 container_sizes_dict[cid] = size_rw
             except Exception:
