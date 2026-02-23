@@ -194,12 +194,15 @@ def get_system_df(
 ) -> dict[str, Any]:
     """Run 'docker system df -v' equivalent: per-container, per-image, and optionally per-volume sizes.
 
+    Uses a single client.api.df() call to fetch all data efficiently, instead of making
+    individual inspect calls per container (which is O(n) API calls).
+
     Args:
-        container_ids: Optional list of container IDs to inspect. If None, will list all containers first.
-                       This avoids duplicate list_containers() calls when container list is already known.
-        image_sizes: Optional precomputed map image_id -> size in bytes. When provided, skips client.images.list()
-                     to avoid redundant list_images() when the caller already has image list/sizes.
-        include_volumes: If True, also fetch volume sizes and info from api.df().
+        container_ids: Deprecated/ignored. Previously used to avoid duplicate list_containers() calls.
+                       Now all data comes from single df() call.
+        image_sizes: Deprecated/ignored. Previously used to skip images.list().
+                     Now all data comes from single df() call.
+        include_volumes: If True, also include volume sizes in the result.
 
     Returns:
         dict with keys:
@@ -214,99 +217,63 @@ def get_system_df(
         client = docker.from_env()
         client_init_time = time.time() - client_start
 
-        # Docker SDK doesn't expose "system df -v" directly; build from containers + images
-        if container_ids is None:
-            list_containers_start = time.time()
-            containers = client.containers.list(all=True)
-            list_containers_time = time.time() - list_containers_start
-            container_ids_list = [c.id for c in containers]
-        else:
-            list_containers_time = 0.0
-            container_ids_list = container_ids
+        # Single df() call returns containers (with SizeRw), images (with Size), and volumes
+        df_start = time.time()
+        df_result = client.api.df()
+        df_time = time.time() - df_start
 
-        if image_sizes is not None:
-            list_images_time = 0.0
-            parse_images_time = 0.0
-        else:
-            list_images_start = time.time()
-            images = client.images.list()
-            list_images_time = time.time() - list_images_start
-            parse_images_start = time.time()
-            image_sizes = {img.id: (img.attrs.get("Size") or 0) for img in images}
-            parse_images_time = time.time() - parse_images_start
+        # Extract container sizes from df result
+        parse_start = time.time()
+        df_containers = df_result.get("Containers") or []
+        container_sizes_dict: dict[str, int] = {
+            c["Id"]: (c.get("SizeRw") or 0) for c in df_containers
+        }
 
-        # Size of a container = size of its writable layer (from inspect with size=true)
-        # Note: Docker SDK 7.x removed the size parameter from inspect_container(),
-        # so we use the low-level _get API directly with the size query parameter.
-        inspect_start = time.time()
-        container_sizes_dict: dict[str, int] = {}
-        inspect_times: list[float] = []
-        for cid in container_ids_list:
-            inspect_one_start = time.time()
-            try:
-                response = client.api._get(
-                    client.api._url("/containers/{0}/json", cid),
-                    params={"size": True}
-                )
-                inspect = client.api._result(response, True)
-                size_rw = inspect.get("SizeRw") or 0
-                container_sizes_dict[cid] = size_rw
-            except Exception:
-                container_sizes_dict[cid] = 0
-            inspect_times.append(time.time() - inspect_one_start)
-        inspect_time = time.time() - inspect_start
+        # Extract image sizes from df result
+        df_images = df_result.get("Images") or []
+        image_sizes_dict: dict[str, int] = {
+            img["Id"]: (img.get("Size") or 0) for img in df_images
+        }
 
-        # Fetch volume sizes if requested (from api.df() which includes Volumes)
+        # Extract volume data if requested
         volumes_dict: dict[str, dict[str, Any]] = {}
-        volumes_time = 0.0
         if include_volumes:
-            volumes_start = time.time()
-            try:
-                df_result = client.api.df()
-                volumes_list = df_result.get("Volumes") or []
-                for vol in volumes_list:
-                    vol_name = vol.get("Name")
-                    if not vol_name:
-                        continue
-                    usage_data = vol.get("UsageData") or {}
-                    volumes_dict[vol_name] = {
-                        "size": usage_data.get("Size", 0) or 0,
-                        "labels": vol.get("Labels") or {},
-                        "ref_count": usage_data.get("RefCount", 0) or 0,
-                    }
-            except Exception as vol_err:
-                logger.warning("Failed to fetch volume sizes: %s", vol_err)
-            volumes_time = time.time() - volumes_start
+            volumes_list = df_result.get("Volumes") or []
+            for vol in volumes_list:
+                vol_name = vol.get("Name")
+                if not vol_name:
+                    continue
+                usage_data = vol.get("UsageData") or {}
+                volumes_dict[vol_name] = {
+                    "size": usage_data.get("Size", 0) or 0,
+                    "labels": vol.get("Labels") or {},
+                    "ref_count": usage_data.get("RefCount", 0) or 0,
+                }
+        parse_time = time.time() - parse_start
 
         total_time = time.time() - start_time
-        avg_inspect = sum(inspect_times) / len(inspect_times) if inspect_times else 0
-        max_inspect = max(inspect_times) if inspect_times else 0
         total_container_bytes = sum(container_sizes_dict.values())
-        total_image_bytes = sum(image_sizes.values()) if image_sizes else 0
+        total_image_bytes = sum(image_sizes_dict.values())
         total_volume_bytes = sum(v["size"] for v in volumes_dict.values()) if volumes_dict else 0
         containers_with_size = sum(1 for s in container_sizes_dict.values() if s > 0)
-        
+
         log_msg = (
-            "Docker get_system_df: total=%.2fs (client_init=%.2fs, list_containers=%.2fs, list_images=%.2fs, "
-            "inspect_containers=%.2fs [avg=%.3fs, max=%.3fs, count=%d], parse_images=%.2fs"
+            "Docker get_system_df: total=%.2fs (client_init=%.2fs, df_api=%.2fs, parse=%.2fs) "
+            "sizes: containers=%d bytes (%d with data, %d total), images=%d bytes (%d images)"
         )
         log_args: list[Any] = [
-            total_time, client_init_time, list_containers_time, list_images_time,
-            inspect_time, avg_inspect, max_inspect, len(container_ids_list), parse_images_time
+            total_time, client_init_time, df_time, parse_time,
+            total_container_bytes, containers_with_size, len(container_sizes_dict),
+            total_image_bytes, len(image_sizes_dict)
         ]
-        if include_volumes:
-            log_msg += ", volumes=%.2fs"
-            log_args.append(volumes_time)
-        log_msg += ") sizes: containers=%d bytes (%d with data), images=%d bytes (%d images)"
-        log_args.extend([total_container_bytes, containers_with_size, total_image_bytes, len(image_sizes) if image_sizes else 0])
         if include_volumes:
             log_msg += ", volumes=%d bytes (%d volumes)"
             log_args.extend([total_volume_bytes, len(volumes_dict)])
         logger.info(log_msg, *log_args)
-        
+
         result: dict[str, Any] = {
             "containers": container_sizes_dict,
-            "images": image_sizes,
+            "images": image_sizes_dict,
         }
         if include_volumes:
             result["volumes"] = volumes_dict

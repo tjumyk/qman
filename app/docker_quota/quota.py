@@ -141,7 +141,8 @@ def _aggregate_usage_by_uid(
     unattributed = total_used - sum(usage_by_uid).
     
     Args:
-        container_ids: Optional list of container IDs to avoid duplicate list_containers() call in get_system_df().
+        container_ids: Deprecated/ignored. Previously used to optimize get_system_df(), but get_system_df()
+                       now uses a single df() API call that returns all data efficiently.
     """
     start_time = time.time()
     timings: dict[str, float] = {}
@@ -333,9 +334,10 @@ def collect_remote_quotas(
     timings["backfill_labels"] = time.time() - backfill_start
     
     root = data_root or get_docker_data_root()
-    # Pass container IDs to avoid duplicate list_containers() call in get_system_df()
     container_ids = [c["id"] for c in containers]
+    aggregate_start = time.time()
     usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(root, reserved_bytes, container_ids=container_ids)
+    timings["aggregate_usage"] = time.time() - aggregate_start
     
     build_quotas_start = time.time()
     attributed = sum(usage_by_uid.values())
