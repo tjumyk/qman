@@ -220,10 +220,10 @@ def invalidate_image_cache() -> None:
 
 
 # System DF cache TTL - configurable for production environments where df() API is slow
-# Default 120s (2 minutes) balances freshness vs performance for large Docker environments
+# Default 300s (5 minutes) balances freshness vs performance for large Docker environments
 # where the df() API can take 10-20 seconds due to size calculations on TB of data.
 # Can be overridden via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS config
-_DEFAULT_DF_TTL_SECONDS = 120  # 2 minutes
+_DEFAULT_DF_TTL_SECONDS = 300  # 5 minutes
 
 
 def _get_df_cache_ttl() -> int:
@@ -243,7 +243,7 @@ def get_cached_system_df(include_volumes: bool = False) -> dict[str, Any] | None
     
     Returns None if cache miss or Redis unavailable.
     Frontend APIs can use this for faster response; background tasks should bypass.
-    TTL is configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 120s).
+    TTL is configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 300s).
     """
     redis_client = _get_redis_client()
     if not redis_client:
@@ -274,7 +274,7 @@ def get_cached_system_df(include_volumes: bool = False) -> dict[str, Any] | None
 
 
 def set_cached_system_df(result: dict[str, Any], include_volumes: bool = False) -> None:
-    """Cache system df result. TTL configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 120s)."""
+    """Cache system df result. TTL configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 300s)."""
     redis_client = _get_redis_client()
     if not redis_client:
         return
