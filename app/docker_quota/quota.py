@@ -134,6 +134,7 @@ def _aggregate_usage_by_uid(
     data_root: str,
     reserved_bytes: int | None,
     container_ids: list[str] | None = None,
+    use_cache: bool = False,
 ) -> tuple[dict[int, int], int, int]:
     """Aggregate Docker disk usage per uid. Returns (uid -> used_bytes, total_used, unattributed_bytes).
     total_used = sum of all container sizes + sum of all image layer sizes + sum of all volume sizes; 
@@ -143,12 +144,13 @@ def _aggregate_usage_by_uid(
     Args:
         container_ids: Deprecated/ignored. Previously used to optimize get_system_df(), but get_system_df()
                        now uses a single df() API call that returns all data efficiently.
+        use_cache: If True, use cached df() results (for frontend APIs). Default False for background tasks.
     """
     start_time = time.time()
     timings: dict[str, float] = {}
     
     df_start = time.time()
-    df = get_system_df(container_ids=container_ids, include_volumes=True)
+    df = get_system_df(container_ids=container_ids, include_volumes=True, use_cache=use_cache)
     timings["get_system_df"] = time.time() - df_start
     
     container_sizes = df.get("containers") or {}
@@ -298,8 +300,14 @@ def get_devices(
 def collect_remote_quotas(
     data_root: str | None = None,
     reserved_bytes: int | None = None,
+    use_cache: bool = True,
 ) -> list[dict[str, Any]]:
-    """Build list with one Docker device and user_quotas (same shape as quota.collect_remote_quotas)."""
+    """Build list with one Docker device and user_quotas (same shape as quota.collect_remote_quotas).
+    
+    Args:
+        use_cache: If True (default), use cached df() results for faster frontend response.
+                   Background tasks should pass False for accurate enforcement/sync.
+    """
     start_time = time.time()
     timings: dict[str, float] = {}
     
@@ -336,7 +344,7 @@ def collect_remote_quotas(
     root = data_root or get_docker_data_root()
     container_ids = [c["id"] for c in containers]
     aggregate_start = time.time()
-    usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(root, reserved_bytes, container_ids=container_ids)
+    usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(root, reserved_bytes, container_ids=container_ids, use_cache=use_cache)
     timings["aggregate_usage"] = time.time() - aggregate_start
     
     build_quotas_start = time.time()
@@ -396,15 +404,20 @@ def collect_remote_quotas_for_uid(
     uid: int,
     data_root: str | None = None,
     reserved_bytes: int | None = None,
+    use_cache: bool = True,
 ) -> list[dict[str, Any]]:
-    """Return Docker device only if this user has usage or quota (same shape as quota.collect_remote_quotas_for_uid)."""
+    """Return Docker device only if this user has usage or quota (same shape as quota.collect_remote_quotas_for_uid).
+    
+    Args:
+        use_cache: If True (default), use cached df() results for faster frontend response.
+    """
     if not should_include_uid(uid):
         return []
     root = data_root or get_docker_data_root()
     containers = list_containers(all_containers=True)
     container_ids = [c["id"] for c in containers]
     usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(
-        root, reserved_bytes, container_ids=container_ids
+        root, reserved_bytes, container_ids=container_ids, use_cache=use_cache
     )
     attributed_total = sum(usage_by_uid.values())
     used = usage_by_uid.get(uid, 0)

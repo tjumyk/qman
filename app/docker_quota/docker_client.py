@@ -191,6 +191,7 @@ def get_system_df(
     container_ids: list[str] | None = None,
     image_sizes: dict[str, int] | None = None,
     include_volumes: bool = False,
+    use_cache: bool = False,
 ) -> dict[str, Any]:
     """Run 'docker system df -v' equivalent: per-container, per-image, and optionally per-volume sizes.
 
@@ -203,6 +204,8 @@ def get_system_df(
         image_sizes: Deprecated/ignored. Previously used to skip images.list().
                      Now all data comes from single df() call.
         include_volumes: If True, also include volume sizes in the result.
+        use_cache: If True, check Redis cache first (60s TTL). Use for frontend APIs only.
+                   Background tasks should use False (default) for accurate enforcement/sync.
 
     Returns:
         dict with keys:
@@ -211,6 +214,19 @@ def get_system_df(
         - "volumes": {volume_name: {"size": int, "labels": dict, "ref_count": int}} (only if include_volumes=True)
     """
     start_time = time.time()
+    
+    # Check cache first if enabled (frontend APIs only)
+    if use_cache:
+        try:
+            from app.docker_quota.cache import get_cached_system_df
+            cached = get_cached_system_df(include_volumes=include_volumes)
+            if cached is not None:
+                elapsed = time.time() - start_time
+                logger.debug("Docker get_system_df: cache hit (took %.3fs)", elapsed)
+                return cached
+        except Exception as e:
+            logger.debug("Cache check failed, falling back to Docker API: %s", e)
+    
     try:
         import docker
         client_start = time.time()
@@ -277,6 +293,15 @@ def get_system_df(
         }
         if include_volumes:
             result["volumes"] = volumes_dict
+        
+        # Cache result for frontend APIs (only if caching was requested)
+        if use_cache:
+            try:
+                from app.docker_quota.cache import set_cached_system_df
+                set_cached_system_df(result, include_volumes=include_volumes)
+            except Exception as cache_err:
+                logger.debug("Failed to cache system_df result: %s", cache_err)
+        
         return result
     except Exception as e:
         elapsed = time.time() - start_time

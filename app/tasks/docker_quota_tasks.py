@@ -121,7 +121,7 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
     from app.docker_quota.quota import _aggregate_usage_by_uid
     containers_list = list_containers(all_containers=True, use_cache=False)
     container_ids = [c["id"] for c in containers_list]
-    usage_by_uid, _total_used, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
+    usage_by_uid, _total_used, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids, use_cache=False)
     uid_to_containers = _containers_by_uid_with_created(order, containers_list=containers_list)
     events: list[dict[str, Any]] = []
     total_removed = 0
@@ -150,7 +150,7 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
         containers = uid_to_containers.get(uid, [])
         for cid, size, _created in containers:
             # Recompute total_used after each removal (includes image layers)
-            current_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
+            current_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids, use_cache=False)
             current_total_used = current_usage_by_uid.get(uid, 0)
             if current_total_used <= limit_bytes:
                 break
@@ -164,7 +164,7 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
                     # Recompute after removal; refresh container list
                     containers_list = list_containers(all_containers=True, use_cache=False)
                     container_ids = [c["id"] for c in containers_list]
-                    updated_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
+                    updated_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids, use_cache=False)
                     new_total_used = updated_usage_by_uid.get(uid, 0)
                     total_removed += 1
                     removed.append(cid)

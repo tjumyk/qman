@@ -17,15 +17,16 @@ logger = get_logger(__name__)
 # Cache keys
 _CACHE_KEY_CONTAINERS = "docker:containers:list"
 _CACHE_KEY_IMAGES = "docker:images:list"
+_CACHE_KEY_SYSTEM_DF = "docker:system_df"
 _CACHE_KEY_LAST_INVALIDATION = "docker:cache:last_invalidation"
 
-# Default TTL: 10 minutes (600 seconds)
+# Default TTL: 5 minutes (300 seconds)
 # This is safe because:
-# - Event detection runs every 120 seconds and invalidates cache on changes
-# - Reconciliation still happens periodically via sync tasks
-# - Even if events are missed, TTL ensures cache refreshes within 10 minutes
+# - Sync task runs every 10 minutes (DOCKER_QUOTA_SYNC_INTERVAL_SECONDS) and can invalidate cache on changes
+# - Enforcement task runs every 5 minutes but uses use_cache=False for correctness
+# - TTL ensures cache refreshes even if sync misses events
 # Can be overridden via DOCKER_QUOTA_CACHE_TTL_SECONDS config
-_DEFAULT_TTL_SECONDS = 600  # 10 minutes
+_DEFAULT_TTL_SECONDS = 300  # 5 minutes
 
 
 def _get_cache_ttl() -> int:
@@ -216,3 +217,100 @@ def invalidate_image_cache() -> None:
         logger.debug("Invalidated image cache")
     except Exception as e:
         logger.debug("Cache invalidation failed: %s", e)
+
+
+# System DF cache TTL - configurable for production environments where df() API is slow
+# Default 120s (2 minutes) balances freshness vs performance for large Docker environments
+# where the df() API can take 10-20 seconds due to size calculations on TB of data.
+# Can be overridden via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS config
+_DEFAULT_DF_TTL_SECONDS = 120  # 2 minutes
+
+
+def _get_df_cache_ttl() -> int:
+    """Get system df cache TTL from config or default."""
+    try:
+        from flask import current_app
+        ttl = current_app.config.get("DOCKER_QUOTA_DF_CACHE_TTL_SECONDS")
+        if ttl is not None:
+            return int(ttl)
+    except Exception:
+        pass
+    return _DEFAULT_DF_TTL_SECONDS
+
+
+def get_cached_system_df(include_volumes: bool = False) -> dict[str, Any] | None:
+    """Get cached system df result if available and not expired.
+    
+    Returns None if cache miss or Redis unavailable.
+    Frontend APIs can use this for faster response; background tasks should bypass.
+    TTL is configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 120s).
+    """
+    redis_client = _get_redis_client()
+    if not redis_client:
+        return None
+    
+    ttl_seconds = _get_df_cache_ttl()
+    cache_key = f"{_CACHE_KEY_SYSTEM_DF}:volumes={include_volumes}"
+    try:
+        cached_data = redis_client.get(cache_key)
+        if cached_data:
+            data = json.loads(cached_data.decode("utf-8"))
+            cached_time = data.get("timestamp", 0)
+            age_seconds = time.time() - cached_time
+            if age_seconds < ttl_seconds:
+                logger.debug(
+                    "Cache hit: system_df (age=%.1fs, containers=%d, images=%d)",
+                    age_seconds,
+                    len(data.get("result", {}).get("containers", {})),
+                    len(data.get("result", {}).get("images", {})),
+                )
+                return data.get("result")
+            else:
+                logger.debug("Cache expired: system_df (age=%.1fs, ttl=%ds)", age_seconds, ttl_seconds)
+        return None
+    except Exception as e:
+        logger.debug("Cache read failed (system_df): %s", e)
+        return None
+
+
+def set_cached_system_df(result: dict[str, Any], include_volumes: bool = False) -> None:
+    """Cache system df result. TTL configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 120s)."""
+    redis_client = _get_redis_client()
+    if not redis_client:
+        return
+    
+    ttl_seconds = _get_df_cache_ttl()
+    cache_key = f"{_CACHE_KEY_SYSTEM_DF}:volumes={include_volumes}"
+    try:
+        data = {
+            "timestamp": time.time(),
+            "result": result,
+        }
+        redis_client.setex(
+            cache_key,
+            ttl_seconds,
+            json.dumps(data),
+        )
+        logger.debug(
+            "Cached system_df (containers=%d, images=%d, ttl=%ds)",
+            len(result.get("containers", {})),
+            len(result.get("images", {})),
+            ttl_seconds,
+        )
+    except Exception as e:
+        logger.debug("Cache write failed (system_df): %s", e)
+
+
+def invalidate_system_df_cache() -> None:
+    """Invalidate system df cache (call when Docker events indicate changes)."""
+    redis_client = _get_redis_client()
+    if not redis_client:
+        return
+    
+    try:
+        # Delete both variants (with and without volumes)
+        redis_client.delete(f"{_CACHE_KEY_SYSTEM_DF}:volumes=False")
+        redis_client.delete(f"{_CACHE_KEY_SYSTEM_DF}:volumes=True")
+        logger.debug("Invalidated system_df cache")
+    except Exception as e:
+        logger.debug("Cache invalidation failed (system_df): %s", e)
