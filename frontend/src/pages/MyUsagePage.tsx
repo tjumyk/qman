@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, Stack, Text, Progress, Badge, Loader, Alert, Group, SimpleGrid, Title } from '@mantine/core'
 import { IconChartBar } from '@tabler/icons-react'
@@ -9,6 +10,34 @@ import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
+
+// Threshold in ms after which we show a "taking longer" message
+const SLOW_LOADING_THRESHOLD_MS = 3000
+
+function LoadingWithSlowHint({ t }: { t: (key: string) => string }) {
+  const [isSlowLoading, setIsSlowLoading] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsSlowLoading(true)
+    }, SLOW_LOADING_THRESHOLD_MS)
+    return () => clearTimeout(timer)
+  }, [])
+
+  return (
+    <Stack align="center" gap="md" py="xl">
+      <Loader size="lg" />
+      <Stack align="center" gap={4}>
+        <Text c="dimmed">{t('loadingYourQuotas')}</Text>
+        {isSlowLoading && (
+          <Text size="sm" c="dimmed" ta="center">
+            {t('loadingTakingLonger')}
+          </Text>
+        )}
+      </Stack>
+    </Stack>
+  )
+}
 
 const MAPPING_KEY_SEP = '|'
 
@@ -107,12 +136,7 @@ export function MyUsagePage() {
   })
 
   if (mappingsLoading) {
-    return (
-      <Stack align="center" gap="md" py="xl">
-        <Loader size="lg" />
-        <Text c="dimmed">{t('loadingYourQuotas')}</Text>
-      </Stack>
-    )
+    return <LoadingWithSlowHint t={t} />
   }
   if (mappingsError) {
     return (
@@ -143,12 +167,7 @@ export function MyUsagePage() {
   }
 
   if (quotasLoading && !quotasData) {
-    return (
-      <Stack align="center" gap="md" py="xl">
-        <Loader size="lg" />
-        <Text c="dimmed">{t('loadingYourQuotas')}</Text>
-      </Stack>
-    )
+    return <LoadingWithSlowHint t={t} />
   }
   if (quotasError) {
     return (
