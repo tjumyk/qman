@@ -456,27 +456,24 @@ def register_api_routes(app: Any) -> None:
     @app.route("/api/hosts/<string:host_id>/users")
     @oauth.requires_login
     def get_host_users(host_id: str) -> tuple[Any, int] | Any:
-        """List host user names on that host (from slave quotas)."""
+        """List host user names on that host (lightweight endpoint, no quota computation)."""
         slave = _slave_by_id(host_id)
         if not slave:
             return jsonify(msg="host not found"), 404
         try:
+            # Use lightweight /remote-api/users endpoint (just system users, no Docker df() calls)
             resp = requests.get(
-                f"{slave['url']}/remote-api/quotas",
+                f"{slave['url']}/remote-api/users",
                 auth=make_auth(slave),
                 timeout=_REMOTE_API_TIMEOUT_QUOTA,
             )
         except (OSError, requests.exceptions.RequestException) as e:
             return jsonify(msg=str(e)), 502
         if resp.status_code // 100 != 2:
-            return jsonify(msg="failed to fetch host quotas"), 502
-        data = resp.json()
-        names: set[str] = set()
-        for device in data:
-            for uq in device.get("user_quotas") or []:
-                if uq.get("name"):
-                    names.add(uq["name"])
-        return jsonify([{"host_user_name": n} for n in sorted(names)])
+            return jsonify(msg="failed to fetch host users"), 502
+        # Transform ["user1", "user2"] to [{"host_user_name": "user1"}, ...]
+        names = resp.json()
+        return jsonify([{"host_user_name": n} for n in names])
 
     def _oauth_name_for_id(oauth_user_id: int) -> str | None:
         """Return OAuth user name from cache or OAuth server."""
