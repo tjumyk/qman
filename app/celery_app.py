@@ -7,7 +7,8 @@ from app.utils import get_logger
 
 logger = get_logger(__name__)
 
-_DEFAULT_INTERVAL = 300.0  # 5 minutes
+_DEFAULT_ENFORCE_INTERVAL = 300.0  # 5 minutes - quota enforcement
+_DEFAULT_SYNC_INTERVAL = 600.0  # 10 minutes - attribution sync (audit logs, Docker events, images, volumes)
 
 
 def make_celery(app=None) -> Celery:
@@ -26,16 +27,17 @@ def make_celery(app=None) -> Celery:
                 "app.tasks.docker_quota_tasks.sync_docker_attribution": {"queue": "qman.docker"},
             },
         )
-        interval_secs = float(app.config.get("DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS", _DEFAULT_INTERVAL))
+        enforce_interval = float(app.config.get("DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS", _DEFAULT_ENFORCE_INTERVAL))
+        sync_interval = float(app.config.get("DOCKER_QUOTA_SYNC_INTERVAL_SECONDS", _DEFAULT_SYNC_INTERVAL))
         celery_app.conf.beat_schedule = {
             "enforce-docker-quota-periodic": {
                 "task": "app.tasks.docker_quota_tasks.enforce_docker_quota",
-                "schedule": schedule(run_every=interval_secs),
+                "schedule": schedule(run_every=enforce_interval),
                 "options": {"queue": "qman.docker"},
             },
             "sync-docker-attribution-periodic": {
                 "task": "app.tasks.docker_quota_tasks.sync_docker_attribution",
-                "schedule": schedule(run_every=120.0),
+                "schedule": schedule(run_every=sync_interval),
                 "options": {"queue": "qman.docker"},
             },
         }
@@ -44,7 +46,8 @@ def make_celery(app=None) -> Celery:
         import os
         broker_url = os.environ.get("CELERY_BROKER_URL")
         result_backend = os.environ.get("CELERY_RESULT_BACKEND")
-        enforce_interval = _DEFAULT_INTERVAL
+        enforce_interval = _DEFAULT_ENFORCE_INTERVAL
+        sync_interval = _DEFAULT_SYNC_INTERVAL
         config_path = os.environ.get("CONFIG_PATH", "config.json")
         if config_path and os.path.isfile(config_path):
             try:
@@ -56,6 +59,8 @@ def make_celery(app=None) -> Celery:
                     result_backend = data.get("CELERY_RESULT_BACKEND")
                 if data.get("DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS") is not None:
                     enforce_interval = float(data["DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS"])
+                if data.get("DOCKER_QUOTA_SYNC_INTERVAL_SECONDS") is not None:
+                    sync_interval = float(data["DOCKER_QUOTA_SYNC_INTERVAL_SECONDS"])
             except Exception as e:
                 logger.warning("Could not load Celery config from %s: %s", config_path, e)
         if broker_url is None:
@@ -75,7 +80,7 @@ def make_celery(app=None) -> Celery:
             },
             "sync-docker-attribution-periodic": {
                 "task": "app.tasks.docker_quota_tasks.sync_docker_attribution",
-                "schedule": schedule(run_every=120.0),
+                "schedule": schedule(run_every=sync_interval),
                 "options": {"queue": "qman.docker"},
             },
         }

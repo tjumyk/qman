@@ -187,8 +187,8 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
 @celery_app.task(
     name="app.tasks.docker_quota_tasks.sync_docker_attribution",
     bind=True,
-    time_limit=600,  # 10 minutes: Docker API calls (~1 min), collect_events_since (90s), get_system_df, multiple image layer queries
-    soft_time_limit=540,  # 9 minutes: warn before hard limit
+    time_limit=300,  # 5 minutes: collect_events_since (90s) + audit parsing + image layer queries; get_system_df is now fast (<1s)
+    soft_time_limit=240,  # 4 minutes: warn before hard limit
 )
 def sync_docker_attribution(self: Any) -> dict[str, int]:
     """Sync container/image attribution from audit logs and Docker events (container create, image pull)."""

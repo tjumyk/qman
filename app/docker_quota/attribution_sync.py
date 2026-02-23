@@ -38,7 +38,8 @@ logger = get_logger(__name__)
 
 SETTING_LAST_EVENTS_TS = "docker_events_last_ts"
 TIME_WINDOW_SECONDS = 120  # Match container/image event to audit event within ±60s
-AUDIT_LOOKBACK = "60m"  # ausearch -ts recent -ts 60m (if supported)
+AUDIT_LOOKBACK = "90m"  # ausearch -ts 90m - covers sync interval (10min) + buffer for restarts/delays
+MAX_DOCKER_EVENTS = 2000  # Max Docker events to collect per sync (increased for 10-min sync interval)
 
 
 def _resolve_image_id(image_ref: str) -> str | None:
@@ -313,7 +314,7 @@ def sync_from_docker_events() -> int:
             since_ts = float(last_s)
         except ValueError:
             pass
-    events = collect_events_since(since_ts, max_seconds=90.0, max_events=500)
+    events = collect_events_since(since_ts, max_seconds=90.0, max_events=MAX_DOCKER_EVENTS)
     audit_events = parse_audit_logs(keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK)
     
     # Log event counts by type for diagnosis
