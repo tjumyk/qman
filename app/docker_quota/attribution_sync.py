@@ -149,17 +149,50 @@ def _parse_audit_timestamp(ev: dict[str, Any]) -> float | None:
         return None
 
 
+class AuditMatchResult:
+    """Result of audit event matching for attribution."""
+    __slots__ = ("uid", "delta", "audit_ts", "subcommand", "proctitle")
+    
+    def __init__(self, uid: int | None = None, delta: float = float("inf"), 
+                 audit_ts: float | None = None, subcommand: str | None = None,
+                 proctitle: str | None = None):
+        self.uid = uid
+        self.delta = delta
+        self.audit_ts = audit_ts
+        self.subcommand = subcommand
+        self.proctitle = proctitle
+    
+    @property
+    def found(self) -> bool:
+        return self.uid is not None
+    
+    def audit_time_str(self) -> str:
+        """Return formatted audit timestamp string."""
+        if self.audit_ts is None:
+            return "N/A"
+        return datetime.fromtimestamp(self.audit_ts).strftime("%Y-%m-%d %H:%M:%S")
+    
+    def command_str(self) -> str:
+        """Return the audit command for logging (proctitle or subcommand fallback)."""
+        if self.proctitle:
+            # Truncate long commands for readability in logs
+            if len(self.proctitle) > 60:
+                return self.proctitle[:57] + "..."
+            return self.proctitle
+        return self.subcommand or "unknown"
+
+
 def _find_best_audit_match(
     ev_ts: float,
-    audit_by_ts: list[tuple[float, int, str | None]],
+    audit_by_ts: list[tuple[float, int, str | None, str | None]],
     required_subcommands: set[str] | None = None,
     use_asymmetric_window: bool = False,
-) -> tuple[int | None, float]:
+) -> AuditMatchResult:
     """Find the best matching audit event for a Docker event timestamp.
     
     Args:
         ev_ts: Docker event timestamp (Unix timestamp)
-        audit_by_ts: List of (timestamp, uid, docker_subcommand) tuples, sorted by timestamp
+        audit_by_ts: List of (timestamp, uid, docker_subcommand, proctitle) tuples, sorted by timestamp
         required_subcommands: If set, only consider audit events with matching docker_subcommand.
                               If None, matches any audit event (legacy behavior for container create).
         use_asymmetric_window: If True, use asymmetric time window for long-running commands
@@ -167,10 +200,9 @@ def _find_best_audit_match(
                                If False, use symmetric window (for quick commands).
     
     Returns:
-        Tuple of (best_uid, best_delta) where best_uid is None if no match found.
+        AuditMatchResult with uid, delta, audit_ts, subcommand, proctitle (uid is None if no match found).
     """
-    best_uid: int | None = None
-    best_delta = float("inf")
+    result = AuditMatchResult()
     
     if use_asymmetric_window:
         # For load/pull/build: audit event (command start) is BEFORE Docker event (completion)
@@ -182,7 +214,7 @@ def _find_best_audit_match(
         lookback = TIME_WINDOW_SECONDS
         forward = TIME_WINDOW_SECONDS
     
-    for at, uid, subcommand in audit_by_ts:
+    for at, uid, subcommand, proctitle in audit_by_ts:
         # Check time window: audit_ts should be in [ev_ts - lookback, ev_ts + forward]
         if at < ev_ts - lookback:
             continue
@@ -204,11 +236,14 @@ def _find_best_audit_match(
         else:
             delta = abs(at - ev_ts)
         
-        if delta < best_delta:
-            best_delta = delta
-            best_uid = uid
+        if delta < result.delta:
+            result.uid = uid
+            result.delta = delta
+            result.audit_ts = at
+            result.subcommand = subcommand
+            result.proctitle = proctitle
     
-    return best_uid, best_delta
+    return result
 
 
 def sync_containers_from_audit() -> int:
@@ -424,22 +459,23 @@ def sync_from_docker_events() -> int:
         ts_str = ev.get("timestamp")
         if not ts_str:
             continue
-        # Get docker subcommand for filtering (e.g., "load", "exec", "pull")
+        # Get docker subcommand and proctitle for filtering and logging
         docker_subcommand = ev.get("docker_subcommand")
+        proctitle = ev.get("proctitle")
         try:
             s = str(ts_str).strip()
             if s.replace(".", "", 1).isdigit():
-                audit_by_ts.append((float(s), uid, docker_subcommand))
+                audit_by_ts.append((float(s), uid, docker_subcommand, proctitle))
             elif " " in s:
                 dt = datetime.strptime(s, "%m/%d/%Y %H:%M:%S")
-                audit_by_ts.append((dt.timestamp(), uid, docker_subcommand))
+                audit_by_ts.append((dt.timestamp(), uid, docker_subcommand, proctitle))
         except Exception:
             continue
     audit_by_ts.sort(key=lambda x: x[0])
     
     # Log subcommand distribution for debugging
     subcommand_counts: dict[str, int] = {}
-    for _, _, subcmd in audit_by_ts:
+    for _, _, subcmd, _ in audit_by_ts:
         key = subcmd or "(none)"
         subcommand_counts[key] = subcommand_counts.get(key, 0) + 1
     if subcommand_counts:
@@ -485,21 +521,25 @@ def sync_from_docker_events() -> int:
                 continue
             # Filter to only "docker run" or "docker create" commands
             required_subcommands = ACTION_TO_SUBCOMMANDS.get("create")
-            best_uid, best_delta = _find_best_audit_match(
+            match = _find_best_audit_match(
                 ev_ts, audit_by_ts,
                 required_subcommands=required_subcommands,
                 use_asymmetric_window=False,  # Container create is quick
             )
-            if best_uid is not None:
+            if match.found:
                 try:
-                    name = pwd.getpwuid(best_uid).pw_name
+                    name = pwd.getpwuid(match.uid).pw_name
                 except KeyError:
-                    name = f"user_{best_uid}"
+                    name = f"user_{match.uid}"
                 size_bytes = container_sizes.get(eid, 0)
-                set_container_attribution(eid, name, best_uid, None, size_bytes)
+                set_container_attribution(eid, name, match.uid, None, size_bytes)
                 set_count += 1
                 attributions[eid] = {}
-                logger.info("Attributed container %s to uid=%s from Docker event (delta=%.1fs)", eid[:12], best_uid, best_delta)
+                ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
+                logger.info(
+                    "Attributed container %s to %s (uid=%s): docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
+                    eid[:12], name, match.uid, ev_time_str, match.command_str(), match.audit_time_str(), match.delta
+                )
         # Container commit (creates new image)
         elif typ == "container" and action == "commit":
             # eid is container_id, but commit creates a new image
@@ -521,21 +561,25 @@ def sync_from_docker_events() -> int:
                 else:
                     # Try audit correlation - filter to "docker commit" commands
                     required_subcommands = ACTION_TO_SUBCOMMANDS.get("commit")
-                    best_uid, best_delta = _find_best_audit_match(
+                    match = _find_best_audit_match(
                         ev_ts, audit_by_ts,
                         required_subcommands=required_subcommands,
                         use_asymmetric_window=False,  # Commit is relatively quick
                     )
-                    if best_uid is not None:
+                    if match.found:
                         try:
-                            name = pwd.getpwuid(best_uid).pw_name
+                            name = pwd.getpwuid(match.uid).pw_name
                         except KeyError:
-                            name = f"user_{best_uid}"
+                            name = f"user_{match.uid}"
                         size_bytes = image_sizes.get(committed_image_id, 0)
-                        set_image_attribution(committed_image_id, name, best_uid, size_bytes)
-                        attribute_image_layers(committed_image_id, name, best_uid, "commit")
+                        set_image_attribution(committed_image_id, name, match.uid, size_bytes)
+                        attribute_image_layers(committed_image_id, name, match.uid, "commit")
                         image_attributions[committed_image_id] = {}
-                        logger.info("Attributed committed image %s to uid=%s from audit", committed_image_id[:12], best_uid)
+                        ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
+                        logger.info(
+                            "Attributed committed image %s to %s (uid=%s): docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
+                            committed_image_id[:12], name, match.uid, ev_time_str, match.command_str(), match.audit_time_str(), match.delta
+                        )
         # Image events: pull, tag (for new images from build), import, load
         elif typ == "image":
             # Resolve image name/tag to full ID (Docker events use name:tag, we store sha256:...)
@@ -557,61 +601,73 @@ def sync_from_docker_events() -> int:
                     continue
                 # Filter to only "docker pull" commands; use asymmetric window (pull can take minutes)
                 required_subcommands = ACTION_TO_SUBCOMMANDS.get("pull")
-                best_uid, best_delta = _find_best_audit_match(
+                match = _find_best_audit_match(
                     ev_ts, audit_by_ts,
                     required_subcommands=required_subcommands,
                     use_asymmetric_window=True,  # Pull can take a long time
                 )
-                if best_uid is not None:
+                if match.found:
                     try:
-                        name = pwd.getpwuid(best_uid).pw_name
+                        name = pwd.getpwuid(match.uid).pw_name
                     except KeyError:
-                        name = f"user_{best_uid}"
+                        name = f"user_{match.uid}"
                     size_bytes = image_sizes.get(eid, 0)
-                    set_image_attribution(eid, name, best_uid, size_bytes)
-                    attribute_image_layers(eid, name, best_uid, "pull")
+                    set_image_attribution(eid, name, match.uid, size_bytes)
+                    attribute_image_layers(eid, name, match.uid, "pull")
                     image_attributions[eid] = {}
-                    logger.info("Attributed image %s to uid=%s (puller) from Docker event (delta=%.1fs)", eid[:12], best_uid, best_delta)
+                    ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
+                    logger.info(
+                        "Attributed image %s to %s (uid=%s) via pull: docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
+                        eid[:12], name, match.uid, ev_time_str, match.command_str(), match.audit_time_str(), match.delta
+                    )
             elif action == "tag":
                 # Tag event: check if image is new (not in attributions)
                 if eid not in image_attributions:
                     # New image (likely from build) - try to attribute via audit
                     # Filter to "docker build" or "docker tag" commands; use asymmetric window for builds
                     required_subcommands = ACTION_TO_SUBCOMMANDS.get("tag")
-                    best_uid, best_delta = _find_best_audit_match(
+                    match = _find_best_audit_match(
                         ev_ts, audit_by_ts,
                         required_subcommands=required_subcommands,
                         use_asymmetric_window=True,  # Build can take a long time
                     )
-                    if best_uid is not None:
+                    if match.found:
                         try:
-                            name = pwd.getpwuid(best_uid).pw_name
+                            name = pwd.getpwuid(match.uid).pw_name
                         except KeyError:
-                            name = f"user_{best_uid}"
+                            name = f"user_{match.uid}"
                         size_bytes = image_sizes.get(eid, 0)
-                        set_image_attribution(eid, name, best_uid, size_bytes)
-                        attribute_image_layers(eid, name, best_uid, "build")
+                        set_image_attribution(eid, name, match.uid, size_bytes)
+                        attribute_image_layers(eid, name, match.uid, "build")
                         image_attributions[eid] = {}
-                        logger.info("Attributed image %s to uid=%s (builder, from tag event) (delta=%.1fs)", eid[:12], best_uid, best_delta)
+                        ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
+                        logger.info(
+                            "Attributed image %s to %s (uid=%s) via build/tag: docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
+                            eid[:12], name, match.uid, ev_time_str, match.command_str(), match.audit_time_str(), match.delta
+                        )
             elif action in ("import", "load"):
                 if eid not in image_attributions:
                     # Filter to "docker import" or "docker load" commands; use asymmetric window
                     required_subcommands = ACTION_TO_SUBCOMMANDS.get(action)
-                    best_uid, best_delta = _find_best_audit_match(
+                    match = _find_best_audit_match(
                         ev_ts, audit_by_ts,
                         required_subcommands=required_subcommands,
                         use_asymmetric_window=True,  # Load/import can take a long time
                     )
-                    if best_uid is not None:
+                    if match.found:
                         try:
-                            name = pwd.getpwuid(best_uid).pw_name
+                            name = pwd.getpwuid(match.uid).pw_name
                         except KeyError:
-                            name = f"user_{best_uid}"
+                            name = f"user_{match.uid}"
                         size_bytes = image_sizes.get(eid, 0)
-                        set_image_attribution(eid, name, best_uid, size_bytes)
-                        attribute_image_layers(eid, name, best_uid, action)
+                        set_image_attribution(eid, name, match.uid, size_bytes)
+                        attribute_image_layers(eid, name, match.uid, action)
                         image_attributions[eid] = {}
-                        logger.info("Attributed image %s to uid=%s (%s) from Docker event (delta=%.1fs)", eid[:12], best_uid, action, best_delta)
+                        ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
+                        logger.info(
+                            "Attributed image %s to %s (uid=%s) via %s: docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
+                            eid[:12], name, match.uid, action, ev_time_str, match.command_str(), match.audit_time_str(), match.delta
+                        )
     _set_setting(SETTING_LAST_EVENTS_TS, str(now_ts))
     return set_count
 
