@@ -21,7 +21,7 @@ interface ImagesTabProps {
   hostId: string
 }
 
-type ImageSortField = 'tags' | 'size_bytes' | 'created'
+type ImageSortField = 'tags' | 'size_bytes' | 'created' | 'puller_host_user_name'
 type LayerSortField = 'first_puller_host_user_name' | 'size_bytes' | 'creation_method' | 'first_seen_at'
 type SortDirection = 'asc' | 'desc'
 
@@ -90,7 +90,8 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
       list = list.filter(
         (img) =>
           img.tags.some((tag) => tag.toLowerCase().includes(s)) ||
-          img.image_id.toLowerCase().includes(s)
+          img.image_id.toLowerCase().includes(s) ||
+          (img.puller_host_user_name?.toLowerCase() || '').includes(s)
       )
     }
     return [...list].sort((a, b) => {
@@ -102,6 +103,8 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
           return (a.size_bytes - b.size_bytes) * dir
         case 'created':
           return ((a.created || '').localeCompare(b.created || '')) * dir
+        case 'puller_host_user_name':
+          return ((a.puller_host_user_name || '').localeCompare(b.puller_host_user_name || '')) * dir
         default:
           return 0
       }
@@ -226,6 +229,7 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
                   <Table.Tr>
                     <Table.Th>{t('imageId')}</Table.Th>
                     <ImageSortableHeader field="tags">{t('imageTags')}</ImageSortableHeader>
+                    <ImageSortableHeader field="puller_host_user_name">{t('owner')}</ImageSortableHeader>
                     <ImageSortableHeader field="size_bytes">{t('size')}</ImageSortableHeader>
                     <ImageSortableHeader field="created">{t('created')}</ImageSortableHeader>
                   </Table.Tr>
@@ -255,6 +259,15 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
                         ) : (
                           <Text size="sm" c="dimmed" fs="italic">
                             {t('noTags')}
+                          </Text>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        {img.puller_host_user_name ? (
+                          <Text size="sm">{img.puller_host_user_name}</Text>
+                        ) : (
+                          <Text size="sm" c="dimmed" fs="italic">
+                            {t('unattributed')}
                           </Text>
                         )}
                       </Table.Td>

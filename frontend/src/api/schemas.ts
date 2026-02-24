@@ -144,6 +144,8 @@ export const dockerImageSchema = z.object({
   tags: z.array(z.string()),
   size_bytes: z.number(),
   created: z.string().nullable(),
+  puller_host_user_name: z.string().nullable().optional(),
+  puller_uid: z.number().nullable().optional(),
 })
 export type DockerImage = z.infer<typeof dockerImageSchema>
 

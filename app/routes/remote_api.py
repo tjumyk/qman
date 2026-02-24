@@ -493,7 +493,7 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
         from app.docker_quota.docker_client import get_image_details, get_image_layers_with_sizes
-        from app.docker_quota.attribution_store import get_layer_attributions
+        from app.docker_quota.attribution_store import get_layer_attributions, get_image_attributions
         
         # Get image details from Docker API
         images = get_image_details()
@@ -501,6 +501,10 @@ def register_remote_api_routes(app: Any) -> None:
         # Get layer attributions from database (indexed by layer_id for lookup)
         layer_attributions_list = get_layer_attributions()
         layer_attributions_map = {la["layer_id"]: la for la in layer_attributions_list}
+        
+        # Get image attributions from database (indexed by image_id for lookup)
+        image_attributions_list = get_image_attributions()
+        image_attributions_map = {ia["image_id"]: ia for ia in image_attributions_list}
         
         # Build images response and collect ALL unique layers from Docker
         result_images = []
@@ -510,11 +514,17 @@ def register_remote_api_routes(app: Any) -> None:
         for img in images:
             size = img.get("size_bytes", 0)
             total_image_bytes += size
+            
+            # Get attribution for this image
+            img_att = image_attributions_map.get(img["id"])
+            
             result_images.append({
                 "image_id": img["id"],
                 "tags": img.get("tags", []),
                 "size_bytes": size,
                 "created": img.get("created"),
+                "puller_host_user_name": img_att.get("puller_host_user_name") if img_att else None,
+                "puller_uid": img_att.get("puller_uid") if img_att else None,
             })
             
             # Collect layers from this image
