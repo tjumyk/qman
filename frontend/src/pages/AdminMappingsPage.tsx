@@ -96,6 +96,10 @@ export function AdminMappingsPage() {
   const [inlineAddForRow, setInlineAddForRow] = useState<Record<string, string>>({})
   const [autoAssignOpen, setAutoAssignOpen] = useState(false)
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set())
+  const [suggestedMappingsOpen, setSuggestedMappingsOpen] = useState(false)
+  const [suggestedMappings, setSuggestedMappings] = useState<CandidateMapping[]>([])
+  const [selectedSuggested, setSelectedSuggested] = useState<Set<string>>(new Set())
+  const [lastAddedMapping, setLastAddedMapping] = useState<{ oauthUserId: number; oauthUserName: string; hostUserName: string } | null>(null)
   const { data: hosts } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
   const { data: hostUsersForHost, isLoading: hostUsersForHostLoading } = useQuery({
     queryKey: ['hosts', selectedHostId, 'users'],
@@ -113,13 +117,14 @@ export function AdminMappingsPage() {
       hostId: string
       hostUserName: string
     }) => postAdminMapping(oauthUserId, hostId, hostUserName),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['admin-mappings'] })
       queryClient.invalidateQueries({ queryKey: ['admin-host-users'] })
       setAddOpen(false)
       setSelectedHostId(null)
       setSelectedOAuthUserId(null)
       setSelectedHostUserName(null)
+      checkAndShowSuggestedMappings(variables.oauthUserId, variables.hostId, variables.hostUserName)
     },
     onError: (err: unknown) => {
       notifications.show({
@@ -187,6 +192,43 @@ export function AdminMappingsPage() {
 
   const getCandidateKey = (c: CandidateMapping) => `${c.oauthUserId}|${c.hostId}|${c.hostUserName}`
 
+  const computeSuggestedMappings = (
+    oauthUserId: number,
+    hostUserName: string,
+    excludeHostId: string
+  ): CandidateMapping[] => {
+    if (!hostUsers || !oauthUsers || !mappings) return []
+    const oauthUser = oauthUsers.find((u) => u.id === oauthUserId)
+    if (!oauthUser) return []
+    
+    const existingMappingKeys = new Set<string>()
+    for (const m of mappings) {
+      existingMappingKeys.add(`${m.oauth_user_id}|${m.host_id}|${m.host_user_name}`)
+    }
+    existingMappingKeys.add(`${oauthUserId}|${excludeHostId}|${hostUserName}`)
+    
+    const suggested: CandidateMapping[] = []
+    const seenHosts = new Set<string>()
+    for (const hu of hostUsers) {
+      if (hu.host_user_name !== hostUserName) continue
+      if (hu.host_id === excludeHostId) continue
+      if (seenHosts.has(hu.host_id)) continue
+      seenHosts.add(hu.host_id)
+      
+      const mappingKey = `${oauthUserId}|${hu.host_id}|${hostUserName}`
+      if (!existingMappingKeys.has(mappingKey)) {
+        suggested.push({
+          hostId: hu.host_id,
+          hostUserName: hostUserName,
+          oauthUserId: oauthUserId,
+          oauthUserName: oauthUser.name,
+        })
+      }
+    }
+    suggested.sort((a, b) => a.hostId.localeCompare(b.hostId))
+    return suggested
+  }
+
   const handleOpenAutoAssign = () => {
     const allKeys = new Set(candidateMappings.map(getCandidateKey))
     setSelectedCandidates(allKeys)
@@ -214,7 +256,71 @@ export function AdminMappingsPage() {
     setSelectedCandidates(new Set())
   }
 
+  const handleToggleSuggested = (candidate: CandidateMapping) => {
+    const key = getCandidateKey(candidate)
+    setSelectedSuggested((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllSuggested = () => {
+    setSelectedSuggested(new Set(suggestedMappings.map(getCandidateKey)))
+  }
+
+  const handleDeselectAllSuggested = () => {
+    setSelectedSuggested(new Set())
+  }
+
   const [isConfirming, setIsConfirming] = useState(false)
+  const [isConfirmingSuggested, setIsConfirmingSuggested] = useState(false)
+
+  const handleConfirmSuggested = async () => {
+    const toAdd = suggestedMappings.filter((c) => selectedSuggested.has(getCandidateKey(c)))
+    if (toAdd.length === 0) {
+      setSuggestedMappingsOpen(false)
+      return
+    }
+    setIsConfirmingSuggested(true)
+    try {
+      await postAdminMappingsBatch(
+        toAdd.map((c) => ({
+          oauth_user_id: c.oauthUserId,
+          host_id: c.hostId,
+          host_user_name: c.hostUserName,
+        }))
+      )
+      queryClient.invalidateQueries({ queryKey: ['admin-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-host-users'] })
+      setSuggestedMappingsOpen(false)
+    } catch (err: unknown) {
+      notifications.show({
+        title: t('error'),
+        message: getErrorMessage(err, t('failedToAddMapping')),
+        color: 'red',
+      })
+    } finally {
+      setIsConfirmingSuggested(false)
+    }
+  }
+
+  const checkAndShowSuggestedMappings = (oauthUserId: number, hostId: string, hostUserName: string) => {
+    const oauthUser = oauthUsers?.find((u) => u.id === oauthUserId)
+    if (!oauthUser) return
+    
+    const suggested = computeSuggestedMappings(oauthUserId, hostUserName, hostId)
+    if (suggested.length > 0) {
+      setSuggestedMappings(suggested)
+      setSelectedSuggested(new Set(suggested.map(getCandidateKey)))
+      setLastAddedMapping({ oauthUserId, oauthUserName: oauthUser.name, hostUserName })
+      setSuggestedMappingsOpen(true)
+    }
+  }
 
   const handleConfirmAutoAssign = async () => {
     const toAdd = candidateMappings.filter((c) => selectedCandidates.has(getCandidateKey(c)))
@@ -597,6 +703,79 @@ export function AdminMappingsPage() {
               onClick={handleConfirmAutoAssign}
             >
               {t('confirmMappings')} ({selectedCandidates.size})
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={suggestedMappingsOpen}
+        onClose={() => setSuggestedMappingsOpen(false)}
+        title={t('suggestedMappings')}
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            {t('suggestedMappingsDescription')
+              .replace('{oauthUser}', lastAddedMapping?.oauthUserName ?? '')
+              .replace('{hostUser}', lastAddedMapping?.hostUserName ?? '')}
+          </Text>
+          <Group justify="space-between">
+            <Text size="sm">
+              {t('candidateMappingsCount').replace('{count}', String(suggestedMappings.length))}
+            </Text>
+            <Group gap="xs">
+              <Button variant="subtle" size="xs" onClick={handleSelectAllSuggested}>
+                {t('selectAll')}
+              </Button>
+              <Button variant="subtle" size="xs" onClick={handleDeselectAllSuggested}>
+                {t('deselectAll')}
+              </Button>
+            </Group>
+          </Group>
+          <ScrollArea.Autosize mah={400}>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th style={{ width: 40 }} />
+                  <Table.Th>{t('host')}</Table.Th>
+                  <Table.Th>{t('hostUser')}</Table.Th>
+                  <Table.Th>{t('oauthUser')}</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {suggestedMappings.map((candidate) => {
+                  const key = getCandidateKey(candidate)
+                  return (
+                    <Table.Tr key={key}>
+                      <Table.Td>
+                        <Checkbox
+                          checked={selectedSuggested.has(key)}
+                          onChange={() => handleToggleSuggested(candidate)}
+                        />
+                      </Table.Td>
+                      <Table.Td>{candidate.hostId}</Table.Td>
+                      <Table.Td>{candidate.hostUserName}</Table.Td>
+                      <Table.Td>
+                        {candidate.oauthUserName} ({candidate.oauthUserId})
+                      </Table.Td>
+                    </Table.Tr>
+                  )
+                })}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea.Autosize>
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setSuggestedMappingsOpen(false)}>
+              {t('cancel')}
+            </Button>
+            <Button
+              loading={isConfirmingSuggested}
+              disabled={selectedSuggested.size === 0}
+              onClick={handleConfirmSuggested}
+            >
+              {t('confirmMappings')} ({selectedSuggested.size})
             </Button>
           </Group>
         </Stack>

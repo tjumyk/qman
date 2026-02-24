@@ -223,6 +223,8 @@ const translations: Record<Locale, Record<string, string>> = {
     candidateMappingsCount: '{count} candidate mapping(s) found',
     selectAll: 'Select all',
     deselectAll: 'Deselect all',
+    suggestedMappings: 'Suggested Mappings',
+    suggestedMappingsDescription: 'The same mapping ({oauthUser} → {hostUser}) can be applied to other hosts. Select the ones you want to add.',
   },
   'zh-Hans': {
     appTitle: 'DQMS',
@@ -419,6 +421,8 @@ const translations: Record<Locale, Record<string, string>> = {
     candidateMappingsCount: '找到 {count} 个候选映射',
     selectAll: '全选',
     deselectAll: '取消全选',
+    suggestedMappings: '推荐映射',
+    suggestedMappingsDescription: '相同的映射（{oauthUser} → {hostUser}）可以应用到其他主机。选择要添加的映射。',
   },
 }
 
