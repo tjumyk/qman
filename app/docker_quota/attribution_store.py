@@ -195,6 +195,30 @@ def set_user_quota_limit(uid: int, block_hard_limit: int) -> None:
         db.close()
 
 
+def batch_set_user_quota_limits(uid_limits: dict[int, int]) -> int:
+    """Set Docker quota limits for multiple uids at once (in 1K blocks). Returns count of uids updated."""
+    if not uid_limits:
+        return 0
+    db = SessionLocal()
+    try:
+        updated = 0
+        for uid, block_hard_limit in uid_limits.items():
+            row = db.query(DockerUserQuotaLimit).filter(DockerUserQuotaLimit.uid == uid).first()
+            if row:
+                row.block_hard_limit = block_hard_limit
+            else:
+                db.add(DockerUserQuotaLimit(uid=uid, block_hard_limit=block_hard_limit))
+            updated += 1
+        db.commit()
+        logger.info("Docker quota limits batch set for %d uids", updated)
+        return updated
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def get_all_user_quota_limits() -> dict[int, int]:
     """Return {uid: block_hard_limit} for all users with a Docker quota set."""
     db = SessionLocal()

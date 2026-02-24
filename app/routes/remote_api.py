@@ -725,7 +725,8 @@ def register_remote_api_routes(app: Any) -> None:
                             current_quotas[q["uid"]] = q
                         break
         
-        # Apply batch quota to each user
+        # First pass: determine which users to update vs skip
+        uids_to_update: list[int] = []
         for uid, name in users:
             current = current_quotas.get(uid, {})
             
@@ -750,47 +751,53 @@ def register_remote_api_routes(app: Any) -> None:
             
             if should_skip:
                 skipped_users += 1
-                continue
-            
-            # Apply quota
+            else:
+                uids_to_update.append(uid)
+        
+        # Second pass: apply quotas (use batch for Docker, loop for others)
+        if device == "docker" and current_app.config.get("USE_DOCKER_QUOTA", False) and uids_to_update:
+            # Use optimized batch function for Docker
+            from app.docker_quota import docker_batch_set_user_quota
             try:
-                if current_app.config.get("MOCK_QUOTA"):
-                    from app.quota_mock import set_user_quota_mock
-                    set_user_quota_mock(
-                        device, uid,
-                        params.block_hard_limit, params.block_soft_limit,
-                        params.inode_hard_limit, params.inode_soft_limit,
-                    )
-                elif device.startswith("/dev/"):
-                    import pyquota as pq
-                    pq.set_user_quota(
-                        device, uid,
-                        params.block_hard_limit, params.block_soft_limit,
-                        params.inode_hard_limit, params.inode_soft_limit,
-                    )
-                elif device == "docker" and current_app.config.get("USE_DOCKER_QUOTA", False):
-                    from app.docker_quota import docker_set_user_quota
-                    docker_set_user_quota(
-                        uid=uid,
-                        block_hard_limit=params.block_hard_limit or 0,
-                        block_soft_limit=params.block_soft_limit or 0,
-                    )
-                elif current_app.config.get("USE_ZFS", False):
-                    from app.quota_zfs import set_user_quota as zfs_set_user_quota
-                    zfs_set_user_quota(
-                        dataset=device,
-                        uid=uid,
-                        block_hard_limit=params.block_hard_limit or 0,
-                        block_soft_limit=params.block_soft_limit or 0,
-                        inode_hard_limit=params.inode_hard_limit,
-                        inode_soft_limit=params.inode_soft_limit,
-                    )
-                else:
-                    errors.append(f"uid={uid}: device not recognized")
-                    continue
-                updated_users += 1
+                uid_limits = {uid: params.block_hard_limit or 0 for uid in uids_to_update}
+                docker_batch_set_user_quota(uid_limits)
+                updated_users = len(uids_to_update)
             except Exception as e:
-                errors.append(f"uid={uid}: {str(e)}")
+                errors.append(f"Docker batch error: {str(e)}")
+        else:
+            # Apply quota to each user individually
+            for uid in uids_to_update:
+                try:
+                    if current_app.config.get("MOCK_QUOTA"):
+                        from app.quota_mock import set_user_quota_mock
+                        set_user_quota_mock(
+                            device, uid,
+                            params.block_hard_limit, params.block_soft_limit,
+                            params.inode_hard_limit, params.inode_soft_limit,
+                        )
+                    elif device.startswith("/dev/"):
+                        import pyquota as pq
+                        pq.set_user_quota(
+                            device, uid,
+                            params.block_hard_limit, params.block_soft_limit,
+                            params.inode_hard_limit, params.inode_soft_limit,
+                        )
+                    elif current_app.config.get("USE_ZFS", False):
+                        from app.quota_zfs import set_user_quota as zfs_set_user_quota
+                        zfs_set_user_quota(
+                            dataset=device,
+                            uid=uid,
+                            block_hard_limit=params.block_hard_limit or 0,
+                            block_soft_limit=params.block_soft_limit or 0,
+                            inode_hard_limit=params.inode_hard_limit,
+                            inode_soft_limit=params.inode_soft_limit,
+                        )
+                    else:
+                        errors.append(f"uid={uid}: device not recognized")
+                        continue
+                    updated_users += 1
+                except Exception as e:
+                    errors.append(f"uid={uid}: {str(e)}")
         
         result = BatchQuotaResult(
             total_users=total_users,

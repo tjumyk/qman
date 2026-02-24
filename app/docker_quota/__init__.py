@@ -15,6 +15,7 @@ from app.docker_quota.quota import (
     collect_remote_quotas as docker_collect_remote_quotas,
     collect_remote_quotas_for_uid as docker_collect_remote_quotas_for_uid,
     set_user_quota as docker_set_user_quota,
+    batch_set_user_quota as docker_batch_set_user_quota,
 )
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "docker_collect_remote_quotas",
     "docker_collect_remote_quotas_for_uid",
     "docker_set_user_quota",
+    "docker_batch_set_user_quota",
 ]
 

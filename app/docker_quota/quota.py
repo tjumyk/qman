@@ -14,6 +14,7 @@ from app.docker_quota.attribution_store import (
     delete_volume_attribution,
     get_user_quota_limit,
     set_user_quota_limit,
+    batch_set_user_quota_limits,
     get_all_user_quota_limits,
     get_layer_attributions,
     delete_layer_attribution,
@@ -457,3 +458,37 @@ def set_user_quota(uid: int, block_hard_limit: int, block_soft_limit: int) -> di
     usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
     used = usage_by_uid.get(uid, 0)
     return _user_quota_dict_docker(uid, used, block_hard_limit)
+
+
+def batch_set_user_quota(uid_limits: dict[int, int]) -> list[dict[str, Any]]:
+    """Set Docker quota for multiple uids at once (1K blocks). More efficient than calling set_user_quota in a loop.
+    
+    Args:
+        uid_limits: dict mapping uid -> block_hard_limit (in 1K blocks)
+    
+    Returns:
+        List of UserQuota-shaped dicts for all updated users
+    """
+    if not uid_limits:
+        return []
+    
+    start_time = time.time()
+    
+    # Step 1: Set all limits in the database at once
+    batch_set_user_quota_limits(uid_limits)
+    
+    # Step 2: Calculate usage once for all users
+    containers = list_containers(all_containers=True)
+    container_ids = [c["id"] for c in containers]
+    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
+    
+    # Step 3: Build result for each uid
+    results = []
+    for uid, block_hard_limit in uid_limits.items():
+        used = usage_by_uid.get(uid, 0)
+        results.append(_user_quota_dict_docker(uid, used, block_hard_limit))
+    
+    elapsed = time.time() - start_time
+    logger.info("Docker batch_set_user_quota: %d users in %.2fs", len(uid_limits), elapsed)
+    
+    return results
