@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Group, NumberInput, Select, Button, Stack } from '@mantine/core'
+import { useI18n } from '../i18n'
 
 interface BlockLimitEditorProps {
   /** Controlled value in 1K blocks. When provided, the editor syncs to this value. */
@@ -35,6 +36,7 @@ function toBlocks(value: number, unitIndex: number): number {
 }
 
 export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets }: BlockLimitEditorProps) {
+  const { t } = useI18n()
   const [num, setNum] = useState(() => toValueAndUnit(value).value)
   const [unit, setUnit] = useState(() => toValueAndUnit(value).unitIndex)
 
@@ -67,7 +69,7 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
         variant={value === 0 ? 'filled' : 'light'}
         onClick={() => onChange(0)}
       >
-        No Limit
+        {t('presetNoLimit')}
       </Button>
       {currentUsage1k !== undefined && currentUsage1k > 0 && (
         <Button
@@ -75,7 +77,7 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
           variant={value === currentUsage1k ? 'filled' : 'light'}
           onClick={() => onChange(currentUsage1k)}
         >
-          = Usage
+          {t('presetMatchUsage')}
         </Button>
       )}
       <Button
@@ -84,14 +86,14 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
         onClick={() => onChange(Math.max(0, value - 2 * GB_IN_1K))}
         disabled={value === 0}
       >
-        −2G
+        {t('presetMinus2G')}
       </Button>
       <Button
         size="compact-xs"
         variant="light"
         onClick={() => onChange(value + 2 * GB_IN_1K)}
       >
-        +2G
+        {t('presetPlus2G')}
       </Button>
       <Button
         size="compact-xs"
@@ -99,14 +101,14 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
         onClick={() => onChange(Math.max(0, value - 10 * GB_IN_1K))}
         disabled={value === 0}
       >
-        −10G
+        {t('presetMinus10G')}
       </Button>
       <Button
         size="compact-xs"
         variant="light"
         onClick={() => onChange(value + 10 * GB_IN_1K)}
       >
-        +10G
+        {t('presetPlus10G')}
       </Button>
       <Button
         size="compact-xs"
@@ -114,7 +116,7 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
         onClick={() => onChange(value * 2)}
         disabled={value === 0}
       >
-        2×
+        {t('presetDouble')}
       </Button>
     </Group>
   ) : null

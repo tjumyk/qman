@@ -208,6 +208,14 @@ const translations: Record<Locale, Record<string, string>> = {
     usageVsNewLimit: 'Usage vs. New Limit',
     overLimitWarning: 'Over limit!',
     softExceedsHardError: 'Soft limit cannot exceed hard limit',
+    // Quota presets
+    presetNoLimit: 'No Limit',
+    presetMatchUsage: '= Usage',
+    presetMinus2G: '−2G',
+    presetPlus2G: '+2G',
+    presetMinus10G: '−10G',
+    presetPlus10G: '+10G',
+    presetDouble: '2×',
     // Batch quota
     batchSetQuota: 'Batch Set Quota',
     quotaLimit: 'Quota Limit',
@@ -416,6 +424,14 @@ const translations: Record<Locale, Record<string, string>> = {
     usageVsNewLimit: '用量 vs. 新限制',
     overLimitWarning: '超出限制！',
     softExceedsHardError: '软限制不能超过硬限制',
+    // Quota presets
+    presetNoLimit: '无限制',
+    presetMatchUsage: '= 用量',
+    presetMinus2G: '−2G',
+    presetPlus2G: '+2G',
+    presetMinus10G: '−10G',
+    presetPlus10G: '+10G',
+    presetDouble: '2×',
     // Batch quota
     batchSetQuota: '批量设置配额',
     quotaLimit: '配额限制',
