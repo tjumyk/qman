@@ -6,7 +6,7 @@ from typing import Any
 
 from flask import current_app, request, jsonify
 from app.auth import requires_api_key
-from app.models import quota_tuple_to_dict, SetUserQuotaRequest
+from app.models import quota_tuple_to_dict, SetUserQuotaRequest, BatchQuotaRequest, BatchQuotaResult
 from app.utils import get_logger
 
 logger = get_logger(__name__)
@@ -643,3 +643,166 @@ def register_remote_api_routes(app: Any) -> None:
             "attributed_bytes": attributed_bytes,
             "unattributed_bytes": unattributed_bytes,
         })
+
+    @app.route("/remote-api/quotas/batch", methods=["POST"])
+    @requires_api_key
+    def remote_set_batch_quota() -> tuple[Any, int] | Any:
+        """Apply batch quota to all eligible users on a device."""
+        start_time = time.time()
+        body = request.get_json(silent=True) or {}
+        
+        try:
+            params = BatchQuotaRequest(**body)
+        except Exception as e:
+            return jsonify(msg=f"Invalid request: {e}"), 400
+        
+        device = params.device
+        if not device:
+            return jsonify(msg="device is required"), 400
+        
+        logger.info("Batch quota setting for device=%s, preserve_nonzero=%s, preserve_usage_exceeds=%s",
+                    device, params.preserve_if_nonzero, params.preserve_if_usage_exceeds)
+        
+        from app.quota_common import should_include_uid
+        
+        # Get all eligible users
+        if current_app.config.get("MOCK_QUOTA"):
+            from app.quota_mock import _get_mock_state
+            mock_state = _get_mock_state()
+            users = [(uid, name) for uid, name in mock_state["users"].items() if should_include_uid(uid)]
+        else:
+            users = [(entry.pw_uid, entry.pw_name) for entry in pwd.getpwall() if should_include_uid(entry.pw_uid)]
+        
+        total_users = len(users)
+        updated_users = 0
+        skipped_users = 0
+        errors: list[str] = []
+        
+        # Get current quotas for the device to check preserve conditions
+        current_quotas: dict[int, dict[str, Any]] = {}
+        
+        if current_app.config.get("MOCK_QUOTA"):
+            from app.quota_mock import _get_mock_state
+            mock_state = _get_mock_state()
+            for dev in mock_state.get("devices", {}).values():
+                if dev.get("name") == device:
+                    for q in dev.get("user_quotas", []):
+                        current_quotas[q["uid"]] = q
+                    break
+        else:
+            use_pyquota = current_app.config.get("USE_PYQUOTA", True)
+            use_zfs = current_app.config.get("USE_ZFS", False)
+            use_docker = current_app.config.get("USE_DOCKER_QUOTA", False)
+            
+            if device.startswith("/dev/") and use_pyquota:
+                import pyquota as pq
+                for uid, name in users:
+                    try:
+                        quota = pq.get_user_quota(device, uid)
+                        q_dict = quota_tuple_to_dict(quota)
+                        q_dict["uid"] = uid
+                        q_dict["name"] = name
+                        current_quotas[uid] = q_dict
+                    except Exception:
+                        pass
+            elif device == "docker" and use_docker:
+                from app.docker_quota import docker_collect_remote_quotas
+                data_root = current_app.config.get("DOCKER_DATA_ROOT")
+                reserved = current_app.config.get("DOCKER_QUOTA_RESERVED_BYTES")
+                docker_results = docker_collect_remote_quotas(data_root, reserved)
+                for dev in docker_results:
+                    if dev.get("name") == device:
+                        for q in dev.get("user_quotas", []):
+                            current_quotas[q["uid"]] = q
+                        break
+            elif use_zfs:
+                from app.quota_zfs import collect_remote_quotas as zfs_collect_remote_quotas
+                zfs_datasets = current_app.config.get("ZFS_DATASETS")
+                zfs_results = zfs_collect_remote_quotas(zfs_datasets)
+                for dev in zfs_results:
+                    if dev.get("name") == device:
+                        for q in dev.get("user_quotas", []):
+                            current_quotas[q["uid"]] = q
+                        break
+        
+        # Apply batch quota to each user
+        for uid, name in users:
+            current = current_quotas.get(uid, {})
+            
+            # Check preserve conditions
+            should_skip = False
+            
+            if params.preserve_if_nonzero:
+                # Skip if any current limit is non-zero
+                if (current.get("block_hard_limit", 0) > 0 or 
+                    current.get("block_soft_limit", 0) > 0 or
+                    current.get("inode_hard_limit", 0) > 0 or
+                    current.get("inode_soft_limit", 0) > 0):
+                    should_skip = True
+            
+            if params.preserve_if_usage_exceeds and not should_skip:
+                # Skip if current usage exceeds new default (block_current is in bytes, limits are in 1K blocks)
+                block_current_kb = current.get("block_current", 0) / 1024
+                if params.block_hard_limit is not None and block_current_kb > params.block_hard_limit:
+                    should_skip = True
+                elif params.block_soft_limit is not None and block_current_kb > params.block_soft_limit:
+                    should_skip = True
+            
+            if should_skip:
+                skipped_users += 1
+                continue
+            
+            # Apply quota
+            try:
+                if current_app.config.get("MOCK_QUOTA"):
+                    from app.quota_mock import set_user_quota_mock
+                    set_user_quota_mock(
+                        device, uid,
+                        params.block_hard_limit, params.block_soft_limit,
+                        params.inode_hard_limit, params.inode_soft_limit,
+                    )
+                elif device.startswith("/dev/"):
+                    import pyquota as pq
+                    pq.set_user_quota(
+                        device, uid,
+                        params.block_hard_limit, params.block_soft_limit,
+                        params.inode_hard_limit, params.inode_soft_limit,
+                    )
+                elif device == "docker" and current_app.config.get("USE_DOCKER_QUOTA", False):
+                    from app.docker_quota import docker_set_user_quota
+                    docker_set_user_quota(
+                        uid=uid,
+                        block_hard_limit=params.block_hard_limit or 0,
+                        block_soft_limit=params.block_soft_limit or 0,
+                    )
+                elif current_app.config.get("USE_ZFS", False):
+                    from app.quota_zfs import set_user_quota as zfs_set_user_quota
+                    zfs_set_user_quota(
+                        dataset=device,
+                        uid=uid,
+                        block_hard_limit=params.block_hard_limit or 0,
+                        block_soft_limit=params.block_soft_limit or 0,
+                        inode_hard_limit=params.inode_hard_limit,
+                        inode_soft_limit=params.inode_soft_limit,
+                    )
+                else:
+                    errors.append(f"uid={uid}: device not recognized")
+                    continue
+                updated_users += 1
+            except Exception as e:
+                errors.append(f"uid={uid}: {str(e)}")
+        
+        result = BatchQuotaResult(
+            total_users=total_users,
+            updated_users=updated_users,
+            skipped_users=skipped_users,
+            errors=errors,
+        )
+        
+        elapsed = time.time() - start_time
+        logger.info(
+            "Batch quota completed for device=%s in %.2fs: total=%d, updated=%d, skipped=%d, errors=%d",
+            device, elapsed, total_users, updated_users, skipped_users, len(errors)
+        )
+        
+        return jsonify(result.model_dump())

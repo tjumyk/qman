@@ -392,6 +392,42 @@ def register_api_routes(app: Any) -> None:
             logger.warning("Failed to set quota for host=%s, uid=%d, device=%s: %s (took %.2fs)", slave_id, uid, device, str(e), elapsed)
             return jsonify(msg=str(e)), 500
 
+    @app.route("/api/quotas/<string:slave_id>/batch", methods=["POST"])
+    @oauth.requires_admin
+    def set_batch_quota(slave_id: str) -> tuple[Any, int]:
+        """Apply batch quota to all eligible users on a device (admin only)."""
+        start_time = time.time()
+        slave = _slave_by_id(slave_id)
+
+        if not slave:
+            logger.warning("Host %s not found for batch quota set", slave_id)
+            return jsonify(msg="slave not found"), 404
+
+        body = request.get_json(silent=True) or {}
+        device = body.get("device")
+        if not device:
+            return jsonify(msg="device is required in request body"), 400
+
+        logger.info("Setting batch quota for host=%s, device=%s", slave_id, device)
+        try:
+            url = f"{slave['url']}/remote-api/quotas/batch"
+            resp = requests.post(
+                url,
+                json=body,
+                auth=make_auth(slave),
+                timeout=_REMOTE_API_TIMEOUT_SET_QUOTA,
+            )
+            elapsed = time.time() - start_time
+            if resp.status_code // 100 == 2:
+                logger.info("Successfully set batch quota for host=%s, device=%s (took %.2fs)", slave_id, device, elapsed)
+            else:
+                logger.warning("Slave %s returned error status %d when setting batch quota for device=%s (took %.2fs)", slave_id, resp.status_code, device, elapsed)
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            elapsed = time.time() - start_time
+            logger.warning("Failed to set batch quota for host=%s, device=%s: %s (took %.2fs)", slave_id, device, str(e), elapsed)
+            return jsonify(msg=str(e)), 500
+
     @app.route("/api/hosts")
     @oauth.requires_login
     def get_hosts() -> tuple[Any, int] | Any:

@@ -79,6 +79,25 @@ export const setUserQuotaBodySchema = z.object({
 })
 export type SetUserQuotaBody = z.infer<typeof setUserQuotaBodySchema>
 
+export const batchQuotaRequestSchema = z.object({
+  device: z.string(),
+  block_hard_limit: z.number().optional(),
+  block_soft_limit: z.number().optional(),
+  inode_hard_limit: z.number().optional(),
+  inode_soft_limit: z.number().optional(),
+  preserve_if_nonzero: z.boolean().optional(),
+  preserve_if_usage_exceeds: z.boolean().optional(),
+})
+export type BatchQuotaRequest = z.infer<typeof batchQuotaRequestSchema>
+
+export const batchQuotaResultSchema = z.object({
+  total_users: z.number(),
+  updated_users: z.number(),
+  skipped_users: z.number(),
+  errors: z.array(z.string()),
+})
+export type BatchQuotaResult = z.infer<typeof batchQuotaResultSchema>
+
 export const resolveUserResponseSchema = z.object({
   uid: z.number(),
   name: z.string(),

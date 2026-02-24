@@ -117,6 +117,27 @@ class SetUserQuotaRequest(BaseModel):
     inode_soft_limit: int | None = None
 
 
+class BatchQuotaRequest(BaseModel):
+    """POST body for batch quota setting."""
+
+    device: str
+    block_hard_limit: int | None = None
+    block_soft_limit: int | None = None
+    inode_hard_limit: int | None = None
+    inode_soft_limit: int | None = None
+    preserve_if_nonzero: bool = False
+    preserve_if_usage_exceeds: bool = False
+
+
+class BatchQuotaResult(BaseModel):
+    """Result of batch quota operation."""
+
+    total_users: int
+    updated_users: int
+    skipped_users: int
+    errors: list[str] = Field(default_factory=list)
+
+
 # Device quota: optional user/group quotas and info (built from pyquota/psutil)
 # We use a flexible model so we can build it incrementally in quota.py
 class DeviceQuotaResponse(BaseModel):

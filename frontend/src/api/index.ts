@@ -9,6 +9,7 @@ import {
   dockerContainersResponseSchema,
   dockerImagesResponseSchema,
   dockerVolumesResponseSchema,
+  batchQuotaResultSchema,
 } from './schemas'
 import type {
   Me,
@@ -20,6 +21,8 @@ import type {
   DockerContainersResponse,
   DockerImagesResponse,
   DockerVolumesResponse,
+  BatchQuotaRequest,
+  BatchQuotaResult,
 } from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
@@ -188,6 +191,18 @@ export async function resolveHostUser(hostId: string, username: string): Promise
     { params: { username: username.trim() }, timeout: TIMEOUT_USER_RESOLVE }
   )
   return resolveUserResponseSchema.parse(data)
+}
+
+export async function setBatchQuota(
+  hostId: string,
+  body: BatchQuotaRequest
+): Promise<BatchQuotaResult> {
+  const { data } = await api.post<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/batch`,
+    body,
+    { timeout: TIMEOUT_SET_QUOTA }
+  )
+  return batchQuotaResultSchema.parse(data)
 }
 
 export type HostPingStatus = {

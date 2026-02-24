@@ -13,13 +13,14 @@ import {
   Group,
   Modal,
 } from '@mantine/core'
-import { IconDisc, IconPlus } from '@tabler/icons-react'
+import { IconDisc, IconPlus, IconUsers } from '@tabler/icons-react'
 import { fetchQuotas, resolveHostUser, getErrorMessage } from '../api'
 import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
 import { useI18n } from '../i18n'
 import { EditQuotaModal } from '../components/EditQuotaModal'
+import { BatchQuotaModal } from '../components/BatchQuotaModal'
 import { DeviceUsage } from '../components/DeviceUsage'
 import { DockerDetailTabs } from '../components/docker/DockerDetailTabs'
 import type { UserQuota } from '../api/schemas'
@@ -47,6 +48,7 @@ export function DeviceUserListPage() {
   const [addQuotaUsername, setAddQuotaUsername] = useState('')
   const [addQuotaResolving, setAddQuotaResolving] = useState(false)
   const [addQuotaError, setAddQuotaError] = useState<string | null>(null)
+  const [batchQuotaOpened, setBatchQuotaOpened] = useState(false)
   const { t } = useI18n()
 
   const { data, isLoading, error } = useQuery({ queryKey: ['quotas'], queryFn: fetchQuotas })
@@ -167,6 +169,14 @@ export function DeviceUserListPage() {
         >
           {t('addQuota')}
         </Button>
+        <Button
+          leftSection={<IconUsers size={16} />}
+          variant="light"
+          color="violet"
+          onClick={() => setBatchQuotaOpened(true)}
+        >
+          {t('batchSetQuota')}
+        </Button>
       </Group>
       <Table striped highlightOnHover>
         <Table.Thead>
@@ -279,6 +289,12 @@ export function DeviceUserListPage() {
         deviceName={deviceName}
         quota={editQuota}
         userQuotaFormat={device.user_quota_format}
+      />
+      <BatchQuotaModal
+        opened={batchQuotaOpened}
+        onClose={() => setBatchQuotaOpened(false)}
+        hostId={hostId}
+        device={device}
       />
     </Stack>
   )
