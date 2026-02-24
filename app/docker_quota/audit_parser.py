@@ -13,6 +13,58 @@ logger = get_logger(__name__)
 # Default keys: separate socket access vs client execution for easier correlation
 DEFAULT_AUDIT_KEYS = ("docker-socket", "docker-client")
 
+# Docker subcommand categories for filtering audit events
+# These map Docker event actions to the docker CLI subcommands that cause them
+DOCKER_SUBCOMMAND_CATEGORIES: dict[str, set[str]] = {
+    "image_create": {"pull", "build", "load", "import", "commit"},
+    "container_create": {"run", "create"},
+    "container_exec": {"exec"},
+    "other": {"ps", "images", "inspect", "logs", "stats", "top", "port", "diff", "cp", "export", "save", "tag", "push", "login", "logout", "search", "version", "info", "system", "network", "volume", "compose"},
+}
+
+# Reverse mapping: subcommand -> category
+SUBCOMMAND_TO_CATEGORY: dict[str, str] = {}
+for category, subcommands in DOCKER_SUBCOMMAND_CATEGORIES.items():
+    for subcmd in subcommands:
+        SUBCOMMAND_TO_CATEGORY[subcmd] = category
+
+
+def extract_docker_subcommand(proctitle: str | None) -> str | None:
+    """Extract the docker subcommand from a proctitle string.
+    
+    Examples:
+        "docker load -i pg15.tar.gz" -> "load"
+        "docker exec -i -u root ..." -> "exec"
+        "docker pull nginx:latest" -> "pull"
+        "docker run --rm busybox" -> "run"
+        "docker-compose up" -> None (not a docker command)
+    
+    Returns the subcommand (e.g., "load", "exec", "pull") or None if not parseable.
+    """
+    if not proctitle:
+        return None
+    
+    # Normalize: proctitle may have null bytes replaced with spaces
+    proctitle = proctitle.replace("\x00", " ").strip()
+    
+    # Match "docker <subcommand>" pattern
+    # The subcommand is the first non-flag argument after "docker"
+    match = re.match(r"^docker\s+([a-z][a-z0-9-]*)", proctitle, re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+    
+    return None
+
+
+def get_subcommand_category(subcommand: str | None) -> str | None:
+    """Get the category for a docker subcommand.
+    
+    Returns: "image_create", "container_create", "container_exec", "other", or None
+    """
+    if not subcommand:
+        return None
+    return SUBCOMMAND_TO_CATEGORY.get(subcommand.lower())
+
 # ausearch -ts accepts keywords (recent, today, ...) or date + time. "recent" = 10 min only.
 # Relative strings like "60m" are not supported; we convert them to absolute start date/time.
 AUSEARCH_TS_KEYWORDS = frozenset(
@@ -116,16 +168,19 @@ def parse_audit_logs(
 
 
 def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
-    """Parse ausearch -i output into list of events with uid, pid, msg, type, timestamp.
+    """Parse ausearch -i output into list of events with uid, pid, msg, type, timestamp, docker_subcommand.
     
     Example ausearch -i output format:
     ----
-    type=SYSCALL msg=audit(02/16/2026 12:34:56.789:1234) : arch=x86_64 ...
+    type=PROCTITLE msg=audit(...) : proctitle=docker load -i pg15.tar.gz
+    type=SYSCALL msg=audit(02/16/2026 12:34:56.789:1234) : arch=x86_64 ... uid=1001 ...
     type=PATH ... name="/var/run/docker.sock" ...
     ----
     
     Note: The timestamp is in the msg field as audit(MM/DD/YYYY HH:MM:SS.mmm:serial).
     The -i (interpret) flag converts numeric UIDs to names, but we need numeric UIDs.
+    
+    The docker_subcommand field is extracted from the proctitle line (e.g., "load", "exec", "pull").
     """
     events: list[dict[str, Any]] = []
     current: dict[str, Any] = {}
@@ -135,6 +190,13 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
         line = line.strip()
         if line.startswith("----"):
             if current:
+                # Extract docker subcommand from proctitle before appending
+                proctitle = current.get("proctitle")
+                if proctitle:
+                    subcommand = extract_docker_subcommand(proctitle)
+                    if subcommand:
+                        current["docker_subcommand"] = subcommand
+                        current["docker_subcommand_category"] = get_subcommand_category(subcommand)
                 events.append(current)
             current = {}
             continue
@@ -153,6 +215,12 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
                     unix_match = re.match(r"(\d+\.\d+):", audit_ts)
                     if unix_match:
                         current["timestamp_unix"] = float(unix_match.group(1))
+        
+        # Extract proctitle for docker subcommand detection
+        if "type=PROCTITLE" in line:
+            proctitle_match = re.search(r"proctitle=(.+?)(?:\s+$|\s+\w+=|$)", line)
+            if proctitle_match:
+                current["proctitle"] = proctitle_match.group(1).strip()
         
         if "=" in line:
             # Parse key=value pairs; handle multiple on same line
@@ -194,6 +262,13 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
                     current["comm"] = v
     
     if current:
+        # Extract docker subcommand from proctitle for final event
+        proctitle = current.get("proctitle")
+        if proctitle:
+            subcommand = extract_docker_subcommand(proctitle)
+            if subcommand:
+                current["docker_subcommand"] = subcommand
+                current["docker_subcommand_category"] = get_subcommand_category(subcommand)
         events.append(current)
     
     # Log summary of parsed events for debugging
@@ -201,9 +276,10 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
         uids_found = [e.get("uid") or e.get("auid") for e in events if e.get("uid") is not None or e.get("auid") is not None]
         ts_found = sum(1 for e in events if e.get("timestamp") or e.get("timestamp_unix"))
         keys_found = set(e.get("key") for e in events if e.get("key"))
+        subcommands_found = [e.get("docker_subcommand") for e in events if e.get("docker_subcommand")]
         logger.info(
-            "Parsed ausearch output: raw_lines=%d, events=%d, with_uid=%d, with_timestamp=%d, keys=%s",
-            raw_lines_count, len(events), len(uids_found), ts_found, list(keys_found)
+            "Parsed ausearch output: raw_lines=%d, events=%d, with_uid=%d, with_timestamp=%d, keys=%s, docker_subcommands=%s",
+            raw_lines_count, len(events), len(uids_found), ts_found, list(keys_found), list(set(subcommands_found))
         )
         # Log first few events for debugging
         for i, ev in enumerate(events[:3]):
