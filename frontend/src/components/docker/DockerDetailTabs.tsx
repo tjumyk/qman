@@ -5,6 +5,7 @@ import { BlockSize } from '../BlockSize'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../../utils/quotaStatus'
 import { useI18n } from '../../i18n'
 import { EditQuotaModal } from '../EditQuotaModal'
+import { BatchQuotaModal } from '../BatchQuotaModal'
 import { DeviceUsage } from '../DeviceUsage'
 import { ContainersTab } from './ContainersTab'
 import { ImagesTab } from './ImagesTab'
@@ -41,6 +42,7 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
   const [addQuotaUsername, setAddQuotaUsername] = useState('')
   const [addQuotaResolving, setAddQuotaResolving] = useState(false)
   const [addQuotaError, setAddQuotaError] = useState<string | null>(null)
+  const [batchQuotaOpened, setBatchQuotaOpened] = useState(false)
 
   const users = device.user_quotas || []
   const filteredUsers = search.trim()
@@ -115,6 +117,14 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
                 }}
               >
                 {t('addQuota')}
+              </Button>
+              <Button
+                leftSection={<IconUsers size={16} />}
+                variant="light"
+                color="violet"
+                onClick={() => setBatchQuotaOpened(true)}
+              >
+                {t('batchSetQuota')}
               </Button>
             </Group>
 
@@ -222,6 +232,13 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
         deviceName={device.name}
         quota={editQuota}
         userQuotaFormat={device.user_quota_format}
+      />
+
+      <BatchQuotaModal
+        opened={batchQuotaOpened}
+        onClose={() => setBatchQuotaOpened(false)}
+        hostId={hostId}
+        device={device}
       />
     </Stack>
   )
