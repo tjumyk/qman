@@ -201,6 +201,13 @@ const translations: Record<Locale, Record<string, string>> = {
     searchVolumes: 'Search volumes...',
     noVolumesMatch: 'No volumes match.',
     failedToLoadDockerVolumes: 'Failed to load Docker volumes',
+    // Edit quota
+    currentUsage: 'Current Usage',
+    noLimit: 'No Limit',
+    matchCurrentUsage: 'Match Current Usage',
+    usageVsNewLimit: 'Usage vs. New Limit',
+    overLimitWarning: 'Over limit!',
+    softExceedsHardError: 'Soft limit cannot exceed hard limit',
     // Batch quota
     batchSetQuota: 'Batch Set Quota',
     quotaLimit: 'Quota Limit',
@@ -402,6 +409,13 @@ const translations: Record<Locale, Record<string, string>> = {
     searchVolumes: '搜索数据卷...',
     noVolumesMatch: '没有匹配的数据卷。',
     failedToLoadDockerVolumes: '加载 Docker 数据卷失败',
+    // Edit quota
+    currentUsage: '当前用量',
+    noLimit: '无限制',
+    matchCurrentUsage: '匹配当前用量',
+    usageVsNewLimit: '用量 vs. 新限制',
+    overLimitWarning: '超出限制！',
+    softExceedsHardError: '软限制不能超过硬限制',
     // Batch quota
     batchSetQuota: '批量设置配额',
     quotaLimit: '配额限制',

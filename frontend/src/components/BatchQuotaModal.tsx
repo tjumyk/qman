@@ -9,6 +9,7 @@ import {
   Alert,
   Progress,
   Loader,
+  NumberInput,
 } from '@mantine/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -181,7 +182,16 @@ export function BatchQuotaModal({
     mutation.mutate(body)
   }
 
-  const hasValidQuota = blockHard > 0 || blockSoft > 0
+  const softHardError = useMemo(() => {
+    if (isSingleLimitFormat) return null
+    if (blockSoft > 0 && blockHard > 0 && blockSoft > blockHard) {
+      return t('softExceedsHardError')
+    }
+    if (inodeSoft > 0 && inodeHard > 0 && inodeSoft > inodeHard) {
+      return t('softExceedsHardError')
+    }
+    return null
+  }, [isSingleLimitFormat, blockSoft, blockHard, inodeSoft, inodeHard, t])
 
   return (
     <Modal
@@ -208,7 +218,7 @@ export function BatchQuotaModal({
                 <Text size="sm" fw={500} mb={4}>
                   {t('quotaLimit')}
                 </Text>
-                <BlockLimitEditor initValue={blockHard} onChange={(v) => {
+                <BlockLimitEditor value={blockHard} onChange={(v) => {
                   setBlockHard(v)
                   setBlockSoft(v)
                 }} />
@@ -219,26 +229,28 @@ export function BatchQuotaModal({
                   <Text size="sm" fw={500} mb={4}>
                     {t('blockSoftLimit1k')}
                   </Text>
-                  <BlockLimitEditor initValue={blockSoft} onChange={setBlockSoft} />
+                  <BlockLimitEditor value={blockSoft} onChange={setBlockSoft} />
                 </div>
                 <div>
                   <Text size="sm" fw={500} mb={4}>
                     {t('blockHardLimit1k')}
                   </Text>
-                  <BlockLimitEditor initValue={blockHard} onChange={setBlockHard} />
+                  <BlockLimitEditor value={blockHard} onChange={setBlockHard} />
                 </div>
-                <div>
-                  <Text size="sm" fw={500} mb={4}>
-                    {t('inodeSoftLimit')}
-                  </Text>
-                  <BlockLimitEditor initValue={inodeSoft} onChange={setInodeSoft} />
-                </div>
-                <div>
-                  <Text size="sm" fw={500} mb={4}>
-                    {t('inodeHardLimit')}
-                  </Text>
-                  <BlockLimitEditor initValue={inodeHard} onChange={setInodeHard} />
-                </div>
+                <NumberInput
+                  label={t('inodeSoftLimit')}
+                  min={0}
+                  value={inodeSoft}
+                  onChange={(v) => setInodeSoft(typeof v === 'string' ? parseInt(v, 10) || 0 : v)}
+                  thousandSeparator
+                />
+                <NumberInput
+                  label={t('inodeHardLimit')}
+                  min={0}
+                  value={inodeHard}
+                  onChange={(v) => setInodeHard(typeof v === 'string' ? parseInt(v, 10) || 0 : v)}
+                  thousandSeparator
+                />
               </>
             )}
 
@@ -256,6 +268,13 @@ export function BatchQuotaModal({
                 onChange={(e) => setPreserveUsageExceeds(e.currentTarget.checked)}
               />
             </Stack>
+
+            {/* Validation error */}
+            {softHardError && (
+              <Alert color="red" variant="light">
+                {softHardError}
+              </Alert>
+            )}
 
             {/* Preview section */}
             <Alert
@@ -317,7 +336,7 @@ export function BatchQuotaModal({
               <Button
                 loading={mutation.isPending}
                 onClick={handleApply}
-                disabled={!hasValidQuota || preview.affectedUsers === 0}
+                disabled={!!softHardError || preview.affectedUsers === 0}
               >
                 {t('apply')} ({preview.affectedUsers} {t('userCount')})
               </Button>
