@@ -217,7 +217,7 @@ export function MyUsagePage() {
               <Title order={5}>{label}</Title>
               {cards.length === 0 ? (
                 <Alert color="gray">
-                  {t('noQuotasAssigned')}
+                  {t('noQuotasAssignedInHost')}
                 </Alert>
               ) : (
                 <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
