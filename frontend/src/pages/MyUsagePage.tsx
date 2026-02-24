@@ -102,7 +102,7 @@ function QuotaCard({
               )}
             </Text>
           </div>
-          {device.user_quota_format !== 'zfs' && (
+          {device.user_quota_format !== 'zfs' && device.fstype !== 'docker' && (
             <div>
               <Text size="xs" fw={500} c="dimmed" mb={2}>
                 {t('inodeUsage')}
