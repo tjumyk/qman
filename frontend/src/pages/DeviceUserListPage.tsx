@@ -148,6 +148,7 @@ export function DeviceUserListPage() {
           <DeviceUsage
             usage={device.usage}
             userQuotas={device.user_quotas}
+            quotaFormat={device.user_quota_format}
           />
         )}
       </Stack>

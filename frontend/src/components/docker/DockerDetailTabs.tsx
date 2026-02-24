@@ -79,7 +79,7 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
         <Text size="sm" c="dimmed">
           {t('mountPointsLabel')}: {device.mount_points.join(', ')}
         </Text>
-        {device.usage && <DeviceUsage usage={device.usage} userQuotas={device.user_quotas} />}
+        {device.usage && <DeviceUsage usage={device.usage} userQuotas={device.user_quotas} quotaFormat="docker" />}
       </Stack>
 
       <Tabs value={activeTab} onChange={setActiveTab}>

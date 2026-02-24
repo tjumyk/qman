@@ -83,6 +83,7 @@ export function HostDetailPage() {
                   <DeviceUsage
                     usage={dev.usage}
                     userQuotas={dev.user_quotas}
+                    quotaFormat={dev.user_quota_format}
                   />
                 )}
               </Stack>

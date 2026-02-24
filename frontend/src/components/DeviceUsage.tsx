@@ -34,9 +34,11 @@ interface DeviceUsageProps {
   otherUsageLabelOverride?: string
   /** When set (e.g. Docker), size in bytes for the "other" segment. If not set, other = used - trackedUsage (pyquota/ZFS). */
   otherUsageBytes?: number
+  /** Quota format (e.g. 'zfs', 'docker', 'pyquota'). When 'zfs' or 'docker', soft quota bar is hidden. */
+  quotaFormat?: string
 }
 
-export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
+export function DeviceUsage({ usage, userQuotas, quotaFormat }: DeviceUsageProps) {
   const { t } = useI18n()
   const otherLabel = t('otherUsageLabel')
   const { used, total, free: userFree } = usage
@@ -47,6 +49,8 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
   const displayPercent = total > 0 ? Math.round((displayUsed / total) * 100) : 0
   // Over-use: used > total (e.g., Docker virtual device with no reserved bytes set)
   const isOverUse = used > total
+  // For ZFS and Docker, soft limit equals hard limit, so hide the soft quota bar
+  const isSingleLimitFormat = quotaFormat === 'zfs' || quotaFormat === 'docker'
 
   const simple = (
     <Stack gap={4}>
@@ -200,39 +204,41 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
         badge={diskOverUse ? <Badge size="xs" color="red" variant="light">{t('overUseLabel')}</Badge> : hasFree ? <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge> : <Badge size="xs" color="red" variant="light">{t('noFreeSpaceLabel')}</Badge>}
       />
 
-      <BarRow
-        label={t('softQuotaUsageLabel')}
-        bar={
-          <BarWithMarker showDiskLimit={overSoldSoft}>
-            <Progress.Root size={barHeight}>
-              {softRootReservedPct > 0 && <Progress.Section value={softRootReservedPct} color="transparent" />}
-              {softOtherPct > 0 && <Progress.Section value={softOtherPct} color="transparent" />}
-              {softReservedPct > 0 && (
-                <Tooltip withArrow label={segmentTooltip(t('reservedSoftLabel'), reservedSoft)}>
-                  <Progress.Section value={softReservedPct} color="orange" />
-                </Tooltip>
-              )}
-              {softFreePct > 0 && (
-                <Tooltip withArrow label={segmentTooltip(t('freeSpaceLabel'), freeSoft)}>
-                  <Progress.Section value={softFreePct} color="green" />
-                </Tooltip>
-              )}
-            </Progress.Root>
-          </BarWithMarker>
-        }
-        summary={overSoldSoft ? <>{t('captionEqualsDemand')} <BlockSize size={totalDemandSoft} /> ({total > 0 ? Math.round((totalDemandSoft / total) * 100) : 0}%)</> : <>{t('captionEqualsTotal')} <BlockSize size={total} /></>}
-        badge={overSoldSoft ? <Badge size="xs" color="orange" variant="light">{t('overSoldLabel')}</Badge> : <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>}
-      />
+      {!isSingleLimitFormat && (
+        <BarRow
+          label={t('softQuotaUsageLabel')}
+          bar={
+            <BarWithMarker showDiskLimit={overSoldSoft}>
+              <Progress.Root size={barHeight}>
+                {softRootReservedPct > 0 && <Progress.Section value={softRootReservedPct} color="transparent" />}
+                {softOtherPct > 0 && <Progress.Section value={softOtherPct} color="transparent" />}
+                {softReservedPct > 0 && (
+                  <Tooltip withArrow label={segmentTooltip(t('reservedSoftLabel'), reservedSoft)}>
+                    <Progress.Section value={softReservedPct} color="orange" />
+                  </Tooltip>
+                )}
+                {softFreePct > 0 && (
+                  <Tooltip withArrow label={segmentTooltip(t('freeSpaceLabel'), freeSoft)}>
+                    <Progress.Section value={softFreePct} color="green" />
+                  </Tooltip>
+                )}
+              </Progress.Root>
+            </BarWithMarker>
+          }
+          summary={overSoldSoft ? <>{t('captionEqualsDemand')} <BlockSize size={totalDemandSoft} /> ({total > 0 ? Math.round((totalDemandSoft / total) * 100) : 0}%)</> : <>{t('captionEqualsTotal')} <BlockSize size={total} /></>}
+          badge={overSoldSoft ? <Badge size="xs" color="orange" variant="light">{t('overSoldLabel')}</Badge> : <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>}
+        />
+      )}
 
       <BarRow
-        label={t('hardQuotaUsageLabel')}
+        label={isSingleLimitFormat ? t('quotaUsageLabel') : t('hardQuotaUsageLabel')}
         bar={
           <BarWithMarker showDiskLimit={overSoldHard}>
             <Progress.Root size={barHeight}>
               {hardRootReservedPct > 0 && <Progress.Section value={hardRootReservedPct} color="transparent" />}
               {hardOtherPct > 0 && <Progress.Section value={hardOtherPct} color="transparent" />}
               {hardReservedPct > 0 && (
-                <Tooltip withArrow label={segmentTooltip(t('reservedHardLabel'), reservedHard)}>
+                <Tooltip withArrow label={segmentTooltip(isSingleLimitFormat ? t('reservedLabel') : t('reservedHardLabel'), reservedHard)}>
                   <Progress.Section value={hardReservedPct} color="red" />
                 </Tooltip>
               )}
@@ -267,13 +273,15 @@ export function DeviceUsage({ usage, userQuotas}: DeviceUsageProps) {
           <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-green-5)' }} />
           <Text size="xs" c="dimmed">{t('freeSpaceLabel')}</Text>
         </Group>
-        <Group gap={4}>
-          <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-orange-5)' }} />
-          <Text size="xs" c="dimmed">{t('reservedSoftLabel')}</Text>
-        </Group>
+        {!isSingleLimitFormat && (
+          <Group gap={4}>
+            <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-orange-5)' }} />
+            <Text size="xs" c="dimmed">{t('reservedSoftLabel')}</Text>
+          </Group>
+        )}
         <Group gap={4}>
           <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-red-5)' }} />
-          <Text size="xs" c="dimmed">{t('reservedHardLabel')}</Text>
+          <Text size="xs" c="dimmed">{isSingleLimitFormat ? t('reservedLabel') : t('reservedHardLabel')}</Text>
         </Group>
       </Group>
     </Stack>
