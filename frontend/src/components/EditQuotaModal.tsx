@@ -26,6 +26,8 @@ export function EditQuotaModal({
   userQuotaFormat,
 }: EditQuotaModalProps) {
   const isZfs = userQuotaFormat === 'zfs'
+  const isDocker = userQuotaFormat === 'docker'
+  const isSingleLimitFormat = isZfs || isDocker
   const queryClient = useQueryClient()
   const { t } = useI18n()
   const [blockSoft, setBlockSoft] = useState(0)
@@ -62,10 +64,10 @@ export function EditQuotaModal({
 
   const handleSave = () => {
     mutation.mutate({
-      block_soft_limit: blockSoft,
+      block_soft_limit: isSingleLimitFormat ? blockHard : blockSoft,
       block_hard_limit: blockHard,
-      inode_soft_limit: isZfs ? 0 : inodeSoft,
-      inode_hard_limit: isZfs ? 0 : inodeHard,
+      inode_soft_limit: isSingleLimitFormat ? 0 : inodeSoft,
+      inode_hard_limit: isSingleLimitFormat ? 0 : inodeHard,
     })
   }
 
@@ -75,20 +77,30 @@ export function EditQuotaModal({
         <Text size="sm" c="dimmed">
           {hostId} / {deviceName}
         </Text>
-        <div>
-          <Text size="sm" fw={500} mb={4}>
-            {t('blockSoftLimit1k')}
-          </Text>
-          <BlockLimitEditor initValue={blockSoft} onChange={setBlockSoft} />
-        </div>
-        <div>
-          <Text size="sm" fw={500} mb={4}>
-            {t('blockHardLimit1k')}
-          </Text>
-          <BlockLimitEditor initValue={blockHard} onChange={setBlockHard} />
-        </div>
-        {!isZfs && (
+        {isSingleLimitFormat ? (
+          <div>
+            <Text size="sm" fw={500} mb={4}>
+              {t('quotaLimit')}
+            </Text>
+            <BlockLimitEditor initValue={blockHard} onChange={(v) => {
+              setBlockHard(v)
+              setBlockSoft(v)
+            }} />
+          </div>
+        ) : (
           <>
+            <div>
+              <Text size="sm" fw={500} mb={4}>
+                {t('blockSoftLimit1k')}
+              </Text>
+              <BlockLimitEditor initValue={blockSoft} onChange={setBlockSoft} />
+            </div>
+            <div>
+              <Text size="sm" fw={500} mb={4}>
+                {t('blockHardLimit1k')}
+              </Text>
+              <BlockLimitEditor initValue={blockHard} onChange={setBlockHard} />
+            </div>
             <NumberInput
               label={t('inodeSoftLimit')}
               min={0}

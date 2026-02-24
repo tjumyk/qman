@@ -184,7 +184,9 @@ export function DeviceUserListPage() {
             <Table.Th>{t('uid')}</Table.Th>
             <Table.Th>{t('name')}</Table.Th>
             <Table.Th>{t('blockUsed')}</Table.Th>
-            <Table.Th>{t('blockSoft')}</Table.Th>
+            {device.user_quota_format !== 'zfs' && (
+              <Table.Th>{t('blockSoft')}</Table.Th>
+            )}
             <Table.Th>{t('blockHard')}</Table.Th>
             {device.user_quota_format !== 'zfs' && (
               <>
@@ -207,9 +209,11 @@ export function DeviceUserListPage() {
                 <Table.Td>
                   <BlockSize size={q.block_current} />
                 </Table.Td>
-                <Table.Td>
-                  <BlockSize size={q.block_soft_limit * 1024} />
-                </Table.Td>
+                {device.user_quota_format !== 'zfs' && (
+                  <Table.Td>
+                    <BlockSize size={q.block_soft_limit * 1024} />
+                  </Table.Td>
+                )}
                 <Table.Td>
                   <BlockSize size={q.block_hard_limit * 1024} />
                 </Table.Td>

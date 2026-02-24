@@ -33,6 +33,8 @@ export function BatchQuotaModal({
   device,
 }: BatchQuotaModalProps) {
   const isZfs = device.user_quota_format === 'zfs'
+  const isDocker = device.user_quota_format === 'docker'
+  const isSingleLimitFormat = isZfs || isDocker
   const queryClient = useQueryClient()
   const { t } = useI18n()
 
@@ -169,10 +171,10 @@ export function BatchQuotaModal({
   const handleApply = () => {
     const body: BatchQuotaRequest = {
       device: device.name,
-      block_soft_limit: isZfs ? blockHard : blockSoft,
+      block_soft_limit: isSingleLimitFormat ? blockHard : blockSoft,
       block_hard_limit: blockHard,
-      inode_soft_limit: isZfs ? 0 : inodeSoft,
-      inode_hard_limit: isZfs ? 0 : inodeHard,
+      inode_soft_limit: isSingleLimitFormat ? 0 : inodeSoft,
+      inode_hard_limit: isSingleLimitFormat ? 0 : inodeHard,
       preserve_if_nonzero: preserveNonzero,
       preserve_if_usage_exceeds: preserveUsageExceeds,
     }
@@ -201,7 +203,7 @@ export function BatchQuotaModal({
         ) : (
           <>
             {/* Quota limit editors */}
-            {isZfs ? (
+            {isSingleLimitFormat ? (
               <div>
                 <Text size="sm" fw={500} mb={4}>
                   {t('quotaLimit')}
