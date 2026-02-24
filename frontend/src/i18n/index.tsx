@@ -214,6 +214,15 @@ const translations: Record<Locale, Record<string, string>> = {
     apply: 'Apply',
     batchQuotaSuccess: 'Batch quota applied: {updated}/{total} users updated',
     batchQuotaFailed: 'Failed to apply batch quota',
+    // Auto-assign mappings
+    autoAssign: 'Auto-assign',
+    autoAssignMappings: 'Auto-assign Mappings',
+    autoAssignDescription: 'The following host users have OAuth users with exactly matching names that are not yet mapped. Select the mappings you want to create.',
+    noCandidateMappings: 'No candidate mappings found. All host users with matching OAuth user names are already mapped.',
+    confirmMappings: 'Confirm Mappings',
+    candidateMappingsCount: '{count} candidate mapping(s) found',
+    selectAll: 'Select all',
+    deselectAll: 'Deselect all',
   },
   'zh-Hans': {
     appTitle: 'DQMS',
@@ -401,6 +410,15 @@ const translations: Record<Locale, Record<string, string>> = {
     apply: '应用',
     batchQuotaSuccess: '批量配额已应用：{updated}/{total} 个用户已更新',
     batchQuotaFailed: '批量配额应用失败',
+    // Auto-assign mappings
+    autoAssign: '自动分配',
+    autoAssignMappings: '自动分配映射',
+    autoAssignDescription: '以下主机用户有名称完全匹配但尚未映射的 OAuth 用户。选择要创建的映射。',
+    noCandidateMappings: '未找到候选映射。所有主机用户已与匹配的 OAuth 用户映射。',
+    confirmMappings: '确认映射',
+    candidateMappingsCount: '找到 {count} 个候选映射',
+    selectAll: '全选',
+    deselectAll: '取消全选',
   },
 }
 

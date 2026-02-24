@@ -10,9 +10,11 @@ import {
   Modal,
   Select,
   ActionIcon,
+  Checkbox,
+  ScrollArea,
 } from '@mantine/core'
-import { IconLink, IconPlus, IconTrash, IconUsers } from '@tabler/icons-react'
-import { useState } from 'react'
+import { IconLink, IconPlus, IconTrash, IconUsers, IconWand } from '@tabler/icons-react'
+import { useState, useMemo } from 'react'
 import {
   fetchAdminMappings,
   fetchAdminHostUsers,
@@ -21,11 +23,19 @@ import {
   fetchHostUsers,
   postAdminMapping,
   deleteAdminMapping,
+  postAdminMappingsBatch,
   getErrorMessage,
 } from '../api'
 import { useI18n } from '../i18n'
 import { notifications } from '@mantine/notifications'
-import type { AdminMapping, AdminHostUser } from '../api'
+import type { AdminMapping, AdminHostUser, AdminOAuthUser } from '../api'
+
+type CandidateMapping = {
+  hostId: string
+  hostUserName: string
+  oauthUserId: number
+  oauthUserName: string
+}
 
 function buildRows(
   hostUsers: AdminHostUser[],
@@ -84,6 +94,8 @@ export function AdminMappingsPage() {
     queryFn: fetchAdminOAuthUsers,
   })
   const [inlineAddForRow, setInlineAddForRow] = useState<Record<string, string>>({})
+  const [autoAssignOpen, setAutoAssignOpen] = useState(false)
+  const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set())
   const { data: hosts } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
   const { data: hostUsersForHost, isLoading: hostUsersForHostLoading } = useQuery({
     queryKey: ['hosts', selectedHostId, 'users'],
@@ -140,6 +152,99 @@ export function AdminMappingsPage() {
     },
   })
 
+  const candidateMappings = useMemo((): CandidateMapping[] => {
+    if (!hostUsers || !oauthUsers || !mappings) return []
+    const oauthUsersByName = new Map<string, AdminOAuthUser>()
+    for (const u of oauthUsers) {
+      oauthUsersByName.set(u.name, u)
+    }
+    const existingMappingKeys = new Set<string>()
+    for (const m of mappings) {
+      existingMappingKeys.add(`${m.oauth_user_id}|${m.host_id}|${m.host_user_name}`)
+    }
+    const candidates: CandidateMapping[] = []
+    const seenHostUsers = new Set<string>()
+    for (const hu of hostUsers) {
+      const key = `${hu.host_id}|${hu.host_user_name}`
+      if (seenHostUsers.has(key)) continue
+      seenHostUsers.add(key)
+      const matchingOAuthUser = oauthUsersByName.get(hu.host_user_name)
+      if (matchingOAuthUser) {
+        const mappingKey = `${matchingOAuthUser.id}|${hu.host_id}|${hu.host_user_name}`
+        if (!existingMappingKeys.has(mappingKey)) {
+          candidates.push({
+            hostId: hu.host_id,
+            hostUserName: hu.host_user_name,
+            oauthUserId: matchingOAuthUser.id,
+            oauthUserName: matchingOAuthUser.name,
+          })
+        }
+      }
+    }
+    candidates.sort((a, b) => a.hostId.localeCompare(b.hostId) || a.hostUserName.localeCompare(b.hostUserName))
+    return candidates
+  }, [hostUsers, oauthUsers, mappings])
+
+  const getCandidateKey = (c: CandidateMapping) => `${c.oauthUserId}|${c.hostId}|${c.hostUserName}`
+
+  const handleOpenAutoAssign = () => {
+    const allKeys = new Set(candidateMappings.map(getCandidateKey))
+    setSelectedCandidates(allKeys)
+    setAutoAssignOpen(true)
+  }
+
+  const handleToggleCandidate = (candidate: CandidateMapping) => {
+    const key = getCandidateKey(candidate)
+    setSelectedCandidates((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAll = () => {
+    setSelectedCandidates(new Set(candidateMappings.map(getCandidateKey)))
+  }
+
+  const handleDeselectAll = () => {
+    setSelectedCandidates(new Set())
+  }
+
+  const [isConfirming, setIsConfirming] = useState(false)
+
+  const handleConfirmAutoAssign = async () => {
+    const toAdd = candidateMappings.filter((c) => selectedCandidates.has(getCandidateKey(c)))
+    if (toAdd.length === 0) {
+      setAutoAssignOpen(false)
+      return
+    }
+    setIsConfirming(true)
+    try {
+      await postAdminMappingsBatch(
+        toAdd.map((c) => ({
+          oauth_user_id: c.oauthUserId,
+          host_id: c.hostId,
+          host_user_name: c.hostUserName,
+        }))
+      )
+      queryClient.invalidateQueries({ queryKey: ['admin-mappings'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-host-users'] })
+      setAutoAssignOpen(false)
+    } catch (err: unknown) {
+      notifications.show({
+        title: t('error'),
+        message: getErrorMessage(err, t('failedToAddMapping')),
+        color: 'red',
+      })
+    } finally {
+      setIsConfirming(false)
+    }
+  }
+
   if (mappingsLoading || hostUsersLoading) {
     return (
       <Stack align="center" gap="md" py="xl">
@@ -188,9 +293,19 @@ export function AdminMappingsPage() {
             {t('userMappings')}
           </Text>
         </Group>
-        <Button leftSection={<IconPlus size={16} />} variant="light" onClick={() => setAddOpen(true)}>
-          {t('addMapping')}
-        </Button>
+        <Group gap="sm">
+          <Button
+            leftSection={<IconWand size={16} />}
+            variant="light"
+            onClick={handleOpenAutoAssign}
+            disabled={oauthUsersLoading || hostUsersLoading || candidateMappings.length === 0}
+          >
+            {t('autoAssign')}
+          </Button>
+          <Button leftSection={<IconPlus size={16} />} variant="light" onClick={() => setAddOpen(true)}>
+            {t('addMapping')}
+          </Button>
+        </Group>
       </Group>
       <Text size="sm" c="dimmed">
         {t('userMappingsDescription')}
@@ -405,6 +520,83 @@ export function AdminMappingsPage() {
               }}
             >
               {t('addMapping')}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={autoAssignOpen}
+        onClose={() => setAutoAssignOpen(false)}
+        title={t('autoAssignMappings')}
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            {t('autoAssignDescription')}
+          </Text>
+          {candidateMappings.length === 0 ? (
+            <Alert color="blue">{t('noCandidateMappings')}</Alert>
+          ) : (
+            <>
+              <Group justify="space-between">
+                <Text size="sm">
+                  {t('candidateMappingsCount').replace('{count}', String(candidateMappings.length))}
+                </Text>
+                <Group gap="xs">
+                  <Button variant="subtle" size="xs" onClick={handleSelectAll}>
+                    {t('selectAll')}
+                  </Button>
+                  <Button variant="subtle" size="xs" onClick={handleDeselectAll}>
+                    {t('deselectAll')}
+                  </Button>
+                </Group>
+              </Group>
+              <ScrollArea.Autosize mah={400}>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th style={{ width: 40 }} />
+                      <Table.Th>{t('host')}</Table.Th>
+                      <Table.Th>{t('hostUser')}</Table.Th>
+                      <Table.Th>{t('oauthUser')}</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {candidateMappings.map((candidate) => {
+                      const key = getCandidateKey(candidate)
+                      return (
+                        <Table.Tr key={key}>
+                          <Table.Td>
+                            <Checkbox
+                              checked={selectedCandidates.has(key)}
+                              onChange={() => handleToggleCandidate(candidate)}
+                            />
+                          </Table.Td>
+                          <Table.Td>{candidate.hostId}</Table.Td>
+                          <Table.Td>{candidate.hostUserName}</Table.Td>
+                          <Table.Td>
+                            {candidate.oauthUserName} ({candidate.oauthUserId})
+                          </Table.Td>
+                        </Table.Tr>
+                      )
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea.Autosize>
+            </>
+          )}
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setAutoAssignOpen(false)}>
+              {t('cancel')}
+            </Button>
+            <Button
+              loading={isConfirming}
+              disabled={selectedCandidates.size === 0 || candidateMappings.length === 0}
+              onClick={handleConfirmAutoAssign}
+            >
+              {t('confirmMappings')} ({selectedCandidates.size})
             </Button>
           </Group>
         </Stack>

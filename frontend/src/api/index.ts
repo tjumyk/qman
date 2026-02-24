@@ -171,6 +171,35 @@ export async function deleteAdminMapping(
   })
 }
 
+export type BatchMappingInput = {
+  oauth_user_id: number
+  host_id: string
+  host_user_name: string
+}
+
+export type BatchMappingResult = {
+  added: BatchMappingInput[]
+  skipped: BatchMappingInput[]
+}
+
+export async function postAdminMappingsBatch(
+  mappings: BatchMappingInput[]
+): Promise<BatchMappingResult> {
+  const { data } = await api.post<unknown>('admin/mappings/batch', { mappings })
+  return z.object({
+    added: z.array(z.object({
+      oauth_user_id: z.number(),
+      host_id: z.string(),
+      host_user_name: z.string(),
+    })),
+    skipped: z.array(z.object({
+      oauth_user_id: z.number(),
+      host_id: z.string(),
+      host_user_name: z.string(),
+    })),
+  }).parse(data)
+}
+
 export async function setUserQuota(
   host: string,
   uid: number,

@@ -612,6 +612,66 @@ def register_api_routes(app: Any) -> None:
         finally:
             db.close()
 
+    @app.route("/api/admin/mappings/batch", methods=["POST"])
+    @oauth.requires_admin
+    def post_admin_mappings_batch() -> tuple[Any, int] | Any:
+        """Add multiple mappings at once (admin only). Body: { mappings: [{ oauth_user_id, host_id, host_user_name }, ...] }"""
+        body = request.get_json(silent=True) or {}
+        mappings_input = body.get("mappings")
+        if not isinstance(mappings_input, list) or len(mappings_input) == 0:
+            return jsonify(msg="mappings array required"), 400
+        
+        # Validate all mappings first
+        validated: list[dict[str, Any]] = []
+        for i, m in enumerate(mappings_input):
+            oauth_user_id = m.get("oauth_user_id")
+            host_id = m.get("host_id")
+            host_user_name = m.get("host_user_name")
+            if oauth_user_id is None or not host_id or not host_user_name:
+                return jsonify(msg=f"mapping[{i}]: oauth_user_id, host_id and host_user_name required"), 400
+            if not _HOST_USER_NAME_RE.match(host_user_name):
+                return jsonify(msg=f"mapping[{i}]: invalid host_user_name"), 400
+            if not _slave_by_id(host_id):
+                return jsonify(msg=f"mapping[{i}]: host '{host_id}' not found"), 404
+            validated.append({
+                "oauth_user_id": int(oauth_user_id),
+                "host_id": host_id,
+                "host_user_name": host_user_name,
+            })
+        
+        db = SessionLocal()
+        try:
+            added: list[dict[str, Any]] = []
+            skipped: list[dict[str, Any]] = []
+            for m in validated:
+                existing = (
+                    db.query(OAuthHostUserMapping)
+                    .filter(
+                        OAuthHostUserMapping.oauth_user_id == m["oauth_user_id"],
+                        OAuthHostUserMapping.host_id == m["host_id"],
+                        OAuthHostUserMapping.host_user_name == m["host_user_name"],
+                    )
+                    .first()
+                )
+                if existing:
+                    skipped.append(m)
+                else:
+                    db.add(
+                        OAuthHostUserMapping(
+                            oauth_user_id=m["oauth_user_id"],
+                            host_id=m["host_id"],
+                            host_user_name=m["host_user_name"],
+                        )
+                    )
+                    added.append(m)
+            db.commit()
+            return jsonify({"added": added, "skipped": skipped}), 201
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     @app.route("/api/admin/mappings", methods=["DELETE"])
     @oauth.requires_admin
     def delete_admin_mappings() -> tuple[Any, int] | Any:
