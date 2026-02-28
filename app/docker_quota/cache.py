@@ -13,7 +13,7 @@ import json
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any, Generator, Optional
 
 from app.utils import get_logger
 
@@ -106,7 +106,7 @@ def redis_lock(
     lock_name: str,
     hold_timeout_seconds: int = _DEFAULT_LOCK_HOLD_SECONDS,
     wait_timeout_seconds: float = _DEFAULT_LOCK_WAIT_SECONDS,
-    fallback_lock: threading.Lock | None = None,
+    fallback_lock: Optional[threading.Lock] = None,
 ) -> Generator[None, None, None]:
     """Context manager for a Redis-based distributed lock. Works across gunicorn workers.
 
