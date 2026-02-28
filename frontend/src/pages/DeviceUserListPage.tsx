@@ -13,7 +13,7 @@ import {
   Group,
   Modal,
 } from '@mantine/core'
-import { IconArrowDown, IconArrowUp, IconDisc, IconPlus, IconUsers } from '@tabler/icons-react'
+import { IconDisc, IconPlus, IconUsers } from '@tabler/icons-react'
 import { fetchQuotas, resolveHostUser, getErrorMessage } from '../api'
 import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
@@ -237,11 +237,9 @@ export function DeviceUserListPage() {
               >
                 {t('uid')}
                 {sortBy === 'uid' &&
-                  (sortDirection === 'asc' ? (
-                    <IconArrowUp size={14} />
-                  ) : (
-                    <IconArrowDown size={14} />
-                  ))}
+                  <Text size="xs" c="dimmed">
+                  {sortDirection === 'asc' ? '▲' : '▼'}
+                </Text>}
               </Group>
             </Table.Th>
             <Table.Th>
@@ -252,11 +250,9 @@ export function DeviceUserListPage() {
               >
                 {t('name')}
                 {sortBy === 'name' &&
-                  (sortDirection === 'asc' ? (
-                    <IconArrowUp size={14} />
-                  ) : (
-                    <IconArrowDown size={14} />
-                  ))}
+                  <Text size="xs" c="dimmed">
+                  {sortDirection === 'asc' ? '▲' : '▼'}
+                </Text>}
               </Group>
             </Table.Th>
             <Table.Th>
@@ -267,11 +263,9 @@ export function DeviceUserListPage() {
               >
                 {t('blockUsed')}
                 {sortBy === 'block_current' &&
-                  (sortDirection === 'asc' ? (
-                    <IconArrowUp size={14} />
-                  ) : (
-                    <IconArrowDown size={14} />
-                  ))}
+                  <Text size="xs" c="dimmed">
+                  {sortDirection === 'asc' ? '▲' : '▼'}
+                </Text>}
               </Group>
             </Table.Th>
             {device.user_quota_format !== 'zfs' && (
@@ -282,12 +276,11 @@ export function DeviceUserListPage() {
                   onClick={() => handleSort('block_soft_limit')}
                 >
                   {t('blockSoft')}
-                  {sortBy === 'block_soft_limit' &&
-                    (sortDirection === 'asc' ? (
-                      <IconArrowUp size={14} />
-                    ) : (
-                      <IconArrowDown size={14} />
-                    ))}
+                  {sortBy === 'block_soft_limit' && (
+                    <Text size="xs" c="dimmed">
+                      {sortDirection === 'asc' ? '▲' : '▼'}
+                    </Text>
+                  )}
                 </Group>
               </Table.Th>
             )}
@@ -299,11 +292,9 @@ export function DeviceUserListPage() {
               >
                 {t('blockHard')}
                 {sortBy === 'block_hard_limit' &&
-                  (sortDirection === 'asc' ? (
-                    <IconArrowUp size={14} />
-                  ) : (
-                    <IconArrowDown size={14} />
-                  ))}
+                  <Text size="xs" c="dimmed">
+                  {sortDirection === 'asc' ? '▲' : '▼'}
+                </Text>}
               </Group>
             </Table.Th>
             {device.user_quota_format !== 'zfs' && (
@@ -315,12 +306,11 @@ export function DeviceUserListPage() {
                     onClick={() => handleSort('inode_current')}
                   >
                     {t('inodeUsed')}
-                    {sortBy === 'inode_current' &&
-                      (sortDirection === 'asc' ? (
-                        <IconArrowUp size={14} />
-                      ) : (
-                        <IconArrowDown size={14} />
-                      ))}
+                    {sortBy === 'inode_current' && (
+                      <Text size="xs" c="dimmed">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </Text>
+                    )}
                   </Group>
                 </Table.Th>
                 <Table.Th>
@@ -330,12 +320,11 @@ export function DeviceUserListPage() {
                     onClick={() => handleSort('inode_soft_limit')}
                   >
                     {t('inodeSoft')}
-                    {sortBy === 'inode_soft_limit' &&
-                      (sortDirection === 'asc' ? (
-                        <IconArrowUp size={14} />
-                      ) : (
-                        <IconArrowDown size={14} />
-                      ))}
+                    {sortBy === 'inode_soft_limit' && (
+                      <Text size="xs" c="dimmed">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </Text>
+                    )}
                   </Group>
                 </Table.Th>
                 <Table.Th>
@@ -345,12 +334,11 @@ export function DeviceUserListPage() {
                     onClick={() => handleSort('inode_hard_limit')}
                   >
                     {t('inodeHard')}
-                    {sortBy === 'inode_hard_limit' &&
-                      (sortDirection === 'asc' ? (
-                        <IconArrowUp size={14} />
-                      ) : (
-                        <IconArrowDown size={14} />
-                      ))}
+                    {sortBy === 'inode_hard_limit' && (
+                      <Text size="xs" c="dimmed">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </Text>
+                    )}
                   </Group>
                 </Table.Th>
               </>
@@ -363,11 +351,9 @@ export function DeviceUserListPage() {
               >
                 {t('status')}
                 {sortBy === 'status' &&
-                  (sortDirection === 'asc' ? (
-                    <IconArrowUp size={14} />
-                  ) : (
-                    <IconArrowDown size={14} />
-                  ))}
+                  <Text size="xs" c="dimmed">
+                  {sortDirection === 'asc' ? '▲' : '▼'}
+                </Text>}
               </Group>
             </Table.Th>
             <Table.Th>{t('actions')}</Table.Th>
