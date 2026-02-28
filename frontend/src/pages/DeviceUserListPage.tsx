@@ -13,11 +13,16 @@ import {
   Group,
   Modal,
 } from '@mantine/core'
-import { IconDisc, IconPlus, IconUsers } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowUp, IconDisc, IconPlus, IconUsers } from '@tabler/icons-react'
 import { fetchQuotas, resolveHostUser, getErrorMessage } from '../api'
 import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
-import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
+import {
+  getQuotaStatus,
+  getQuotaStatusColor,
+  getQuotaStatusLabelKey,
+  type QuotaStatus,
+} from '../utils/quotaStatus'
 import { useI18n } from '../i18n'
 import { EditQuotaModal } from '../components/EditQuotaModal'
 import { BatchQuotaModal } from '../components/BatchQuotaModal'
@@ -40,6 +45,33 @@ function syntheticUserQuota(uid: number, name: string): UserQuota {
   }
 }
 
+const STATUS_ORDER: Record<QuotaStatus, number> = { ok: 0, warning: 1, over: 2 }
+
+type SortColumn =
+  | 'uid'
+  | 'name'
+  | 'block_current'
+  | 'block_soft_limit'
+  | 'block_hard_limit'
+  | 'inode_current'
+  | 'inode_soft_limit'
+  | 'inode_hard_limit'
+  | 'status'
+
+function compareQuota(a: UserQuota, b: UserQuota, col: SortColumn, dir: 'asc' | 'desc'): number {
+  let cmp = 0
+  if (col === 'status') {
+    cmp = STATUS_ORDER[getQuotaStatus(a)] - STATUS_ORDER[getQuotaStatus(b)]
+  } else if (col === 'name') {
+    cmp = a.name.localeCompare(b.name, undefined, { numeric: true })
+  } else {
+    const aVal = a[col] as number
+    const bVal = b[col] as number
+    cmp = aVal - bVal
+  }
+  return dir === 'asc' ? cmp : -cmp
+}
+
 export function DeviceUserListPage() {
   const { hostId, deviceName } = useParams<{ hostId: string; deviceName: string }>()
   const [search, setSearch] = useState('')
@@ -49,7 +81,18 @@ export function DeviceUserListPage() {
   const [addQuotaResolving, setAddQuotaResolving] = useState(false)
   const [addQuotaError, setAddQuotaError] = useState<string | null>(null)
   const [batchQuotaOpened, setBatchQuotaOpened] = useState(false)
+  const [sortBy, setSortBy] = useState<SortColumn>('name')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const { t } = useI18n()
+
+  function handleSort(column: SortColumn) {
+    if (sortBy === column) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(column)
+      setSortDirection('asc')
+    }
+  }
 
   const { data, isLoading, error } = useQuery({ queryKey: ['quotas'], queryFn: fetchQuotas })
 
@@ -70,6 +113,10 @@ export function DeviceUserListPage() {
         String(q.uid).includes(s)
     )
   }, [device?.user_quotas, search])
+
+  const sortedUsers = useMemo(() => {
+    return [...users].sort((a, b) => compareQuota(a, b, sortBy, sortDirection))
+  }, [users, sortBy, sortDirection])
 
   if (!hostId || !deviceName) return <Alert color="red">{t('missingHostOrDevice')}</Alert>
   if (isLoading) {
@@ -182,26 +229,152 @@ export function DeviceUserListPage() {
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>{t('uid')}</Table.Th>
-            <Table.Th>{t('name')}</Table.Th>
-            <Table.Th>{t('blockUsed')}</Table.Th>
+            <Table.Th>
+              <Group
+                gap={4}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleSort('uid')}
+              >
+                {t('uid')}
+                {sortBy === 'uid' &&
+                  (sortDirection === 'asc' ? (
+                    <IconArrowUp size={14} />
+                  ) : (
+                    <IconArrowDown size={14} />
+                  ))}
+              </Group>
+            </Table.Th>
+            <Table.Th>
+              <Group
+                gap={4}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleSort('name')}
+              >
+                {t('name')}
+                {sortBy === 'name' &&
+                  (sortDirection === 'asc' ? (
+                    <IconArrowUp size={14} />
+                  ) : (
+                    <IconArrowDown size={14} />
+                  ))}
+              </Group>
+            </Table.Th>
+            <Table.Th>
+              <Group
+                gap={4}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleSort('block_current')}
+              >
+                {t('blockUsed')}
+                {sortBy === 'block_current' &&
+                  (sortDirection === 'asc' ? (
+                    <IconArrowUp size={14} />
+                  ) : (
+                    <IconArrowDown size={14} />
+                  ))}
+              </Group>
+            </Table.Th>
             {device.user_quota_format !== 'zfs' && (
-              <Table.Th>{t('blockSoft')}</Table.Th>
+              <Table.Th>
+                <Group
+                  gap={4}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => handleSort('block_soft_limit')}
+                >
+                  {t('blockSoft')}
+                  {sortBy === 'block_soft_limit' &&
+                    (sortDirection === 'asc' ? (
+                      <IconArrowUp size={14} />
+                    ) : (
+                      <IconArrowDown size={14} />
+                    ))}
+                </Group>
+              </Table.Th>
             )}
-            <Table.Th>{t('blockHard')}</Table.Th>
+            <Table.Th>
+              <Group
+                gap={4}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleSort('block_hard_limit')}
+              >
+                {t('blockHard')}
+                {sortBy === 'block_hard_limit' &&
+                  (sortDirection === 'asc' ? (
+                    <IconArrowUp size={14} />
+                  ) : (
+                    <IconArrowDown size={14} />
+                  ))}
+              </Group>
+            </Table.Th>
             {device.user_quota_format !== 'zfs' && (
               <>
-                <Table.Th>{t('inodeUsed')}</Table.Th>
-                <Table.Th>{t('inodeSoft')}</Table.Th>
-                <Table.Th>{t('inodeHard')}</Table.Th>
+                <Table.Th>
+                  <Group
+                    gap={4}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('inode_current')}
+                  >
+                    {t('inodeUsed')}
+                    {sortBy === 'inode_current' &&
+                      (sortDirection === 'asc' ? (
+                        <IconArrowUp size={14} />
+                      ) : (
+                        <IconArrowDown size={14} />
+                      ))}
+                  </Group>
+                </Table.Th>
+                <Table.Th>
+                  <Group
+                    gap={4}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('inode_soft_limit')}
+                  >
+                    {t('inodeSoft')}
+                    {sortBy === 'inode_soft_limit' &&
+                      (sortDirection === 'asc' ? (
+                        <IconArrowUp size={14} />
+                      ) : (
+                        <IconArrowDown size={14} />
+                      ))}
+                  </Group>
+                </Table.Th>
+                <Table.Th>
+                  <Group
+                    gap={4}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('inode_hard_limit')}
+                  >
+                    {t('inodeHard')}
+                    {sortBy === 'inode_hard_limit' &&
+                      (sortDirection === 'asc' ? (
+                        <IconArrowUp size={14} />
+                      ) : (
+                        <IconArrowDown size={14} />
+                      ))}
+                  </Group>
+                </Table.Th>
               </>
             )}
-            <Table.Th>{t('status')}</Table.Th>
+            <Table.Th>
+              <Group
+                gap={4}
+                style={{ cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleSort('status')}
+              >
+                {t('status')}
+                {sortBy === 'status' &&
+                  (sortDirection === 'asc' ? (
+                    <IconArrowUp size={14} />
+                  ) : (
+                    <IconArrowDown size={14} />
+                  ))}
+              </Group>
+            </Table.Th>
             <Table.Th>{t('actions')}</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {users.map((q) => {
+          {sortedUsers.map((q) => {
             const status = getQuotaStatus(q)
             return (
               <Table.Tr key={q.uid}>
