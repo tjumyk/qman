@@ -4,11 +4,16 @@ Given that we track Docker events (container create/remove) via sync_from_docker
 every 120 seconds, we can cache container lists for longer periods (5-10 minutes) and
 invalidate the cache when events are detected. This significantly reduces Docker API load
 while maintaining data freshness through event-driven invalidation.
+
+Also provides Redis-based distributed locks for Docker API operations so that with
+multiple gunicorn workers only one worker hits the Docker API at a time per operation.
 """
 
 import json
+import threading
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Generator
 
 from app.utils import get_logger
 
@@ -86,6 +91,80 @@ def _get_redis_client():
     except Exception as e:
         logger.debug("Redis cache unavailable: %s", e)
         return None
+
+
+# Lock key prefix for Docker API operations (distributed across gunicorn workers)
+_LOCK_PREFIX = "docker:lock:"
+
+# Default: hold lock up to 2 minutes (Docker API can be slow), wait up to 3 minutes to acquire
+_DEFAULT_LOCK_HOLD_SECONDS = 120
+_DEFAULT_LOCK_WAIT_SECONDS = 180.0
+
+
+@contextmanager
+def redis_lock(
+    lock_name: str,
+    hold_timeout_seconds: int = _DEFAULT_LOCK_HOLD_SECONDS,
+    wait_timeout_seconds: float = _DEFAULT_LOCK_WAIT_SECONDS,
+    fallback_lock: threading.Lock | None = None,
+) -> Generator[None, None, None]:
+    """Context manager for a Redis-based distributed lock. Works across gunicorn workers.
+
+    When Redis is available, uses redis.lock.Lock so only one process holds the lock.
+    When Redis is unavailable, uses fallback_lock if provided (in-process serialization only).
+
+    Args:
+        lock_name: Name of the lock (e.g. "list_containers").
+        hold_timeout_seconds: Max time the lock is held (auto-release to avoid deadlock).
+        wait_timeout_seconds: Max time to wait to acquire the lock.
+        fallback_lock: Optional threading.Lock to use when Redis is unavailable.
+    """
+    redis_client = _get_redis_client()
+    if redis_client:
+        try:
+            from redis.lock import Lock as RedisLock
+
+            key = _LOCK_PREFIX + lock_name
+            lock = RedisLock(
+                redis_client,
+                key,
+                timeout=hold_timeout_seconds,
+                blocking=True,
+                blocking_timeout=wait_timeout_seconds,
+            )
+            acquired = lock.acquire()
+            if not acquired:
+                logger.warning(
+                    "Redis lock %s not acquired within %ss, using fallback",
+                    lock_name,
+                    wait_timeout_seconds,
+                )
+                if fallback_lock is not None:
+                    with fallback_lock:
+                        yield
+                else:
+                    yield
+                return
+            try:
+                yield
+            finally:
+                try:
+                    lock.release()
+                except Exception as e:
+                    logger.debug("Redis lock release failed (may have expired): %s", e)
+        except Exception as e:
+            logger.debug("Redis lock acquire failed, falling back: %s", e)
+            if fallback_lock is not None:
+                with fallback_lock:
+                    yield
+            else:
+                yield
+    else:
+        if fallback_lock is not None:
+            with fallback_lock:
+                yield
+        else:
+            yield
 
 
 def get_cached_containers(ttl_seconds: int | None = None) -> list[dict[str, Any]] | None:

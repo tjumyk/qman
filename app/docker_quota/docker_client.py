@@ -11,7 +11,8 @@ Cache is invalidated when Docker events indicate container/image changes. This s
 reduces Docker API load while maintaining freshness through event-driven invalidation.
 
 Note on locking: Heavy operations (list_containers, list_images, get_system_df) use per-operation locks so that concurrent
-requests do not all hit the Docker API at once. Cacheable operations use double-checked
+requests do not all hit the Docker API at once. Locks are Redis-based so they work across gunicorn workers; if Redis
+is unavailable, in-process threading locks are used as fallback. Cacheable operations use double-checked
 locking: the first caller does the work and fills the cache; waiters then see a cache hit.
 """
 
@@ -19,11 +20,12 @@ import threading
 import time
 from typing import Any
 
+from app.docker_quota.cache import redis_lock
 from app.utils import get_logger
 
 logger = get_logger(__name__)
 
-# Per-operation locks to avoid thundering herd on Docker API when many requests arrive concurrently.
+# Per-operation locks: Redis lock when available (cross-worker), else in-process fallback.
 _lock_list_containers = threading.Lock()
 _lock_list_images = threading.Lock()
 _lock_system_df = threading.Lock()
@@ -72,7 +74,7 @@ def list_containers(all_containers: bool = True, use_cache: bool = True) -> list
             logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
     # Cache miss or cache disabled: fetch from Docker API (single flight under lock)
-    with _lock_list_containers:
+    with redis_lock("list_containers", fallback_lock=_lock_list_containers):
         # Double-check cache after acquiring lock (another thread may have filled it)
         if use_cache:
             try:
@@ -163,7 +165,7 @@ def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
             logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
     # Cache miss or cache disabled: fetch from Docker API (single flight under lock)
-    with _lock_list_images:
+    with redis_lock("list_images", fallback_lock=_lock_list_images):
         if use_cache:
             try:
                 from app.docker_quota.cache import get_cached_images, set_cached_images
@@ -258,7 +260,7 @@ def get_system_df(
         except Exception as e:
             logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
-    with _lock_system_df:
+    with redis_lock("system_df", fallback_lock=_lock_system_df):
         if use_cache:
             try:
                 from app.docker_quota.cache import get_cached_system_df
