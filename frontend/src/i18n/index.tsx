@@ -194,6 +194,7 @@ const translations: Record<Locale, Record<string, string>> = {
     firstSeen: 'First Seen',
     searchLayers: 'Search layers...',
     noLayersMatch: 'No layers match.',
+    hideZeroSizeLayers: 'Hide layers with 0 size',
     // Docker volumes
     volumeName: 'Volume Name',
     refCount: 'Ref Count',
@@ -410,6 +411,7 @@ const translations: Record<Locale, Record<string, string>> = {
     firstSeen: '首次出现',
     searchLayers: '搜索层...',
     noLayersMatch: '没有匹配的层。',
+    hideZeroSizeLayers: '隐藏大小为 0 的层',
     // Docker volumes
     volumeName: '数据卷名称',
     refCount: '引用数',

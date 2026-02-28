@@ -10,6 +10,7 @@ import {
   Badge,
   Group,
   Accordion,
+  Checkbox,
 } from '@mantine/core'
 import { fetchDockerImages } from '../../api'
 import { BlockSize } from '../BlockSize'
@@ -58,6 +59,7 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
   const [imageSortDirection, setImageSortDirection] = useState<SortDirection>('desc')
   const [layerSortField, setLayerSortField] = useState<LayerSortField>('size_bytes')
   const [layerSortDirection, setLayerSortDirection] = useState<SortDirection>('desc')
+  const [hideZeroSizeLayers, setHideZeroSizeLayers] = useState(true)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['docker-images', hostId],
@@ -141,6 +143,13 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
       }
     })
   }, [data, layerSearch, layerSortField, layerSortDirection])
+
+  const displayedLayers = useMemo(() => {
+    if (hideZeroSizeLayers) {
+      return filteredLayers.filter((layer) => layer.size_bytes !== 0)
+    }
+    return filteredLayers
+  }, [filteredLayers, hideZeroSizeLayers])
 
   const ImageSortableHeader = ({
     field,
@@ -300,12 +309,19 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
           </Accordion.Control>
           <Accordion.Panel>
             <Stack gap="md">
-              <TextInput
-                placeholder={t('searchLayers')}
-                value={layerSearch}
-                onChange={(e) => setLayerSearch(e.currentTarget.value)}
-                style={{ maxWidth: 300 }}
-              />
+              <Group gap="md">
+                <TextInput
+                  placeholder={t('searchLayers')}
+                  value={layerSearch}
+                  onChange={(e) => setLayerSearch(e.currentTarget.value)}
+                  style={{ maxWidth: 300 }}
+                />
+                <Checkbox
+                  label={t('hideZeroSizeLayers')}
+                  checked={hideZeroSizeLayers}
+                  onChange={(e) => setHideZeroSizeLayers(e.currentTarget.checked)}
+                />
+              </Group>
 
               <Table striped highlightOnHover>
                 <Table.Thead>
@@ -324,7 +340,7 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {filteredLayers.map((layer: DockerLayer) => (
+                  {displayedLayers.map((layer: DockerLayer) => (
                     <Table.Tr key={layer.layer_id}>
                       <Table.Td>
                         <Text size="xs" ff="monospace" c="dimmed">
@@ -364,7 +380,7 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
                 </Table.Tbody>
               </Table>
 
-              {filteredLayers.length === 0 && (
+              {displayedLayers.length === 0 && (
                 <Text size="sm" c="dimmed">
                   {t('noLayersMatch')}
                 </Text>
