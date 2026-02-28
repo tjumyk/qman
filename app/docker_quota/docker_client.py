@@ -9,8 +9,13 @@ timeout parameters when creating it.
 Note on caching: list_containers() and list_images() use Redis cache with 10-minute TTL.
 Cache is invalidated when Docker events indicate container/image changes. This significantly
 reduces Docker API load while maintaining freshness through event-driven invalidation.
+
+Note on locking: Heavy operations (list_containers, list_images, get_system_df) use per-operation locks so that concurrent
+requests do not all hit the Docker API at once. Cacheable operations use double-checked
+locking: the first caller does the work and fills the cache; waiters then see a cache hit.
 """
 
+import threading
 import time
 from typing import Any
 
@@ -18,6 +23,10 @@ from app.utils import get_logger
 
 logger = get_logger(__name__)
 
+# Per-operation locks to avoid thundering herd on Docker API when many requests arrive concurrently.
+_lock_list_containers = threading.Lock()
+_lock_list_images = threading.Lock()
+_lock_system_df = threading.Lock()
 
 def get_docker_data_root(base_url: str = "unix://var/run/docker.sock") -> str:
     """Return Docker data root (e.g. /var/lib/docker). Uses 'docker info' or default."""
@@ -62,59 +71,71 @@ def list_containers(all_containers: bool = True, use_cache: bool = True) -> list
         except Exception as e:
             logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
-    # Cache miss or cache disabled: fetch from Docker API
-    try:
-        import docker
-        client_start = time.time()
-        client = docker.from_env()
-        client_init_time = time.time() - client_start
-        
-        list_start = time.time()
-        containers = client.containers.list(all=all_containers)
-        list_time = time.time() - list_start
-        
-        parse_start = time.time()
-        result = []
-        for c in containers:
-            # Get image ID from attrs to avoid lazy-loading API call (c.image.id triggers inspect_image)
-            # Image ID is in c.attrs["Image"] (short ID) or c.attrs["Config"]["Image"] (image name)
-            # For full image ID, we'd need inspect, but short ID is usually sufficient
-            image_id = None
-            attrs = c.attrs
-            if "Image" in attrs:
-                image_id = attrs["Image"]  # Short image ID (e.g. "sha256:abc123...")
-            elif "Config" in attrs and "Image" in attrs["Config"]:
-                # Fallback: image name/tag (less ideal but avoids API call)
-                image_id = attrs["Config"]["Image"]
-            # Labels are in Config.Labels, not directly in attrs.Labels
-            config_labels = (attrs.get("Config") or {}).get("Labels") or {}
-            result.append({
-                "id": c.id,
-                "short_id": c.short_id,
-                "name": (c.name or ""),
-                "image": image_id,
-                "created": attrs.get("Created"),
-                "labels": config_labels,
-            })
-        parse_time = time.time() - parse_start
-        
-        # Cache the result
+    # Cache miss or cache disabled: fetch from Docker API (single flight under lock)
+    with _lock_list_containers:
+        # Double-check cache after acquiring lock (another thread may have filled it)
         if use_cache:
             try:
-                set_cached_containers(result)
-            except Exception as e:
-                logger.debug("Failed to cache containers list: %s", e)
+                from app.docker_quota.cache import get_cached_containers, set_cached_containers
+                cached = get_cached_containers()
+                if cached is not None:
+                    elapsed = time.time() - start_time
+                    logger.info("Docker list_containers: cache hit after lock (took %.3fs, count=%d)", elapsed, len(cached))
+                    return cached
+            except Exception:
+                pass
+        try:
+            import docker
+            client_start = time.time()
+            client = docker.from_env()
+            client_init_time = time.time() - client_start
+            
+            list_start = time.time()
+            containers = client.containers.list(all=all_containers)
+            list_time = time.time() - list_start
+            
+            parse_start = time.time()
+            result = []
+            for c in containers:
+                # Get image ID from attrs to avoid lazy-loading API call (c.image.id triggers inspect_image)
+                # Image ID is in c.attrs["Image"] (short ID) or c.attrs["Config"]["Image"] (image name)
+                # For full image ID, we'd need inspect, but short ID is usually sufficient
+                image_id = None
+                attrs = c.attrs
+                if "Image" in attrs:
+                    image_id = attrs["Image"]  # Short image ID (e.g. "sha256:abc123...")
+                elif "Config" in attrs and "Image" in attrs["Config"]:
+                    # Fallback: image name/tag (less ideal but avoids API call)
+                    image_id = attrs["Config"]["Image"]
+                # Labels are in Config.Labels, not directly in attrs.Labels
+                config_labels = (attrs.get("Config") or {}).get("Labels") or {}
+                result.append({
+                    "id": c.id,
+                    "short_id": c.short_id,
+                    "name": (c.name or ""),
+                    "image": image_id,
+                    "created": attrs.get("Created"),
+                    "labels": config_labels,
+                })
+            parse_time = time.time() - parse_start
+            
+            # Cache the result
+            if use_cache:
+                try:
+                    set_cached_containers(result)
+                except Exception as e:
+                    logger.debug("Failed to cache containers list: %s", e)
         
-        total_time = time.time() - start_time
-        logger.debug(
-            "Docker list_containers: total=%.2fs (client_init=%.2fs, list=%.2fs, parse=%.2fs, count=%d)",
-            total_time, client_init_time, list_time, parse_time, len(result)
-        )
-        return result
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.warning("Docker list containers failed: %s (took %.2fs)", e, elapsed)
-        return []
+            total_time = time.time() - start_time
+            logger.debug(
+                "Docker list_containers: total=%.2fs (client_init=%.2fs, list=%.2fs, parse=%.2fs, count=%d)",
+                total_time, client_init_time, list_time, parse_time, len(result)
+            )
+            return result
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.warning("Docker list containers failed: %s (took %.2fs)", e, elapsed)
+            return []
 
 
 def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
@@ -141,36 +162,46 @@ def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
         except Exception as e:
             logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
-    # Cache miss or cache disabled: fetch from Docker API
-    try:
-        import docker
-        client = docker.from_env()
+    # Cache miss or cache disabled: fetch from Docker API (single flight under lock)
+    with _lock_list_images:
+        if use_cache:
+            try:
+                from app.docker_quota.cache import get_cached_images, set_cached_images
+                cached = get_cached_images()
+                if cached is not None:
+                    elapsed = time.time() - start_time
+                    logger.info("Docker list_images: cache hit after lock (took %.3fs, count=%d)", elapsed, len(cached))
+                    return cached
+            except Exception:
+                pass
         try:
-            images = client.images.list()
-            result = [
-                {
-                    "id": img.id,
-                    "short_id": img.short_id,
-                    "size": img.attrs.get("Size") or 0,
-                    "created": img.attrs.get("Created"),
-                }
-                for img in images
-            ]
-            # Cache the result
-            if use_cache:
-                try:
-                    set_cached_images(result)
-                except Exception as e:
-                    logger.debug("Failed to cache images list: %s", e)
+            import docker
+            client = docker.from_env()
+            try:
+                images = client.images.list()
+                result = [
+                    {
+                        "id": img.id,
+                        "short_id": img.short_id,
+                        "size": img.attrs.get("Size") or 0,
+                        "created": img.attrs.get("Created"),
+                    }
+                    for img in images
+                ]
+                if use_cache:
+                    try:
+                        set_cached_images(result)
+                    except Exception as e:
+                        logger.debug("Failed to cache images list: %s", e)
+                elapsed = time.time() - start_time
+                logger.debug("Docker list_images: total=%.2fs (count=%d)", elapsed, len(result))
+                return result
+            finally:
+                client.close()
+        except Exception as e:
             elapsed = time.time() - start_time
-            logger.debug("Docker list_images: total=%.2fs (count=%d)", elapsed, len(result))
-            return result
-        finally:
-            client.close()
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.warning("Docker list images failed: %s (took %.2fs)", e, elapsed)
-        return []
+            logger.warning("Docker list images failed: %s (took %.2fs)", e, elapsed)
+            return []
 
 
 def _parse_created_iso(created: str | None) -> float:
@@ -227,86 +258,97 @@ def get_system_df(
         except Exception as e:
             logger.debug("Cache check failed, falling back to Docker API: %s", e)
     
-    try:
-        import docker
-        client_start = time.time()
-        client = docker.from_env()
-        client_init_time = time.time() - client_start
-
-        # Single df() call returns containers (with SizeRw), images (with Size), and volumes
-        df_start = time.time()
-        df_result = client.api.df()
-        df_time = time.time() - df_start
-
-        # Extract container sizes from df result
-        parse_start = time.time()
-        df_containers = df_result.get("Containers") or []
-        container_sizes_dict: dict[str, int] = {
-            c["Id"]: (c.get("SizeRw") or 0) for c in df_containers
-        }
-
-        # Extract image sizes from df result
-        df_images = df_result.get("Images") or []
-        image_sizes_dict: dict[str, int] = {
-            img["Id"]: (img.get("Size") or 0) for img in df_images
-        }
-
-        # Extract volume data if requested
-        volumes_dict: dict[str, dict[str, Any]] = {}
-        if include_volumes:
-            volumes_list = df_result.get("Volumes") or []
-            for vol in volumes_list:
-                vol_name = vol.get("Name")
-                if not vol_name:
-                    continue
-                usage_data = vol.get("UsageData") or {}
-                volumes_dict[vol_name] = {
-                    "size": usage_data.get("Size", 0) or 0,
-                    "labels": vol.get("Labels") or {},
-                    "ref_count": usage_data.get("RefCount", 0) or 0,
-                }
-        parse_time = time.time() - parse_start
-
-        total_time = time.time() - start_time
-        total_container_bytes = sum(container_sizes_dict.values())
-        total_image_bytes = sum(image_sizes_dict.values())
-        total_volume_bytes = sum(v["size"] for v in volumes_dict.values()) if volumes_dict else 0
-        containers_with_size = sum(1 for s in container_sizes_dict.values() if s > 0)
-
-        log_msg = (
-            "Docker get_system_df: total=%.2fs (client_init=%.2fs, df_api=%.2fs, parse=%.2fs) "
-            "sizes: containers=%d bytes (%d with data, %d total), images=%d bytes (%d images)"
-        )
-        log_args: list[Any] = [
-            total_time, client_init_time, df_time, parse_time,
-            total_container_bytes, containers_with_size, len(container_sizes_dict),
-            total_image_bytes, len(image_sizes_dict)
-        ]
-        if include_volumes:
-            log_msg += ", volumes=%d bytes (%d volumes)"
-            log_args.extend([total_volume_bytes, len(volumes_dict)])
-        logger.info(log_msg, *log_args)
-
-        result: dict[str, Any] = {
-            "containers": container_sizes_dict,
-            "images": image_sizes_dict,
-        }
-        if include_volumes:
-            result["volumes"] = volumes_dict
-        
-        # Cache result for frontend APIs (only if caching was requested)
+    with _lock_system_df:
         if use_cache:
             try:
-                from app.docker_quota.cache import set_cached_system_df
-                set_cached_system_df(result, include_volumes=include_volumes)
-            except Exception as cache_err:
-                logger.debug("Failed to cache system_df result: %s", cache_err)
-        
-        return result
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.warning("Docker system df failed: %s (took %.2fs)", e, elapsed)
-        return {"containers": {}, "images": {}}
+                from app.docker_quota.cache import get_cached_system_df
+                cached = get_cached_system_df(include_volumes=include_volumes)
+                if cached is not None:
+                    elapsed = time.time() - start_time
+                    logger.debug("Docker get_system_df: cache hit after lock (took %.3fs)", elapsed)
+                    return cached
+            except Exception:
+                pass
+        try:
+            import docker
+            client_start = time.time()
+            client = docker.from_env()
+            client_init_time = time.time() - client_start
+
+            # Single df() call returns containers (with SizeRw), images (with Size), and volumes
+            df_start = time.time()
+            df_result = client.api.df()
+            df_time = time.time() - df_start
+
+            # Extract container sizes from df result
+            parse_start = time.time()
+            df_containers = df_result.get("Containers") or []
+            container_sizes_dict: dict[str, int] = {
+                c["Id"]: (c.get("SizeRw") or 0) for c in df_containers
+            }
+
+            # Extract image sizes from df result
+            df_images = df_result.get("Images") or []
+            image_sizes_dict: dict[str, int] = {
+                img["Id"]: (img.get("Size") or 0) for img in df_images
+            }
+
+            # Extract volume data if requested
+            volumes_dict: dict[str, dict[str, Any]] = {}
+            if include_volumes:
+                volumes_list = df_result.get("Volumes") or []
+                for vol in volumes_list:
+                    vol_name = vol.get("Name")
+                    if not vol_name:
+                        continue
+                    usage_data = vol.get("UsageData") or {}
+                    volumes_dict[vol_name] = {
+                        "size": usage_data.get("Size", 0) or 0,
+                        "labels": vol.get("Labels") or {},
+                        "ref_count": usage_data.get("RefCount", 0) or 0,
+                    }
+            parse_time = time.time() - parse_start
+
+            total_time = time.time() - start_time
+            total_container_bytes = sum(container_sizes_dict.values())
+            total_image_bytes = sum(image_sizes_dict.values())
+            total_volume_bytes = sum(v["size"] for v in volumes_dict.values()) if volumes_dict else 0
+            containers_with_size = sum(1 for s in container_sizes_dict.values() if s > 0)
+
+            log_msg = (
+                "Docker get_system_df: total=%.2fs (client_init=%.2fs, df_api=%.2fs, parse=%.2fs) "
+                "sizes: containers=%d bytes (%d with data, %d total), images=%d bytes (%d images)"
+            )
+            log_args: list[Any] = [
+                total_time, client_init_time, df_time, parse_time,
+                total_container_bytes, containers_with_size, len(container_sizes_dict),
+                total_image_bytes, len(image_sizes_dict)
+            ]
+            if include_volumes:
+                log_msg += ", volumes=%d bytes (%d volumes)"
+                log_args.extend([total_volume_bytes, len(volumes_dict)])
+            logger.info(log_msg, *log_args)
+
+            result: dict[str, Any] = {
+                "containers": container_sizes_dict,
+                "images": image_sizes_dict,
+            }
+            if include_volumes:
+                result["volumes"] = volumes_dict
+            
+            # Cache result for frontend APIs (only if caching was requested)
+            if use_cache:
+                try:
+                    from app.docker_quota.cache import set_cached_system_df
+                    set_cached_system_df(result, include_volumes=include_volumes)
+                except Exception as cache_err:
+                    logger.debug("Failed to cache system_df result: %s", cache_err)
+            
+            return result
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.warning("Docker system df failed: %s (took %.2fs)", e, elapsed)
+            return {"containers": {}, "images": {}}
 
 
 def stop_container(container_id: str) -> bool:
