@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Tabs, Stack, Text, Table, Button, Badge, TextInput, Group, Modal } from '@mantine/core'
 import { IconUsers, IconBox, IconPhoto, IconDatabase, IconPlus } from '@tabler/icons-react'
 import { BlockSize } from '../BlockSize'
-import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../../utils/quotaStatus'
+import {
+  getQuotaStatus,
+  getQuotaStatusColor,
+  getQuotaStatusLabelKey,
+  type QuotaStatus,
+} from '../../utils/quotaStatus'
 import { useI18n } from '../../i18n'
 import { EditQuotaModal } from '../EditQuotaModal'
 import { BatchQuotaModal } from '../BatchQuotaModal'
@@ -33,6 +38,30 @@ function syntheticUserQuota(uid: number, name: string): UserQuota {
   }
 }
 
+const STATUS_ORDER: Record<QuotaStatus, number> = { ok: 0, warning: 1, over: 2 }
+
+type UserSortColumn = 'uid' | 'name' | 'block_current' | 'block_hard_limit' | 'status'
+type SortDirection = 'asc' | 'desc'
+
+function compareUserQuota(
+  a: UserQuota,
+  b: UserQuota,
+  col: UserSortColumn,
+  dir: SortDirection
+): number {
+  let cmp = 0
+  if (col === 'status') {
+    cmp = STATUS_ORDER[getQuotaStatus(a)] - STATUS_ORDER[getQuotaStatus(b)]
+  } else if (col === 'name') {
+    cmp = a.name.localeCompare(b.name, undefined, { numeric: true })
+  } else {
+    const aVal = a[col] as number
+    const bVal = b[col] as number
+    cmp = aVal - bVal
+  }
+  return dir === 'asc' ? cmp : -cmp
+}
+
 export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
   const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<string | null>('users')
@@ -43,15 +72,31 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
   const [addQuotaResolving, setAddQuotaResolving] = useState(false)
   const [addQuotaError, setAddQuotaError] = useState<string | null>(null)
   const [batchQuotaOpened, setBatchQuotaOpened] = useState(false)
+  const [sortBy, setSortBy] = useState<UserSortColumn>('name')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
 
   const users = device.user_quotas || []
-  const filteredUsers = search.trim()
-    ? users.filter(
-        (q) =>
-          q.name.toLowerCase().includes(search.trim().toLowerCase()) ||
-          String(q.uid).includes(search.trim())
-      )
-    : users
+  const filteredUsers = useMemo(() => {
+    if (!search.trim()) return users
+    const s = search.trim().toLowerCase()
+    return users.filter(
+      (q) => q.name.toLowerCase().includes(s) || String(q.uid).includes(s)
+    )
+  }, [users, search])
+
+  const sortedUsers = useMemo(
+    () => [...filteredUsers].sort((a, b) => compareUserQuota(a, b, sortBy, sortDirection)),
+    [filteredUsers, sortBy, sortDirection]
+  )
+
+  function handleSort(column: UserSortColumn) {
+    if (sortBy === column) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(column)
+      setSortDirection('asc')
+    }
+  }
 
   async function handleAddQuotaContinue() {
     const username = addQuotaUsername.trim()
@@ -131,16 +176,76 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
             <Table striped highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>{t('uid')}</Table.Th>
-                  <Table.Th>{t('name')}</Table.Th>
-                  <Table.Th>{t('blockUsed')}</Table.Th>
-                  <Table.Th>{t('blockHard')}</Table.Th>
-                  <Table.Th>{t('status')}</Table.Th>
+                  <Table.Th
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('uid')}
+                  >
+                    <Group gap={4}>
+                      {t('uid')}
+                      {sortBy === 'uid' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
+                  <Table.Th
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('name')}
+                  >
+                    <Group gap={4}>
+                      {t('name')}
+                      {sortBy === 'name' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
+                  <Table.Th
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('block_current')}
+                  >
+                    <Group gap={4}>
+                      {t('blockUsed')}
+                      {sortBy === 'block_current' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
+                  <Table.Th
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('block_hard_limit')}
+                  >
+                    <Group gap={4}>
+                      {t('blockHard')}
+                      {sortBy === 'block_hard_limit' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
+                  <Table.Th
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => handleSort('status')}
+                  >
+                    <Group gap={4}>
+                      {t('status')}
+                      {sortBy === 'status' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
                   <Table.Th>{t('actions')}</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {filteredUsers.map((q) => {
+                {sortedUsers.map((q) => {
                   const status = getQuotaStatus(q)
                   return (
                     <Table.Tr key={q.uid}>
@@ -167,7 +272,7 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
                 })}
               </Table.Tbody>
             </Table>
-            {filteredUsers.length === 0 && (
+            {sortedUsers.length === 0 && (
               <Text size="sm" c="dimmed">
                 {t('noUsersMatch')}
               </Text>
