@@ -4,7 +4,6 @@
 config.json
 config.slave.json
 oauth.config.json
-oauth.mock.config.json
 static/
 static
 

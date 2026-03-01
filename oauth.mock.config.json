@@ -1,0 +1,56 @@
+{
+  "clients": [
+    {
+      "id": 1,
+      "secret": "someLongSecret",
+      "redirect_url": "http://127.0.0.1:5173/oauth-callback"
+    }
+  ],
+  "users": [
+    {
+      "id": 1000,
+      "name": "alice",
+      "email": "alice@mock.local",
+      "nickname": "alice",
+      "avatar": "",
+      "groups": [{"id": 1000}, {"id": 1002}]
+    },
+    {
+      "id": 1001,
+      "name": "bob",
+      "email": "bob@mock.local",
+      "nickname": "bob",
+      "avatar": "",
+      "groups": [{"id": 1000}, {"id": 1001}]
+    },
+    {
+      "id": 1002,
+      "name": "charlie",
+      "email": "charlie@mock.local",
+      "nickname": "charlie",
+      "avatar": "",
+      "groups": [{"id": 1000}]
+    },
+    {
+      "id": 1003,
+      "name": "diana",
+      "email": "diana@mock.local",
+      "nickname": "diana",
+      "avatar": "",
+      "groups": [{"id": 1000}]
+    },
+    {
+      "id": 1004,
+      "name": "eve",
+      "email": "eve@mock.local",
+      "nickname": "eve",
+      "avatar": "",
+      "groups": [{"id": 1000}]
+    }
+  ],
+  "groups": [
+    { "id": 1000, "name": "users", "description": "Regular users" },
+    { "id": 1001, "name": "developers", "description": "Developers" },
+    { "id": 1002, "name": "admin", "description": "Administrators" }
+  ]
+}
