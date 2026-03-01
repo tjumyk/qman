@@ -186,7 +186,7 @@ function AppShellWithNav() {
           )}
         </AppShell.Section>
       </AppShell.Navbar>
-      <AppShell.Main>
+      <AppShell.Main pb="xl">
         <Container size="xl">
           <PageBreadcrumbs />
           <Outlet />
