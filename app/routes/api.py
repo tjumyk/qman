@@ -174,6 +174,10 @@ def register_api_routes(app: Any) -> None:
     """Register /api/* routes on the Flask app (requires app for config and oauth)."""
     from auth_connect import oauth
 
+    @app.route("/api/health")
+    def health() -> Any:
+        return jsonify({"status": "ok"})
+
     @app.route("/api/me")
     @oauth.requires_login
     def get_me() -> tuple[Any, int] | Any:
