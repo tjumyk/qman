@@ -1,11 +1,21 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Stack, Text, Table, Loader, Alert, TextInput, Badge, Group } from '@mantine/core'
+import { Stack, Text, Table, Loader, Alert, TextInput, Badge, Group, Tooltip } from '@mantine/core'
 import { fetchDockerVolumes } from '../../api'
 import { BlockSize } from '../BlockSize'
 import { useI18n } from '../../i18n'
 import { UsageSummaryCards } from './UsageSummaryCard'
 import type { DockerVolume } from '../../api/schemas'
+
+function formatScanTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString()
+  } catch {
+    return iso
+  }
+}
 
 interface VolumesTabProps {
   hostId: string
@@ -128,6 +138,7 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
             <SortableHeader field="volume_name">{t('volumeName')}</SortableHeader>
             <SortableHeader field="host_user_name">{t('owner')}</SortableHeader>
             <SortableHeader field="size_bytes">{t('size')}</SortableHeader>
+            <Table.Th>{t('scan')}</Table.Th>
             <SortableHeader field="ref_count">{t('refCount')}</SortableHeader>
             <SortableHeader field="attribution_source">{t('attributionSource')}</SortableHeader>
           </Table.Tr>
@@ -150,7 +161,51 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
                 )}
               </Table.Td>
               <Table.Td>
-                <BlockSize size={v.size_bytes} />
+                <Tooltip
+                  label={
+                    v.reported_size_bytes != null || v.actual_disk_bytes != null
+                      ? `Reported: ${(v.reported_size_bytes ?? v.size_bytes).toLocaleString()} B | Actual: ${v.actual_disk_bytes != null ? v.actual_disk_bytes.toLocaleString() + ' B' : '—'}`
+                      : undefined
+                  }
+                >
+                  <Stack gap={0}>
+                    <BlockSize size={v.size_bytes} />
+                    {(v.reported_size_bytes != null && v.reported_size_bytes !== v.size_bytes) ||
+                    (v.actual_disk_bytes != null && v.actual_disk_bytes !== v.size_bytes) ? (
+                      <Text size="xs" c="dimmed">
+                        Reported: <BlockSize size={v.reported_size_bytes ?? v.size_bytes} /> · Actual:{' '}
+                        {v.actual_disk_bytes != null ? <BlockSize size={v.actual_disk_bytes} /> : '—'}
+                      </Text>
+                    ) : null}
+                  </Stack>
+                </Tooltip>
+              </Table.Td>
+              <Table.Td>
+                <Stack gap={2}>
+                  {v.pending_scan_started_at ? (
+                    <Text size="xs" c="blue">
+                      In progress since {formatScanTime(v.pending_scan_started_at)}
+                    </Text>
+                  ) : null}
+                  {v.scan_started_at != null && v.scan_finished_at != null && !v.pending_scan_started_at && (
+                    <Text size="xs" c="dimmed">
+                      Last successful: {formatScanTime(v.scan_started_at)} – {formatScanTime(v.scan_finished_at)}
+                    </Text>
+                  )}
+                  {v.last_scan_status && !v.pending_scan_started_at && (
+                    <Text size="xs" c={v.last_scan_status === 'success' ? 'green' : 'orange'}>
+                      Last attempt: {v.last_scan_status}
+                      {v.last_scan_finished_at ? ` at ${formatScanTime(v.last_scan_finished_at)}` : ''}
+                    </Text>
+                  )}
+                  {!v.pending_scan_started_at &&
+                    !v.scan_finished_at &&
+                    !v.last_scan_status && (
+                      <Text size="xs" c="dimmed">
+                        Never scanned
+                      </Text>
+                    )}
+                </Stack>
               </Table.Td>
               <Table.Td>
                 <Badge size="sm" variant="light" color={v.ref_count > 0 ? 'blue' : 'gray'}>

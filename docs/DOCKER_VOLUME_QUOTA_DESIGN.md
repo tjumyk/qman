@@ -103,13 +103,43 @@ Reconciliation removes attributions for volumes that no longer exist in Docker.
 
 ---
 
+## Actual disk calibration
+
+Docker’s reported volume size (from `GET /system/df`) can overstate real on-disk usage (e.g. sparse files). A **background worker** periodically runs `du -sb` on each volume’s mountpoint and stores the result so quota and UI use **actual disk usage** when available.
+
+### Tables
+
+- **`docker_volume_disk_usage`**  
+  Per-volume scan result: success tuple (`actual_disk_bytes`, `scan_started_at`, `scan_finished_at`) updated only on success; last attempt (`last_scan_started_at`, `last_scan_finished_at`, `last_scan_status`); `pending_scan_started_at` when a scan is in progress.  
+  Effective size = `actual_disk_bytes` if set, else Docker-reported size.
+
+- **`docker_volume_last_used`**  
+  `volume_name` → `last_mounted_at` (from container start events). Used for **smart skip**: do not re-scan a volume if we already have a successful scan, RefCount is 0, and no container has mounted it since the last scan.
+
+### Worker
+
+- **Task:** `sync_volume_actual_disk` (Celery, queue `qman.docker`).
+- **Schedule:** Configurable (e.g. `DOCKER_VOLUME_ACTUAL_DISK_SYNC_INTERVAL_SECONDS`, default 6 hours).
+- **Behaviour:** For each volume, run `du -sb` with low I/O priority (ionice/nice on Linux), per-volume timeout, and **disk-wise parallelism** (one scan per disk at a time, multiple disks in parallel).
+- **Skip condition:** Skip only when all of: has successful scan, RefCount == 0, `last_mounted_at` set, `last_mounted_at` ≤ `scan_finished_at`.
+
+### Events
+
+- On **container start**, the attribution sync updates `last_mounted_at` for each volume mounted by that container (for smart skip).
+
+### UI
+
+- Volumes table shows **reported** (Docker) vs **actual** (from scan) size, and **last successful scan** / **last attempt** timestamps and status so users know when the value was collected.
+
+---
+
 ## Edge cases
 
 - **Anonymous volumes:** Have generated names (long hash). Attributed the same way: first container that uses them.
 - **Shared volumes:** Multiple containers using one volume. Attributed to first container's owner (by creation time). No double-counting.
 - **Dangling volumes:** Keep their original owner attribution. If never attributed, count as unattributed.
 - **Bind mounts:** Not included (not Docker volumes, covered by filesystem quota if applicable).
-- **Volume removed:** Reconciliation removes the attribution row.
+- **Volume removed:** Reconciliation removes the attribution row and the disk-usage / last_used rows.
 
 ---
 

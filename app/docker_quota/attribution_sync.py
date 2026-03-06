@@ -1,7 +1,7 @@
 """Sync Docker attribution from audit logs and Docker events (container create, image pull)."""
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pwd
@@ -17,9 +17,12 @@ from app.docker_quota.attribution_store import (
     set_container_attribution,
     set_image_attribution,
     set_volume_attribution,
+    set_volume_last_mounted_at,
     update_volume_size,
     attribute_image_layers,
     get_layers_for_image,
+    reconcile_volume_disk_usage,
+    reconcile_volume_last_used,
 )
 from app.docker_quota.quota import _reconcile_layer_attributions, _reconcile_image_attributions, _reconcile_volume_attributions
 from app.docker_quota.cache import invalidate_container_cache, invalidate_image_cache
@@ -540,6 +543,24 @@ def sync_from_docker_events() -> int:
                     "Attributed container %s to %s (uid=%s): docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
                     eid[:12], name, match.uid, ev_time_str, match.command_str(), match.audit_time_str(), match.delta
                 )
+        # Container start: update last_mounted_at for each volume (for actual-disk scan smart skip)
+        elif typ == "container" and action == "start":
+            try:
+                import docker
+                client = docker.from_env()
+                try:
+                    container = client.containers.get(eid)
+                    mounts = container.attrs.get("Mounts") or []
+                    ev_dt = datetime.fromtimestamp(ev_ts, tz=timezone.utc)
+                    for mount in mounts:
+                        if mount.get("Type") == "volume":
+                            vol_name = mount.get("Name")
+                            if vol_name:
+                                set_volume_last_mounted_at(vol_name, ev_dt)
+                finally:
+                    client.close()
+            except Exception as e:
+                logger.debug("Could not update volume last_mounted_at for container %s: %s", eid[:12], e)
         # Container commit (creates new image)
         elif typ == "container" and action == "commit":
             # eid is container_id, but commit creates a new image
@@ -823,14 +844,18 @@ def sync_volume_attributions() -> dict[str, int]:
             counts["unattributed"] += 1
             logger.debug("Volume %s is unattributed (no label, no attributed container)", vol_name)
     
-    # Reconcile: remove attributions for volumes that no longer exist
+    # Reconcile: remove attributions and disk usage / last_used for volumes that no longer exist
     reconcile_start = time.time()
     volume_names_in_docker = set(volumes.keys())
     removed_volumes = _reconcile_volume_attributions(volume_names_in_docker)
+    removed_disk_usage = reconcile_volume_disk_usage(volume_names_in_docker)
+    removed_last_used = reconcile_volume_last_used(volume_names_in_docker)
     reconcile_time = time.time() - reconcile_start
-    if removed_volumes > 0:
-        logger.info("Reconciled volume attributions: removed %d volumes that no longer exist (took %.2fs)",
-                   removed_volumes, reconcile_time)
+    if removed_volumes > 0 or removed_disk_usage > 0 or removed_last_used > 0:
+        logger.info(
+            "Reconciled volume data: removed %d attributions, %d disk_usage, %d last_used (took %.2fs)",
+            removed_volumes, removed_disk_usage, removed_last_used, reconcile_time
+        )
     counts["removed"] = removed_volumes
     
     elapsed = time.time() - start_time

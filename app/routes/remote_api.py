@@ -602,14 +602,16 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
         from app.docker_quota.docker_client import get_system_df
-        from app.docker_quota.attribution_store import get_volume_attributions
+        from app.docker_quota.attribution_store import get_volume_attributions, get_volume_disk_usage_all
         
         # Get volume data from Docker API
         df = get_system_df(include_volumes=True)
         volumes_data = df.get("volumes", {})
         
-        # Get attributions from database
+        # Get attributions and disk usage from database
         attributions = {a["volume_name"]: a for a in get_volume_attributions()}
+        disk_usage_list = get_volume_disk_usage_all()
+        disk_usage_by_name = {u["volume_name"]: u for u in disk_usage_list}
         
         # Build response
         result_volumes = []
@@ -617,7 +619,10 @@ def register_remote_api_routes(app: Any) -> None:
         attributed_bytes = 0
         
         for vol_name, vol_info in volumes_data.items():
-            size = vol_info.get("size", 0)
+            reported_size = vol_info.get("size", 0)
+            disk_usage = disk_usage_by_name.get(vol_name)
+            actual_disk_bytes = disk_usage.get("actual_disk_bytes") if disk_usage else None
+            size = actual_disk_bytes if actual_disk_bytes is not None else reported_size
             total_bytes += size
             
             att = attributions.get(vol_name)
@@ -629,14 +634,29 @@ def register_remote_api_routes(app: Any) -> None:
             if att:
                 attributed_bytes += size
             
+            def _iso(dt) -> str | None:
+                if dt is None:
+                    return None
+                if hasattr(dt, "isoformat"):
+                    return dt.isoformat()
+                return str(dt)
+            
             result_volumes.append({
                 "volume_name": vol_name,
                 "size_bytes": size,
+                "reported_size_bytes": reported_size,
+                "actual_disk_bytes": actual_disk_bytes,
                 "host_user_name": host_user_name,
                 "uid": uid,
                 "attribution_source": attribution_source,
                 "ref_count": vol_info.get("ref_count", 0),
                 "first_seen_at": first_seen.isoformat() if first_seen else None,
+                "scan_started_at": _iso(disk_usage.get("scan_started_at")) if disk_usage else None,
+                "scan_finished_at": _iso(disk_usage.get("scan_finished_at")) if disk_usage else None,
+                "pending_scan_started_at": _iso(disk_usage.get("pending_scan_started_at")) if disk_usage else None,
+                "last_scan_started_at": _iso(disk_usage.get("last_scan_started_at")) if disk_usage else None,
+                "last_scan_finished_at": _iso(disk_usage.get("last_scan_finished_at")) if disk_usage else None,
+                "last_scan_status": disk_usage.get("last_scan_status") if disk_usage else None,
             })
         
         unattributed_bytes = total_bytes - attributed_bytes

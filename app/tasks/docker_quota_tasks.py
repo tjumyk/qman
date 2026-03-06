@@ -194,3 +194,15 @@ def sync_docker_attribution(self: Any) -> dict[str, int]:
     """Sync container/image attribution from audit logs and Docker events (container create, image pull)."""
     from app.docker_quota.attribution_sync import run_sync_docker_attribution
     return run_sync_docker_attribution()
+
+
+@celery_app.task(
+    name="app.tasks.docker_quota_tasks.sync_volume_actual_disk",
+    bind=True,
+    time_limit=14400,  # 4 hours: many volumes, each du can take up to 1h
+    soft_time_limit=12600,  # 3.5 hours
+)
+def sync_volume_actual_disk(self: Any) -> dict[str, int]:
+    """Collect actual disk usage of all Docker volumes via du -sb (low I/O priority, disk-wise parallelism)."""
+    from app.docker_quota.volume_actual_disk import collect_volume_actual_disk
+    return collect_volume_actual_disk()

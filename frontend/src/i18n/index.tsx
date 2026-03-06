@@ -198,6 +198,7 @@ const translations: Record<Locale, Record<string, string>> = {
     // Docker volumes
     volumeName: 'Volume Name',
     refCount: 'Ref Count',
+    scan: 'Scan',
     attributionSource: 'Source',
     searchVolumes: 'Search volumes...',
     noVolumesMatch: 'No volumes match.',
@@ -415,6 +416,7 @@ const translations: Record<Locale, Record<string, string>> = {
     // Docker volumes
     volumeName: '数据卷名称',
     refCount: '引用数',
+    scan: '扫描',
     attributionSource: '来源',
     searchVolumes: '搜索数据卷...',
     noVolumesMatch: '没有匹配的数据卷。',

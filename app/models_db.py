@@ -106,3 +106,32 @@ class DockerVolumeAttribution(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     attribution_source: Mapped[str] = mapped_column(String(32), default="container")  # 'label', 'container'
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DockerVolumeDiskUsage(Base):
+    """Actual disk usage (du) scan results per volume. Success tuple + last attempt + pending.
+    
+    Success tuple (actual_disk_bytes, scan_started_at, scan_finished_at) updated only on success.
+    Last attempt (last_scan_started_at, last_scan_finished_at, last_scan_status) on every run.
+    pending_scan_started_at set when scan starts, cleared when it finishes.
+    """
+
+    __tablename__ = "docker_volume_disk_usage"
+
+    volume_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    actual_disk_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scan_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scan_finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    pending_scan_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_scan_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_scan_finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_scan_status: Mapped[str | None] = mapped_column(String(32), nullable=True)  # success, timeout, permission_denied, parse_failure
+
+
+class DockerVolumeLastUsed(Base):
+    """Last time a volume was mounted (from container start events). Used for smart skip of disk scan."""
+
+    __tablename__ = "docker_volume_last_used"
+
+    volume_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    last_mounted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

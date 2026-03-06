@@ -12,6 +12,7 @@ from app.docker_quota.attribution_store import (
     delete_image_attribution,
     get_volume_attributions,
     delete_volume_attribution,
+    get_volume_disk_usage_all,
     get_user_quota_limit,
     set_user_quota_limit,
     batch_set_user_quota_limits,
@@ -162,6 +163,8 @@ def _aggregate_usage_by_uid(
     attributions = get_container_attributions()
     layer_attributions = get_layer_attributions()
     volume_attributions = get_volume_attributions()
+    volume_disk_usage_list = get_volume_disk_usage_all()
+    volume_disk_usage_by_name = {u["volume_name"]: u for u in volume_disk_usage_list}
     timings["get_attributions"] = time.time() - attrib_start
     
     build_map_start = time.time()
@@ -215,13 +218,17 @@ def _aggregate_usage_by_uid(
             usage_by_uid[uid] = usage_by_uid.get(uid, 0) + layer_size
     timings["layer_aggregation"] = time.time() - layer_agg_start
     
-    # Volume usage (attributed volumes count toward user, unattributed count in total)
+    # Volume usage: effective size = actual_disk_bytes from scan if present, else Docker-reported size
     volume_agg_start = time.time()
-    total_volume_used = sum(v.get("size", 0) for v in volume_data.values())
+    total_volume_used = 0
     attributed_volume_used = 0
     vol_att_by_name = {att["volume_name"]: att for att in volume_attributions}
     for vol_name, vol_info in volume_data.items():
-        vol_size = vol_info.get("size", 0)
+        reported_size = vol_info.get("size", 0)
+        disk_usage = volume_disk_usage_by_name.get(vol_name)
+        actual_bytes = disk_usage.get("actual_disk_bytes") if disk_usage else None
+        vol_size = actual_bytes if actual_bytes is not None else reported_size
+        total_volume_used += vol_size
         vol_att = vol_att_by_name.get(vol_name)
         if vol_att:
             attributed_volume_used += vol_size

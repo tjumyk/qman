@@ -9,6 +9,8 @@ from app.models_db import (
     DockerLayerAttribution,
     DockerUserQuotaLimit,
     DockerVolumeAttribution,
+    DockerVolumeDiskUsage,
+    DockerVolumeLastUsed,
 )
 from app.utils import get_logger
 
@@ -432,6 +434,254 @@ def delete_volume_attribution(volume_name: str) -> None:
             DockerVolumeAttribution.volume_name == volume_name
         ).delete()
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# --- Volume disk usage (actual du scan results) ---
+
+
+def get_volume_disk_usage_all() -> list[dict[str, Any]]:
+    """Return all volume disk usage rows: volume_name -> actual_disk_bytes, scan_*, last_scan_*, pending_scan_started_at."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DockerVolumeDiskUsage).all()
+        return [
+            {
+                "volume_name": r.volume_name,
+                "actual_disk_bytes": r.actual_disk_bytes,
+                "scan_started_at": r.scan_started_at,
+                "scan_finished_at": r.scan_finished_at,
+                "pending_scan_started_at": r.pending_scan_started_at,
+                "last_scan_started_at": r.last_scan_started_at,
+                "last_scan_finished_at": r.last_scan_finished_at,
+                "last_scan_status": r.last_scan_status,
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def get_volume_disk_usage(volume_name: str) -> dict[str, Any] | None:
+    """Return disk usage row for one volume, or None."""
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeDiskUsage).filter(
+            DockerVolumeDiskUsage.volume_name == volume_name
+        ).first()
+        if not row:
+            return None
+        return {
+            "volume_name": row.volume_name,
+            "actual_disk_bytes": row.actual_disk_bytes,
+            "scan_started_at": row.scan_started_at,
+            "scan_finished_at": row.scan_finished_at,
+            "pending_scan_started_at": row.pending_scan_started_at,
+            "last_scan_started_at": row.last_scan_started_at,
+            "last_scan_finished_at": row.last_scan_finished_at,
+            "last_scan_status": row.last_scan_status,
+        }
+    finally:
+        db.close()
+
+
+def set_volume_disk_usage_pending(volume_name: str, started_at: Any) -> None:
+    """Set pending_scan_started_at and last_scan_started_at when starting a scan."""
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeDiskUsage).filter(
+            DockerVolumeDiskUsage.volume_name == volume_name
+        ).first()
+        if row:
+            row.pending_scan_started_at = started_at
+            row.last_scan_started_at = started_at
+        else:
+            db.add(
+                DockerVolumeDiskUsage(
+                    volume_name=volume_name,
+                    pending_scan_started_at=started_at,
+                    last_scan_started_at=started_at,
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def set_volume_disk_usage_success(
+    volume_name: str,
+    actual_disk_bytes: int,
+    scan_started_at: Any,
+    scan_finished_at: Any,
+) -> None:
+    """Set success tuple and last attempt on successful scan; clear pending."""
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeDiskUsage).filter(
+            DockerVolumeDiskUsage.volume_name == volume_name
+        ).first()
+        if row:
+            row.actual_disk_bytes = actual_disk_bytes
+            row.scan_started_at = scan_started_at
+            row.scan_finished_at = scan_finished_at
+            row.pending_scan_started_at = None
+            row.last_scan_finished_at = scan_finished_at
+            row.last_scan_status = "success"
+        else:
+            db.add(
+                DockerVolumeDiskUsage(
+                    volume_name=volume_name,
+                    actual_disk_bytes=actual_disk_bytes,
+                    scan_started_at=scan_started_at,
+                    scan_finished_at=scan_finished_at,
+                    last_scan_started_at=scan_started_at,
+                    last_scan_finished_at=scan_finished_at,
+                    last_scan_status="success",
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def set_volume_disk_usage_failure(
+    volume_name: str,
+    last_scan_finished_at: Any,
+    last_scan_status: str,
+) -> None:
+    """Set last attempt on failed scan; clear pending. Do not modify success tuple."""
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeDiskUsage).filter(
+            DockerVolumeDiskUsage.volume_name == volume_name
+        ).first()
+        if row:
+            row.pending_scan_started_at = None
+            row.last_scan_finished_at = last_scan_finished_at
+            row.last_scan_status = last_scan_status
+        else:
+            db.add(
+                DockerVolumeDiskUsage(
+                    volume_name=volume_name,
+                    last_scan_finished_at=last_scan_finished_at,
+                    last_scan_status=last_scan_status,
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_volume_disk_usage(volume_name: str) -> None:
+    """Remove disk usage row (e.g. after volume removed)."""
+    db = SessionLocal()
+    try:
+        db.query(DockerVolumeDiskUsage).filter(
+            DockerVolumeDiskUsage.volume_name == volume_name
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def reconcile_volume_disk_usage(volume_names_from_docker: set[str]) -> int:
+    """Remove disk usage rows for volumes that no longer exist in Docker. Returns count removed."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DockerVolumeDiskUsage).all()
+        removed = 0
+        for r in rows:
+            if r.volume_name not in volume_names_from_docker:
+                db.query(DockerVolumeDiskUsage).filter(
+                    DockerVolumeDiskUsage.volume_name == r.volume_name
+                ).delete()
+                removed += 1
+        db.commit()
+        return removed
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# --- Volume last mounted (for smart skip) ---
+
+
+def get_volume_last_used_all() -> dict[str, Any]:
+    """Return {volume_name: last_mounted_at} for all volumes with last_used record."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DockerVolumeLastUsed).all()
+        return {r.volume_name: r.last_mounted_at for r in rows}
+    finally:
+        db.close()
+
+
+def set_volume_last_mounted_at(volume_name: str, last_mounted_at: Any) -> None:
+    """Set or update last_mounted_at for a volume (from container start event)."""
+    db = SessionLocal()
+    try:
+        row = db.query(DockerVolumeLastUsed).filter(
+            DockerVolumeLastUsed.volume_name == volume_name
+        ).first()
+        if row:
+            row.last_mounted_at = last_mounted_at
+        else:
+            db.add(DockerVolumeLastUsed(volume_name=volume_name, last_mounted_at=last_mounted_at))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_volume_last_used(volume_name: str) -> None:
+    """Remove last_used row (e.g. after volume removed)."""
+    db = SessionLocal()
+    try:
+        db.query(DockerVolumeLastUsed).filter(
+            DockerVolumeLastUsed.volume_name == volume_name
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def reconcile_volume_last_used(volume_names_from_docker: set[str]) -> int:
+    """Remove last_used rows for volumes that no longer exist in Docker. Returns count removed."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DockerVolumeLastUsed).all()
+        removed = 0
+        for r in rows:
+            if r.volume_name not in volume_names_from_docker:
+                db.query(DockerVolumeLastUsed).filter(
+                    DockerVolumeLastUsed.volume_name == r.volume_name
+                ).delete()
+                removed += 1
+        db.commit()
+        return removed
     except Exception:
         db.rollback()
         raise

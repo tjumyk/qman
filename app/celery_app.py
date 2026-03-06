@@ -9,6 +9,7 @@ logger = get_logger(__name__)
 
 _DEFAULT_ENFORCE_INTERVAL = 300.0  # 5 minutes - quota enforcement
 _DEFAULT_SYNC_INTERVAL = 600.0  # 10 minutes - attribution sync (audit logs, Docker events, images, volumes)
+_DEFAULT_VOLUME_ACTUAL_DISK_SYNC_INTERVAL = 21600.0  # 6 hours - actual disk usage scan (du)
 
 
 def make_celery(app=None) -> Celery:
@@ -25,10 +26,12 @@ def make_celery(app=None) -> Celery:
             task_routes={
                 "app.tasks.docker_quota_tasks.enforce_docker_quota": {"queue": "qman.docker"},
                 "app.tasks.docker_quota_tasks.sync_docker_attribution": {"queue": "qman.docker"},
+                "app.tasks.docker_quota_tasks.sync_volume_actual_disk": {"queue": "qman.docker"},
             },
         )
         enforce_interval = float(app.config.get("DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS", _DEFAULT_ENFORCE_INTERVAL))
         sync_interval = float(app.config.get("DOCKER_QUOTA_SYNC_INTERVAL_SECONDS", _DEFAULT_SYNC_INTERVAL))
+        volume_actual_disk_interval = float(app.config.get("DOCKER_VOLUME_ACTUAL_DISK_SYNC_INTERVAL_SECONDS", _DEFAULT_VOLUME_ACTUAL_DISK_SYNC_INTERVAL))
         celery_app.conf.beat_schedule = {
             "enforce-docker-quota-periodic": {
                 "task": "app.tasks.docker_quota_tasks.enforce_docker_quota",
@@ -40,6 +43,11 @@ def make_celery(app=None) -> Celery:
                 "schedule": schedule(run_every=sync_interval),
                 "options": {"queue": "qman.docker"},
             },
+            "sync-volume-actual-disk-periodic": {
+                "task": "app.tasks.docker_quota_tasks.sync_volume_actual_disk",
+                "schedule": schedule(run_every=volume_actual_disk_interval),
+                "options": {"queue": "qman.docker"},
+            },
         }
     else:
         import json
@@ -48,6 +56,7 @@ def make_celery(app=None) -> Celery:
         result_backend = os.environ.get("CELERY_RESULT_BACKEND")
         enforce_interval = _DEFAULT_ENFORCE_INTERVAL
         sync_interval = _DEFAULT_SYNC_INTERVAL
+        volume_actual_disk_interval = _DEFAULT_VOLUME_ACTUAL_DISK_SYNC_INTERVAL
         config_path = os.environ.get("CONFIG_PATH", "config.json")
         if config_path and os.path.isfile(config_path):
             try:
@@ -61,6 +70,8 @@ def make_celery(app=None) -> Celery:
                     enforce_interval = float(data["DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS"])
                 if data.get("DOCKER_QUOTA_SYNC_INTERVAL_SECONDS") is not None:
                     sync_interval = float(data["DOCKER_QUOTA_SYNC_INTERVAL_SECONDS"])
+                if data.get("DOCKER_VOLUME_ACTUAL_DISK_SYNC_INTERVAL_SECONDS") is not None:
+                    volume_actual_disk_interval = float(data["DOCKER_VOLUME_ACTUAL_DISK_SYNC_INTERVAL_SECONDS"])
             except Exception as e:
                 logger.warning("Could not load Celery config from %s: %s", config_path, e)
         if broker_url is None:
@@ -81,6 +92,11 @@ def make_celery(app=None) -> Celery:
             "sync-docker-attribution-periodic": {
                 "task": "app.tasks.docker_quota_tasks.sync_docker_attribution",
                 "schedule": schedule(run_every=sync_interval),
+                "options": {"queue": "qman.docker"},
+            },
+            "sync-volume-actual-disk-periodic": {
+                "task": "app.tasks.docker_quota_tasks.sync_volume_actual_disk",
+                "schedule": schedule(run_every=volume_actual_disk_interval),
                 "options": {"queue": "qman.docker"},
             },
         }

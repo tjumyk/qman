@@ -175,11 +175,19 @@ export type DockerImagesResponse = z.infer<typeof dockerImagesResponseSchema>
 export const dockerVolumeSchema = z.object({
   volume_name: z.string(),
   size_bytes: z.number(),
+  reported_size_bytes: z.number().optional(),
+  actual_disk_bytes: z.number().nullable().optional(),
   host_user_name: z.string().nullable(),
   uid: z.number().nullable(),
   attribution_source: z.string().nullable(),
   ref_count: z.number(),
   first_seen_at: z.string().nullable(),
+  scan_started_at: z.string().nullable().optional(),
+  scan_finished_at: z.string().nullable().optional(),
+  pending_scan_started_at: z.string().nullable().optional(),
+  last_scan_started_at: z.string().nullable().optional(),
+  last_scan_finished_at: z.string().nullable().optional(),
+  last_scan_status: z.string().nullable().optional(),
 })
 export type DockerVolume = z.infer<typeof dockerVolumeSchema>
 
