@@ -602,16 +602,17 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
         from app.docker_quota.docker_client import get_system_df
-        from app.docker_quota.attribution_store import get_volume_attributions, get_volume_disk_usage_all
+        from app.docker_quota.attribution_store import get_volume_attributions, get_volume_disk_usage_all, get_volume_last_used_all
         
         # Get volume data from Docker API
         df = get_system_df(include_volumes=True)
         volumes_data = df.get("volumes", {})
         
-        # Get attributions and disk usage from database
+        # Get attributions, disk usage, and last mounted from database
         attributions = {a["volume_name"]: a for a in get_volume_attributions()}
         disk_usage_list = get_volume_disk_usage_all()
         disk_usage_by_name = {u["volume_name"]: u for u in disk_usage_list}
+        last_used_by_name = get_volume_last_used_all()
         
         # Build response
         result_volumes = []
@@ -641,6 +642,7 @@ def register_remote_api_routes(app: Any) -> None:
                     return dt.isoformat()
                 return str(dt)
             
+            last_mounted = last_used_by_name.get(vol_name)
             result_volumes.append({
                 "volume_name": vol_name,
                 "size_bytes": size,
@@ -651,6 +653,7 @@ def register_remote_api_routes(app: Any) -> None:
                 "attribution_source": attribution_source,
                 "ref_count": vol_info.get("ref_count", 0),
                 "first_seen_at": first_seen.isoformat() if first_seen else None,
+                "last_mounted_at": _iso(last_mounted) if last_mounted is not None else None,
                 "scan_started_at": _iso(disk_usage.get("scan_started_at")) if disk_usage else None,
                 "scan_finished_at": _iso(disk_usage.get("scan_finished_at")) if disk_usage else None,
                 "pending_scan_started_at": _iso(disk_usage.get("pending_scan_started_at")) if disk_usage else None,

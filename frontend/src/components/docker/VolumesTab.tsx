@@ -182,6 +182,11 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
               </Table.Td>
               <Table.Td>
                 <Stack gap={2}>
+                  {v.last_mounted_at != null && (
+                    <Text size="xs" c="dimmed">
+                      {t('lastMountedAt')}: {formatScanTime(v.last_mounted_at)}
+                    </Text>
+                  )}
                   {v.pending_scan_started_at ? (
                     <Text size="xs" c="blue">
                       In progress since {formatScanTime(v.pending_scan_started_at)}
@@ -202,7 +207,7 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
                     !v.scan_finished_at &&
                     !v.last_scan_status && (
                       <Text size="xs" c="dimmed">
-                        Never scanned
+                        {t('neverScanned')}
                       </Text>
                     )}
                 </Stack>

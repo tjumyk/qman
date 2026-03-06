@@ -182,6 +182,7 @@ export const dockerVolumeSchema = z.object({
   attribution_source: z.string().nullable(),
   ref_count: z.number(),
   first_seen_at: z.string().nullable(),
+  last_mounted_at: z.string().nullable().optional(),
   scan_started_at: z.string().nullable().optional(),
   scan_finished_at: z.string().nullable().optional(),
   pending_scan_started_at: z.string().nullable().optional(),
