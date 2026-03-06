@@ -532,6 +532,7 @@ def set_volume_disk_usage_success(
             row.scan_started_at = scan_started_at
             row.scan_finished_at = scan_finished_at
             row.pending_scan_started_at = None
+            row.last_scan_started_at = scan_started_at
             row.last_scan_finished_at = scan_finished_at
             row.last_scan_status = "success"
         else:

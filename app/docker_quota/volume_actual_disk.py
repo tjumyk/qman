@@ -185,10 +185,26 @@ def collect_volume_actual_disk() -> dict[str, int]:
         return vol_name, None
 
     def run_device_volumes(vol_list: list[tuple[str, str]]) -> list[tuple[str, str | None]]:
-        """Run scan for each volume on one device (sequential within device)."""
-        return [scan_volume(vol_name, mountpoint) for vol_name, mountpoint in vol_list]
+        """Run scan for each volume on one device; up to max_concurrent_per_disk concurrent scans per device."""
+        if max_concurrent_per_disk <= 1 or len(vol_list) <= 1:
+            return [scan_volume(vol_name, mountpoint) for vol_name, mountpoint in vol_list]
+        results: list[tuple[str, str | None]] = []
+        workers = min(max_concurrent_per_disk, len(vol_list))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(scan_volume, vol_name, mountpoint): vol_name
+                for vol_name, mountpoint in vol_list
+            }
+            for future in as_completed(futures):
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    vol_name = futures[future]
+                    logger.warning("Volume %s scan failed: %s", vol_name, e)
+                    results.append((vol_name, "parse_failure"))
+        return results
 
-    # Disk-wise parallelism: one task per device, each task scans that device's volumes sequentially
+    # Disk-wise parallelism: one task per device, each task runs up to max_concurrent_per_disk scans on that device
     max_workers = min(len(device_to_volumes), 32)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
