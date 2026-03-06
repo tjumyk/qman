@@ -89,12 +89,16 @@ def _run_du_bytes(path: str, timeout_seconds: int) -> tuple[int | None, str | No
         return None, "parse_failure"
 
 
+_DEFAULT_SKIP_USE_LAST_MOUNTED = False
+
+
 def _load_config() -> dict[str, Any]:
-    """Load config from CONFIG_PATH (JSON). Returns dict with timeout and max_concurrent_per_disk."""
+    """Load config from CONFIG_PATH (JSON). Returns dict with timeout, max_concurrent_per_disk, skip_use_last_mounted."""
     config_path = os.environ.get("CONFIG_PATH", "config.json")
-    out = {
+    out: dict[str, Any] = {
         "timeout_per_volume": _DEFAULT_TIMEOUT_PER_VOLUME,
         "max_concurrent_per_disk": _MAX_CONCURRENT_PER_DISK,
+        "skip_use_last_mounted": _DEFAULT_SKIP_USE_LAST_MOUNTED,
     }
     if config_path and os.path.isfile(config_path):
         try:
@@ -105,6 +109,8 @@ def _load_config() -> dict[str, Any]:
                 out["timeout_per_volume"] = int(data["DOCKER_VOLUME_ACTUAL_DISK_TIMEOUT_PER_VOLUME_SECONDS"])
             if data.get("DOCKER_VOLUME_ACTUAL_DISK_MAX_CONCURRENT_PER_DISK") is not None:
                 out["max_concurrent_per_disk"] = int(data["DOCKER_VOLUME_ACTUAL_DISK_MAX_CONCURRENT_PER_DISK"])
+            if data.get("DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED") is not None:
+                out["skip_use_last_mounted"] = bool(data["DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED"])
         except Exception as e:
             logger.debug("Could not load config from %s: %s", config_path, e)
     return out
@@ -118,6 +124,7 @@ def collect_volume_actual_disk() -> dict[str, int]:
     config = _load_config()
     timeout_per_volume = config["timeout_per_volume"]
     max_concurrent_per_disk = config["max_concurrent_per_disk"]
+    skip_use_last_mounted = config["skip_use_last_mounted"]
 
     name_to_mountpoint = _get_volumes_with_mountpoints()
     if not name_to_mountpoint:
@@ -133,12 +140,14 @@ def collect_volume_actual_disk() -> dict[str, int]:
     last_used_all = get_volume_last_used_all()
 
     def should_skip(vol_name: str) -> bool:
-        """Skip iff: has scan AND RefCount==0 AND last_mounted_at set AND last_mounted_at <= scan_finished_at."""
+        """Skip iff: has successful scan and RefCount==0; when skip_use_last_mounted, also require last_mounted_at set and last_mounted_at <= scan_finished_at."""
         disk_usage = disk_usage_by_name.get(vol_name)
         if not disk_usage or disk_usage.get("actual_disk_bytes") is None or disk_usage.get("scan_finished_at") is None:
             return False
         if ref_count_by_name.get(vol_name, 0) != 0:
             return False
+        if not skip_use_last_mounted:
+            return True
         last_mounted = last_used_all.get(vol_name)
         if last_mounted is None:
             return False

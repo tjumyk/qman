@@ -121,7 +121,7 @@ Docker’s reported volume size (from `GET /system/df`) can overstate real on-di
 - **Task:** `sync_volume_actual_disk` (Celery, queue `qman.docker`).
 - **Schedule:** Periodic. Configurable via `DOCKER_VOLUME_ACTUAL_DISK_SYNC_INTERVAL_SECONDS` (default 600 = 10 minutes).
 - **Behaviour:** For each volume, run `du -sb` with low I/O priority (ionice/nice on Linux), per-volume timeout, and **disk-wise parallelism** (one scan per disk at a time, multiple disks in parallel).
-- **Skip condition:** Skip only when all of: has successful scan, RefCount == 0, `last_mounted_at` set, `last_mounted_at` ≤ `scan_finished_at`.
+- **Skip condition:** Skip when: has successful scan and RefCount == 0; if `DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED` is true, also require `last_mounted_at` set and `last_mounted_at` ≤ `scan_finished_at`. Default is false (skip using only RefCount; set to true to use last_mounted check).
 
 ### Events
 
