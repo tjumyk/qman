@@ -1,4 +1,4 @@
-"""Collect actual disk usage of Docker volumes via du -sb (low I/O priority, disk-wise parallelism)."""
+"""Collect actual on-disk usage of Docker volumes via du -sB1 (low I/O priority, disk-wise parallelism)."""
 
 import os
 import subprocess
@@ -54,10 +54,11 @@ def _device_for_path(path: str) -> int | None:
 
 
 def _run_du_bytes(path: str, timeout_seconds: int) -> tuple[int | None, str | None]:
-    """Run du -sb on path with optional ionice/nice. Returns (bytes, None) on success, (None, status) on failure.
+    """Run du -sB1 on path with optional ionice/nice. Returns (bytes, None) on success, (None, status) on failure.
     status is one of 'timeout', 'permission_denied', 'parse_failure'.
     """
-    base_cmd = ["du", "-sb", path]
+    # Use block size 1 to get actual disk usage in bytes (allocated blocks), not apparent size.
+    base_cmd = ["du", "-sB1", path]
     if sys.platform == "linux":
         full_cmd = ["ionice", "-c3", "nice", "-n19"] + base_cmd
     else:
