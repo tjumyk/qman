@@ -7,16 +7,6 @@ import { useI18n } from '../../i18n'
 import { UsageSummaryCards } from './UsageSummaryCard'
 import type { DockerVolume } from '../../api/schemas'
 
-function formatScanTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString()
-  } catch {
-    return iso
-  }
-}
-
 interface VolumesTabProps {
   hostId: string
 }
@@ -138,7 +128,6 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
             <SortableHeader field="volume_name">{t('volumeName')}</SortableHeader>
             <SortableHeader field="host_user_name">{t('owner')}</SortableHeader>
             <SortableHeader field="size_bytes">{t('size')}</SortableHeader>
-            <Table.Th>{t('scan')}</Table.Th>
             <SortableHeader field="ref_count">{t('refCount')}</SortableHeader>
             <SortableHeader field="attribution_source">{t('attributionSource')}</SortableHeader>
           </Table.Tr>
@@ -179,38 +168,6 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
                     ) : null}
                   </Stack>
                 </Tooltip>
-              </Table.Td>
-              <Table.Td>
-                <Stack gap={2}>
-                  {v.last_mounted_at != null && (
-                    <Text size="xs" c="dimmed">
-                      {t('lastMountedAt')}: {formatScanTime(v.last_mounted_at)}
-                    </Text>
-                  )}
-                  {v.pending_scan_started_at ? (
-                    <Text size="xs" c="blue">
-                      In progress since {formatScanTime(v.pending_scan_started_at)}
-                    </Text>
-                  ) : null}
-                  {v.scan_started_at != null && v.scan_finished_at != null && !v.pending_scan_started_at && (
-                    <Text size="xs" c="dimmed">
-                      Last successful: {formatScanTime(v.scan_started_at)} – {formatScanTime(v.scan_finished_at)}
-                    </Text>
-                  )}
-                  {v.last_scan_status && !v.pending_scan_started_at && (
-                    <Text size="xs" c={v.last_scan_status === 'success' ? 'green' : 'orange'}>
-                      Last attempt: {v.last_scan_status}
-                      {v.last_scan_finished_at ? ` at ${formatScanTime(v.last_scan_finished_at)}` : ''}
-                    </Text>
-                  )}
-                  {!v.pending_scan_started_at &&
-                    !v.scan_finished_at &&
-                    !v.last_scan_status && (
-                      <Text size="xs" c="dimmed">
-                        {t('neverScanned')}
-                      </Text>
-                    )}
-                </Stack>
               </Table.Td>
               <Table.Td>
                 <Badge size="sm" variant="light" color={v.ref_count > 0 ? 'blue' : 'gray'}>
