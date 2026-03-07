@@ -40,7 +40,7 @@ export function DashboardPage() {
           {t('dashboard')}
         </Text>
       </Group>
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing={{ base: 'sm', md: 'md' }}>
         <Card shadow="sm" padding="lg" radius="md" withBorder>
           <Text size="sm" c="dimmed">
             {t('totalHosts')}

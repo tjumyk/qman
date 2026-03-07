@@ -12,10 +12,13 @@ import {
   Menu,
   UnstyledButton,
   SegmentedControl,
+  Burger,
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
 import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink } from '@tabler/icons-react'
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useLocation, Outlet } from 'react-router-dom'
 import { fetchMe } from './api'
@@ -30,12 +33,23 @@ import { AdminMappingsPage } from './pages/AdminMappingsPage'
 import { PageBreadcrumbs } from './components/PageBreadcrumbs'
 
 function AppShellWithNav() {
+  const [opened, { toggle, close }] = useDisclosure(false)
   const { data: me, isLoading, error } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const navigate = useNavigate()
   const location = useLocation()
   const { t, locale, setLocale } = useI18n()
   const { setColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('light')
+
+  const navTo = (path: string) => {
+    close()
+    navigate(path)
+  }
+
+  // Close mobile navbar when route changes (e.g. back/forward or in-page links)
+  useEffect(() => {
+    close()
+  }, [location.pathname, close])
 
   if (isLoading) {
     return (
@@ -58,40 +72,44 @@ function AppShellWithNav() {
   return (
     <AppShell
       header={{ height: 56 }}
-      padding="md"
+      padding={{ base: 'xs', sm: 'md' }}
       navbar={{
         width: 220,
         breakpoint: 'sm',
+        collapsed: { mobile: !opened },
       }}
     >
       <AppShell.Header>
-        <Container size="xl" h="100%" display="flex" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-          <UnstyledButton
-            component={Link}
-            to="/"
-            display="flex"
-            style={{ alignItems: 'center', textDecoration: 'none', color: 'inherit' }}
-          >
-            <Group gap="sm">
-              <Box
-                component="img"
-                src={computedColorScheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'}
-                alt=""
-                h={32}
-                w="auto"
-                style={{ display: 'block' }}
-              />
-              <Stack gap={2}>
-                <Title order={3} style={{ lineHeight: 1.2 }}>
-                  {t('appTitle')}
-                </Title>
-                <Text size="xs" c="dimmed" style={{ lineHeight: 1.2 }}>
-                  {t('appDescription')}
-                </Text>
-              </Stack>
-            </Group>
-          </UnstyledButton>
-          <Group gap="sm" style={{ marginLeft: 'auto' }}>
+        <Container size="xl" h="100%" display="flex" style={{ alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0, flex: '1 1 auto' }}>
+            <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
+            <UnstyledButton
+              component={Link}
+              to="/"
+              display="flex"
+              style={{ alignItems: 'center', textDecoration: 'none', color: 'inherit', minWidth: 0 }}
+            >
+              <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                <Box
+                  component="img"
+                  src={computedColorScheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'}
+                  alt=""
+                  h={32}
+                  w="auto"
+                  style={{ display: 'block', flexShrink: 0 }}
+                />
+                <Stack gap={2} style={{ minWidth: 0 }}>
+                  <Title order={3} style={{ lineHeight: 1.2 }}>
+                    {t('appTitle')}
+                  </Title>
+                  <Text size="xs" c="dimmed" style={{ lineHeight: 1.2 }} visibleFrom="sm">
+                    {t('appDescription')}
+                  </Text>
+                </Stack>
+              </Group>
+            </UnstyledButton>
+          </Group>
+          <Group gap="sm" wrap="wrap" style={{ marginLeft: 'auto', flexShrink: 0 }}>
             <SegmentedControl
               size="xs"
               value={computedColorScheme}
@@ -154,13 +172,13 @@ function AppShellWithNav() {
             leftSection={<IconChartBar size={18} />}
             label={t('myUsage')}
             active={location.pathname === '/my-usage'}
-            onClick={() => navigate('/my-usage')}
+            onClick={() => navTo('/my-usage')}
           />
           <NavLink
             leftSection={<IconLink size={18} />}
             label={t('myMappings')}
             active={location.pathname === '/my-mappings'}
-            onClick={() => navigate('/my-mappings')}
+            onClick={() => navTo('/my-mappings')}
           />
           {me.is_admin && (
             <>
@@ -168,19 +186,19 @@ function AppShellWithNav() {
                 leftSection={<IconGauge size={18} />}
                 label={t('dashboard')}
                 active={location.pathname === '/manage' || location.pathname === '/manage/'}
-                onClick={() => navigate('/manage')}
+                onClick={() => navTo('/manage')}
               />
               <NavLink
                 leftSection={<IconServer size={18} />}
                 label={t('hostList')}
                 active={location.pathname.startsWith('/manage/hosts')}
-                onClick={() => navigate('/manage/hosts')}
+                onClick={() => navTo('/manage/hosts')}
               />
               <NavLink
                 leftSection={<IconLink size={18} />}
                 label={t('userMappings')}
                 active={location.pathname === '/manage/mappings'}
-                onClick={() => navigate('/manage/mappings')}
+                onClick={() => navTo('/manage/mappings')}
               />
             </>
           )}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Modal, Stack, NumberInput, Group, Button, Text, Progress, Alert, Box } from '@mantine/core'
+import { useMediaQuery } from '@mantine/hooks'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { setUserQuota, getErrorMessage } from '../api'
@@ -87,6 +88,7 @@ export function EditQuotaModal({
     return null
   }, [isSingleLimitFormat, blockSoft, blockHard, inodeSoft, inodeHard, t])
 
+  const isMobile = useMediaQuery('(max-width: 36em)')
   if (!quota) return null
 
   const handleSave = () => {
@@ -100,7 +102,7 @@ export function EditQuotaModal({
   }
 
   return (
-    <Modal opened={opened} onClose={onClose} title={`${t('editQuota')}: ${quota.name} (uid ${quota.uid})`} size="sm">
+    <Modal opened={opened} onClose={onClose} title={`${t('editQuota')}: ${quota.name} (uid ${quota.uid})`} size="sm" fullScreen={isMobile}>
       <Stack gap="md">
         <Text size="sm" c="dimmed">
           {hostId} / {deviceName}
@@ -215,14 +217,15 @@ export function EditQuotaModal({
           </Alert>
         )}
 
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={onClose}>
+        <Group justify="flex-end" mt="md" wrap="wrap">
+          <Button variant="default" onClick={onClose} w={{ base: '100%', xs: 'auto' }}>
             {t('cancel')}
           </Button>
           <Button
             loading={mutation.isPending}
             onClick={handleSave}
             disabled={!!softHardError}
+            w={{ base: '100%', xs: 'auto' }}
           >
             {t('save')}
           </Button>

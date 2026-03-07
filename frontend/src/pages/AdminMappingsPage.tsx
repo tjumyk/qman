@@ -12,9 +12,11 @@ import {
   ActionIcon,
   Checkbox,
   ScrollArea,
+  Box,
 } from '@mantine/core'
 import { IconLink, IconPlus, IconTrash, IconUsers, IconWand } from '@tabler/icons-react'
 import { useState, useMemo } from 'react'
+import { useMediaQuery } from '@mantine/hooks'
 import {
   fetchAdminMappings,
   fetchAdminHostUsers,
@@ -76,6 +78,7 @@ function buildRows(
 export function AdminMappingsPage() {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const isMobile = useMediaQuery('(max-width: 36em)')
   const [addOpen, setAddOpen] = useState(false)
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
   const [selectedOAuthUserId, setSelectedOAuthUserId] = useState<string | null>(null)
@@ -392,7 +395,7 @@ export function AdminMappingsPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap" gap="sm">
         <Group gap="sm">
           <IconLink size={24} />
           <Text size="lg" fw={600}>
@@ -421,125 +424,129 @@ export function AdminMappingsPage() {
           {t('noAdminMappingsMessage')}
         </Alert>
       ) : (
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>{t('host')}</Table.Th>
-              <Table.Th>{t('hostUser')}</Table.Th>
-              <Table.Th>{t('mappedOAuthUsers')}</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {rows.map((row) => (
-              <Table.Tr key={`${row.host_id}-${row.host_user_name}`}>
-                <Table.Td>{row.host_id}</Table.Td>
-                <Table.Td>{row.host_user_name}</Table.Td>
-                <Table.Td>
-                  <Group gap="xs" wrap="wrap" align="center">
-                    {row.oauthMappings.length === 0 && !inlineAddForRow[`${row.host_id}|${row.host_user_name}`] ? (
-                      <Text size="sm" c="dimmed">
-                        —
-                      </Text>
-                    ) : null}
-                    {row.oauthMappings.map((m) => (
-                      <Group key={`${m.oauth_user_id}-${row.host_id}-${row.host_user_name}`} gap={4}>
-                        <Text size="sm">{m.oauth_user_name ?? m.oauth_user_id}</Text>
-                        <ActionIcon
-                          size="sm"
-                          variant="subtle"
-                          color="red"
-                          onClick={() =>
-                            deleteMutation.mutate({
-                              oauthUserId: m.oauth_user_id,
-                              hostId: row.host_id,
-                              hostUserName: row.host_user_name,
-                            })
-                          }
-                          loading={deleteMutation.isPending}
-                        >
-                          <IconTrash size={14} />
-                        </ActionIcon>
-                      </Group>
-                    ))}
-                    <Select
-                      size="xs"
-                      placeholder={oauthUsersLoading ? t('loading') : t('addUser')}
-                      data={(oauthUserOptions ?? [])
-                        .filter(
-                          (opt) =>
-                            !row.oauthMappings.some((m) => String(m.oauth_user_id) === opt.value)
-                        )
-                        .sort((a, b) => {
-                          const nameA =
-                            oauthUsers?.find((u) => String(u.id) === a.value)?.name ?? ''
-                          const nameB =
-                            oauthUsers?.find((u) => String(u.id) === b.value)?.name ?? ''
-                          const exactA = nameA === row.host_user_name ? 1 : 0
-                          const exactB = nameB === row.host_user_name ? 1 : 0
-                          if (exactA !== exactB) return exactB - exactA
-                          const ciA =
-                            nameA.toLowerCase() === row.host_user_name.toLowerCase() ? 1 : 0
-                          const ciB =
-                            nameB.toLowerCase() === row.host_user_name.toLowerCase() ? 1 : 0
-                          if (ciA !== ciB) return ciB - ciA
-                          return nameA.localeCompare(nameB)
-                        })}
-                      value={inlineAddForRow[`${row.host_id}|${row.host_user_name}`] ?? null}
-                      onChange={(v) => {
-                        if (!v) return
-                        const rowKey = `${row.host_id}|${row.host_user_name}`
-                        setInlineAddForRow((prev) => ({ ...prev, [rowKey]: v }))
-                        addMutation.mutate(
-                          {
-                            oauthUserId: Number(v),
-                            hostId: row.host_id,
-                            hostUserName: row.host_user_name,
-                          },
-                          {
-                            onSettled: () =>
-                              setInlineAddForRow((prev) => {
-                                const next = { ...prev }
-                                delete next[rowKey]
-                                return next
-                              }),
-                          }
-                        )
-                      }}
-                      disabled={oauthUsersLoading || addMutation.isPending}
-                      clearable={false}
-                      style={{ minWidth: 140 }}
-                      renderOption={({ option }) => {
-                        const oauthName = oauthUsers?.find(
-                          (u) => String(u.id) === option.value
-                        )?.name
-                        const isSuggested =
-                          oauthName &&
-                          (oauthName === row.host_user_name ||
-                            oauthName.toLowerCase() === row.host_user_name.toLowerCase())
-                        return (
-                          <>
-                            {option.label}
-                            {isSuggested && (
+        <ScrollArea>
+          <Box style={{ minWidth: 560 }}>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>{t('host')}</Table.Th>
+                  <Table.Th>{t('hostUser')}</Table.Th>
+                  <Table.Th>{t('mappedOAuthUsers')}</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((row) => (
+                  <Table.Tr key={`${row.host_id}-${row.host_user_name}`}>
+                    <Table.Td>{row.host_id}</Table.Td>
+                    <Table.Td>{row.host_user_name}</Table.Td>
+                    <Table.Td>
+                      <Group gap="xs" wrap="wrap" align="center">
+                        {row.oauthMappings.length === 0 && !inlineAddForRow[`${row.host_id}|${row.host_user_name}`] ? (
+                          <Text size="sm" c="dimmed">
+                            —
+                          </Text>
+                        ) : null}
+                        {row.oauthMappings.map((m) => (
+                          <Group key={`${m.oauth_user_id}-${row.host_id}-${row.host_user_name}`} gap={4}>
+                            <Text size="sm">{m.oauth_user_name ?? m.oauth_user_id}</Text>
+                            <ActionIcon
+                              size="sm"
+                              variant="subtle"
+                              color="red"
+                              onClick={() =>
+                                deleteMutation.mutate({
+                                  oauthUserId: m.oauth_user_id,
+                                  hostId: row.host_id,
+                                  hostUserName: row.host_user_name,
+                                })
+                              }
+                              loading={deleteMutation.isPending}
+                            >
+                              <IconTrash size={14} />
+                            </ActionIcon>
+                          </Group>
+                        ))}
+                        <Select
+                          size="xs"
+                          placeholder={oauthUsersLoading ? t('loading') : t('addUser')}
+                          data={(oauthUserOptions ?? [])
+                            .filter(
+                              (opt) =>
+                                !row.oauthMappings.some((m) => String(m.oauth_user_id) === opt.value)
+                            )
+                            .sort((a, b) => {
+                              const nameA =
+                                oauthUsers?.find((u) => String(u.id) === a.value)?.name ?? ''
+                              const nameB =
+                                oauthUsers?.find((u) => String(u.id) === b.value)?.name ?? ''
+                              const exactA = nameA === row.host_user_name ? 1 : 0
+                              const exactB = nameB === row.host_user_name ? 1 : 0
+                              if (exactA !== exactB) return exactB - exactA
+                              const ciA =
+                                nameA.toLowerCase() === row.host_user_name.toLowerCase() ? 1 : 0
+                              const ciB =
+                                nameB.toLowerCase() === row.host_user_name.toLowerCase() ? 1 : 0
+                              if (ciA !== ciB) return ciB - ciA
+                              return nameA.localeCompare(nameB)
+                            })}
+                          value={inlineAddForRow[`${row.host_id}|${row.host_user_name}`] ?? null}
+                          onChange={(v) => {
+                            if (!v) return
+                            const rowKey = `${row.host_id}|${row.host_user_name}`
+                            setInlineAddForRow((prev) => ({ ...prev, [rowKey]: v }))
+                            addMutation.mutate(
+                              {
+                                oauthUserId: Number(v),
+                                hostId: row.host_id,
+                                hostUserName: row.host_user_name,
+                              },
+                              {
+                                onSettled: () =>
+                                  setInlineAddForRow((prev) => {
+                                    const next = { ...prev }
+                                    delete next[rowKey]
+                                    return next
+                                  }),
+                              }
+                            )
+                          }}
+                          disabled={oauthUsersLoading || addMutation.isPending}
+                          clearable={false}
+                          style={{ minWidth: 140 }}
+                          renderOption={({ option }) => {
+                            const oauthName = oauthUsers?.find(
+                              (u) => String(u.id) === option.value
+                            )?.name
+                            const isSuggested =
+                              oauthName &&
+                              (oauthName === row.host_user_name ||
+                                oauthName.toLowerCase() === row.host_user_name.toLowerCase())
+                            return (
                               <>
-                                {' '}
-                                <Text component="span" c="dimmed" size="sm">
-                                  ({t('suggested')})
-                                </Text>
+                                {option.label}
+                                {isSuggested && (
+                                  <>
+                                    {' '}
+                                    <Text component="span" c="dimmed" size="sm">
+                                      ({t('suggested')})
+                                    </Text>
+                                  </>
+                                )}
                               </>
-                            )}
-                          </>
-                        )
-                      }}
-                    />
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+                            )
+                          }}
+                        />
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Box>
+        </ScrollArea>
       )}
 
-      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title={t('addMapping')} centered>
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title={t('addMapping')} centered fullScreen={isMobile}>
         <Stack gap="md">
           <Group>
             <Select
@@ -604,8 +611,8 @@ export function AdminMappingsPage() {
               )
             }}
           />
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setAddOpen(false)}>
+          <Group justify="flex-end" mt="md" wrap="wrap">
+            <Button variant="default" onClick={() => setAddOpen(false)} w={{ base: '100%', xs: 'auto' }}>
               {t('cancel')}
             </Button>
             <Button
@@ -624,6 +631,7 @@ export function AdminMappingsPage() {
                     hostUserName: selectedHostUserName,
                   })
               }}
+              w={{ base: '100%', xs: 'auto' }}
             >
               {t('addMapping')}
             </Button>
@@ -637,6 +645,7 @@ export function AdminMappingsPage() {
         title={t('autoAssignMappings')}
         centered
         size="lg"
+        fullScreen={isMobile}
       >
         <Stack gap="md">
           <Text size="sm" c="dimmed">
@@ -693,14 +702,15 @@ export function AdminMappingsPage() {
               </ScrollArea.Autosize>
             </>
           )}
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setAutoAssignOpen(false)}>
+          <Group justify="flex-end" mt="md" wrap="wrap">
+            <Button variant="default" onClick={() => setAutoAssignOpen(false)} w={{ base: '100%', xs: 'auto' }}>
               {t('cancel')}
             </Button>
             <Button
               loading={isConfirming}
               disabled={selectedCandidates.size === 0 || candidateMappings.length === 0}
               onClick={handleConfirmAutoAssign}
+              w={{ base: '100%', xs: 'auto' }}
             >
               {t('confirmMappings')} ({selectedCandidates.size})
             </Button>
@@ -714,6 +724,7 @@ export function AdminMappingsPage() {
         title={t('suggestedMappings')}
         centered
         size="lg"
+        fullScreen={isMobile}
       >
         <Stack gap="md">
           <Text size="sm" c="dimmed">
@@ -766,14 +777,15 @@ export function AdminMappingsPage() {
               </Table.Tbody>
             </Table>
           </ScrollArea.Autosize>
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setSuggestedMappingsOpen(false)}>
+          <Group justify="flex-end" mt="md" wrap="wrap">
+            <Button variant="default" onClick={() => setSuggestedMappingsOpen(false)} w={{ base: '100%', xs: 'auto' }}>
               {t('cancel')}
             </Button>
             <Button
               loading={isConfirmingSuggested}
               disabled={selectedSuggested.size === 0}
               onClick={handleConfirmSuggested}
+              w={{ base: '100%', xs: 'auto' }}
             >
               {t('confirmMappings')} ({selectedSuggested.size})
             </Button>

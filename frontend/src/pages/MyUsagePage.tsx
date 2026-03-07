@@ -308,7 +308,7 @@ export function MyUsagePage() {
                   {t('noQuotasAssignedInHost')}
                 </Alert>
               ) : (
-                <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
+                <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing={{ base: 'xs', sm: 'sm' }}>
                   {cards.map(({ device, quota }) => (
                     <QuotaCard
                       key={`${mappingKey}-${device.name}`}

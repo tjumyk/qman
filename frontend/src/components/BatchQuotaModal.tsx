@@ -11,6 +11,7 @@ import {
   Loader,
   NumberInput,
 } from '@mantine/core'
+import { useMediaQuery } from '@mantine/hooks'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle } from '@tabler/icons-react'
@@ -197,12 +198,14 @@ export function BatchQuotaModal({
     return null
   }, [isSingleLimitFormat, blockSoft, blockHard, inodeSoft, inodeHard, t])
 
+  const isMobile = useMediaQuery('(max-width: 36em)')
   return (
     <Modal
       opened={opened}
       onClose={onClose}
       title={t('batchSetQuota')}
       size="lg"
+      fullScreen={isMobile}
     >
       <Stack gap="md">
         <Text size="sm" c="dimmed">
@@ -353,14 +356,15 @@ export function BatchQuotaModal({
             </Alert>
 
             {/* Action buttons */}
-            <Group justify="flex-end" mt="md">
-              <Button variant="default" onClick={onClose}>
+            <Group justify="flex-end" mt="md" wrap="wrap">
+              <Button variant="default" onClick={onClose} w={{ base: '100%', xs: 'auto' }}>
                 {t('cancel')}
               </Button>
               <Button
                 loading={mutation.isPending}
                 onClick={handleApply}
                 disabled={!!softHardError || preview.affectedUsers === 0}
+                w={{ base: '100%', xs: 'auto' }}
               >
                 {t('apply')} ({preview.affectedUsers} {t('userCount')})
               </Button>

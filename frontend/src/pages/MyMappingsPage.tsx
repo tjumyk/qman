@@ -9,11 +9,14 @@ import {
   Table,
   Modal,
   Select,
+  ScrollArea,
+  Box,
 } from '@mantine/core'
 import { IconLink, IconPlus, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router-dom'
 import { Anchor } from '@mantine/core'
 import { useState } from 'react'
+import { useMediaQuery } from '@mantine/hooks'
 import {
   fetchMe,
   fetchMeMappings,
@@ -29,6 +32,7 @@ import { notifications } from '@mantine/notifications'
 export function MyMappingsPage() {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const isMobile = useMediaQuery('(max-width: 36em)')
   const [addOpen, setAddOpen] = useState(false)
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
   const [selectedHostUserName, setSelectedHostUserName] = useState<string | null>(null)
@@ -112,7 +116,7 @@ export function MyMappingsPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap" gap="sm">
         <Group gap="sm">
           <IconLink size={24} />
           <Text size="lg" fw={600}>
@@ -134,40 +138,44 @@ export function MyMappingsPage() {
           {t('noMappingsMessage')}
         </Alert>
       ) : (
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>{t('host')}</Table.Th>
-              <Table.Th>{t('hostUser')}</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {list.map((m) => (
-              <Table.Tr key={`${m.host_id}-${m.host_user_name}`}>
-                <Table.Td>{m.host_id}</Table.Td>
-                <Table.Td>{m.host_user_name}</Table.Td>
-                <Table.Td>
-                  <Button
-                    size="xs"
-                    variant="subtle"
-                    color="red"
-                    leftSection={<IconTrash size={14} />}
-                    loading={deleteMutation.isPending}
-                    onClick={() =>
-                      deleteMutation.mutate({ hostId: m.host_id, hostUserName: m.host_user_name })
-                    }
-                  >
-                    {t('removeMapping')}
-                  </Button>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+        <ScrollArea>
+          <Box style={{ minWidth: 400 }}>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>{t('host')}</Table.Th>
+                  <Table.Th>{t('hostUser')}</Table.Th>
+                  <Table.Th />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {list.map((m) => (
+                  <Table.Tr key={`${m.host_id}-${m.host_user_name}`}>
+                    <Table.Td>{m.host_id}</Table.Td>
+                    <Table.Td>{m.host_user_name}</Table.Td>
+                    <Table.Td>
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        color="red"
+                        leftSection={<IconTrash size={14} />}
+                        loading={deleteMutation.isPending}
+                        onClick={() =>
+                          deleteMutation.mutate({ hostId: m.host_id, hostUserName: m.host_user_name })
+                        }
+                      >
+                        {t('removeMapping')}
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Box>
+        </ScrollArea>
       )}
 
-      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title={t('addMapping')} centered>
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title={t('addMapping')} centered fullScreen={isMobile}>
         <Stack gap="md">
           <Select
             label={t('host')}
@@ -212,8 +220,8 @@ export function MyMappingsPage() {
               )
             }}
           />
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setAddOpen(false)}>
+          <Group justify="flex-end" mt="md" wrap="wrap">
+            <Button variant="default" onClick={() => setAddOpen(false)} w={{ base: '100%', xs: 'auto' }}>
               {t('cancel')}
             </Button>
             <Button
@@ -223,6 +231,7 @@ export function MyMappingsPage() {
                 if (selectedHostId && selectedHostUserName)
                   addMutation.mutate({ hostId: selectedHostId, hostUserName: selectedHostUserName })
               }}
+              w={{ base: '100%', xs: 'auto' }}
             >
               {t('addMapping')}
             </Button>

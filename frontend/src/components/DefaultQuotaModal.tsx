@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Modal, Stack, Group, Button, Text, NumberInput, Loader, Alert } from '@mantine/core'
+import { useMediaQuery } from '@mantine/hooks'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { getDeviceDefaultQuota, setDeviceDefaultQuota, getErrorMessage } from '../api'
@@ -89,12 +90,14 @@ export function DefaultQuotaModal({
     })
   }
 
+  const isMobile = useMediaQuery('(max-width: 36em)')
   return (
     <Modal
       opened={opened}
       onClose={onClose}
       title={t('defaultQuota')}
       size="sm"
+      fullScreen={isMobile}
     >
       <Stack gap="md">
         <Text size="sm" c="dimmed">
@@ -166,14 +169,15 @@ export function DefaultQuotaModal({
             {softHardError}
           </Alert>
         )}
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={onClose}>
+        <Group justify="flex-end" mt="md" wrap="wrap">
+          <Button variant="default" onClick={onClose} w={{ base: '100%', xs: 'auto' }}>
             {t('cancel')}
           </Button>
           <Button
             loading={mutation.isPending}
             onClick={handleSave}
             disabled={!!softHardError}
+            w={{ base: '100%', xs: 'auto' }}
           >
             {t('save')}
           </Button>

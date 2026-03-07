@@ -12,7 +12,10 @@ import {
   Box,
   Tooltip,
   MultiSelect,
+  ScrollArea,
+  Card,
 } from '@mantine/core'
+import { useMediaQuery } from '@mantine/hooks'
 import { IconPlus, IconSettings, IconUsers } from '@tabler/icons-react'
 import { resolveHostUser, getErrorMessage, getDeviceDefaultQuota } from '../api'
 import { BlockSize } from './BlockSize'
@@ -196,6 +199,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
     (device.user_quota_info.block_grace > 0 || device.user_quota_info.inode_grace > 0)
 
   const showDeviceSummaryBox = deviceDefault !== undefined || hasDeviceGrace
+  const isMobile = useMediaQuery('(max-width: 36em)')
 
   return (
     <Stack gap="md">
@@ -281,7 +285,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
           placeholder={t('searchByNameOrUid')}
           value={search}
           onChange={(e) => setSearch(e.currentTarget.value)}
-          style={{ maxWidth: 300 }}
+          w={{ base: '100%', sm: 300 }}
         />
         <MultiSelect
           placeholder={t('filterByStatus')}
@@ -294,6 +298,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
           value={statusFilter}
           onChange={(v) => setStatusFilter(v as QuotaStatus[])}
           style={{ minWidth: 160 }}
+          w={{ base: '100%', sm: undefined }}
         />
         <Button
           leftSection={<IconPlus size={16} />}
@@ -316,290 +321,336 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
         </Button>
       </Group>
 
-      <Table striped highlightOnHover>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>
-              <Group
-                gap={4}
-                style={{ cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => handleSort('uid')}
-              >
-                {t('uid')}
-                {effectiveSortBy === 'uid' && (
-                  <Text size="xs" c="dimmed">
-                    {sortDirection === 'asc' ? '▲' : '▼'}
-                  </Text>
-                )}
-              </Group>
-            </Table.Th>
-            <Table.Th>
-              <Group
-                gap={4}
-                style={{ cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => handleSort('name')}
-              >
-                {t('name')}
-                {effectiveSortBy === 'name' && (
-                  <Text size="xs" c="dimmed">
-                    {sortDirection === 'asc' ? '▲' : '▼'}
-                  </Text>
-                )}
-              </Group>
-            </Table.Th>
-            <Table.Th>
-              <Group
-                gap={4}
-                style={{ cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => handleSort('block_current')}
-              >
-                {t('blockUsed')}
-                {effectiveSortBy === 'block_current' && (
-                  <Text size="xs" c="dimmed">
-                    {sortDirection === 'asc' ? '▲' : '▼'}
-                  </Text>
-                )}
-              </Group>
-            </Table.Th>
-            {!isReducedColumns && (
-              <Table.Th>
-                <Group
-                  gap={4}
-                  style={{ cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => handleSort('block_soft_limit')}
-                >
-                  {t('blockSoft')}
-                  {effectiveSortBy === 'block_soft_limit' && (
-                    <Text size="xs" c="dimmed">
-                      {sortDirection === 'asc' ? '▲' : '▼'}
-                    </Text>
-                  )}
-                </Group>
-              </Table.Th>
-            )}
-            <Table.Th>
-              <Group
-                gap={4}
-                style={{ cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => handleSort('block_hard_limit')}
-              >
-                {t('blockHard')}
-                {effectiveSortBy === 'block_hard_limit' && (
-                  <Text size="xs" c="dimmed">
-                    {sortDirection === 'asc' ? '▲' : '▼'}
-                  </Text>
-                )}
-              </Group>
-            </Table.Th>
-            {!isReducedColumns && (
-              <>
-                <Table.Th>
-                  <Group
-                    gap={4}
-                    style={{ cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => handleSort('inode_current')}
-                  >
-                    {t('inodeUsed')}
-                    {effectiveSortBy === 'inode_current' && (
-                      <Text size="xs" c="dimmed">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
+      {isMobile ? (
+        sortedUsers.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            {t('noUsersMatch')}
+          </Text>
+        ) : (
+          <Stack gap="xs">
+            {sortedUsers.map((q) => {
+              const status = statusByUid.get(q.uid) ?? getQuotaStatus(q)
+              return (
+                <Card key={q.uid} padding="sm" withBorder>
+                  <Group justify="space-between" wrap="nowrap" align="flex-start">
+                    <Stack gap={4} style={{ minWidth: 0 }}>
+                      <Text fw={500} truncate>
+                        {q.name}
                       </Text>
-                    )}
-                  </Group>
-                </Table.Th>
-                <Table.Th>
-                  <Group
-                    gap={4}
-                    style={{ cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => handleSort('inode_soft_limit')}
-                  >
-                    {t('inodeSoft')}
-                    {effectiveSortBy === 'inode_soft_limit' && (
                       <Text size="xs" c="dimmed">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
+                        {t('uid')} {q.uid}
                       </Text>
-                    )}
+                      <Group gap="sm" wrap="wrap">
+                        <Text size="sm">
+                          {t('blockUsed')} <BlockSize size={q.block_current} />
+                        </Text>
+                        <Text size="sm">
+                          {t('blockHard')} <BlockSize size={q.block_hard_limit * 1024} />
+                        </Text>
+                      </Group>
+                      <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
+                        {t(getQuotaStatusLabelKey(status))}
+                      </Badge>
+                    </Stack>
+                    <Button size="xs" variant="light" onClick={() => setEditQuota(q)}>
+                      {t('edit')}
+                    </Button>
                   </Group>
-                </Table.Th>
-                <Table.Th>
-                  <Group
-                    gap={4}
-                    style={{ cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => handleSort('inode_hard_limit')}
-                  >
-                    {t('inodeHard')}
-                    {effectiveSortBy === 'inode_hard_limit' && (
-                      <Text size="xs" c="dimmed">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
-                      </Text>
-                    )}
-                  </Group>
-                </Table.Th>
-              </>
-            )}
-            <Table.Th>
-              <Group
-                gap={4}
-                style={{ cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => handleSort('status')}
-              >
-                {t('status')}
-                {effectiveSortBy === 'status' && (
-                  <Text size="xs" c="dimmed">
-                    {sortDirection === 'asc' ? '▲' : '▼'}
-                  </Text>
-                )}
-              </Group>
-            </Table.Th>
-            <Table.Th>{t('actions')}</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {sortedUsers.map((q) => {
-            const status = statusByUid.get(q.uid) ?? getQuotaStatus(q)
-            const def = showDefaultSummary ? deviceDefault ?? null : null
-            const blockSoftAbove = !!(
-              def &&
-              !isReducedColumns &&
-              def.block_soft_limit > 0 &&
-              (q.block_soft_limit > def.block_soft_limit || q.block_soft_limit === 0)
-            )
-            const blockHardAbove = !!(
-              def &&
-              def.block_hard_limit > 0 &&
-              (q.block_hard_limit > def.block_hard_limit || q.block_hard_limit === 0)
-            )
-            const inodeSoftAbove = !!(
-              def &&
-              !isReducedColumns &&
-              def.inode_soft_limit > 0 &&
-              (q.inode_soft_limit > def.inode_soft_limit || q.inode_soft_limit === 0)
-            )
-            const inodeHardAbove = !!(
-              def &&
-              !isReducedColumns &&
-              def.inode_hard_limit > 0 &&
-              (q.inode_hard_limit > def.inode_hard_limit || q.inode_hard_limit === 0)
-            )
-            const limitCellStyle = (above: boolean) =>
-              above
-                ? { backgroundColor: 'var(--mantine-color-yellow-light)' }
-                : undefined
-            const wrapLimit = (above: boolean, content: React.ReactNode) =>
-              above ? (
-                <Tooltip label={t('aboveDefault')} withArrow openDelay={300}>
-                  <span style={{ display: 'inline-block' }}>{content}</span>
-                </Tooltip>
-              ) : (
-                content
+                </Card>
               )
-            const overBlockSoft =
-              !isReducedColumns &&
-              q.block_soft_limit > 0 &&
-              q.block_current >= q.block_soft_limit * 1024
-            const overInodeSoft =
-              !isReducedColumns &&
-              q.inode_soft_limit > 0 &&
-              q.inode_current >= q.inode_soft_limit
-            const showGraceSection =
-              !isReducedColumns &&
-              ((q.block_time_limit > 0 || q.inode_time_limit > 0) ||
-                overBlockSoft ||
-                overInodeSoft)
-            return (
-              <Table.Tr key={q.uid}>
-                <Table.Td>{q.uid}</Table.Td>
-                <Table.Td>{q.name}</Table.Td>
-                <Table.Td>
-                  <BlockSize size={q.block_current} />
-                </Table.Td>
-                {!isReducedColumns && (
-                  <Table.Td style={limitCellStyle(blockSoftAbove)}>
-                    {wrapLimit(
-                      blockSoftAbove,
-                      <BlockSize size={q.block_soft_limit * 1024} />
-                    )}
-                  </Table.Td>
-                )}
-                <Table.Td style={limitCellStyle(blockHardAbove)}>
-                  {wrapLimit(
-                    blockHardAbove,
-                    <BlockSize size={q.block_hard_limit * 1024} />
-                  )}
-                </Table.Td>
-                {!isReducedColumns && (
-                  <>
-                    <Table.Td>
-                      <INodeSize size={q.inode_current} />
-                    </Table.Td>
-                    <Table.Td style={limitCellStyle(inodeSoftAbove)}>
-                      {wrapLimit(
-                        inodeSoftAbove,
-                        <INodeSize size={q.inode_soft_limit} />
+            })}
+          </Stack>
+        )
+      ) : (
+        <ScrollArea>
+          <Box style={{ minWidth: 800 }}>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>
+                    <Group
+                      gap={4}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => handleSort('uid')}
+                    >
+                      {t('uid')}
+                      {effectiveSortBy === 'uid' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
                       )}
-                    </Table.Td>
-                    <Table.Td style={limitCellStyle(inodeHardAbove)}>
-                      {wrapLimit(
-                        inodeHardAbove,
-                        <INodeSize size={q.inode_hard_limit} />
+                    </Group>
+                  </Table.Th>
+                  <Table.Th>
+                    <Group
+                      gap={4}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => handleSort('name')}
+                    >
+                      {t('name')}
+                      {effectiveSortBy === 'name' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
                       )}
-                    </Table.Td>
-                  </>
-                )}
-                <Table.Td>
-                  <Stack gap={2}>
-                    <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
-                      {t(getQuotaStatusLabelKey(status))}
-                    </Badge>
-                    {showGraceSection && (
-                      <Group gap="xs" wrap="wrap">
-                        {(q.block_time_limit > 0 || overBlockSoft) && (
-                          <Text size="xs" span>
-                            <Text component="span" c="dimmed" inherit>
-                              {t('blockGrace')}:
-                            </Text>{' '}
-{q.block_time_limit > 0 ? (
-                                <Text component="span" c="yellow" fw={600} inherit>
-                                  <GraceEndRelative time={q.block_time_limit} />
-                                </Text>
-                              ) : (
-                                <Text component="span" c="red" fw={600} inherit>
-                                  {t('graceExpired')}
-                                </Text>
-                              )}
-                          </Text>
-                        )}
-                        {(q.inode_time_limit > 0 || overInodeSoft) && (
-                          <Text size="xs" span>
-                            <Text component="span" c="dimmed" inherit>
-                              {t('inodeGrace')}:
-                            </Text>{' '}
-{q.inode_time_limit > 0 ? (
-                                <Text component="span" c="yellow" fw={600} inherit>
-                                  <GraceEndRelative time={q.inode_time_limit} />
-                                </Text>
-                              ) : (
-                                <Text component="span" c="red" fw={600} inherit>
-                                  {t('graceExpired')}
-                                </Text>
-                              )}
+                    </Group>
+                  </Table.Th>
+                  <Table.Th>
+                    <Group
+                      gap={4}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => handleSort('block_current')}
+                    >
+                      {t('blockUsed')}
+                      {effectiveSortBy === 'block_current' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
+                  {!isReducedColumns && (
+                    <Table.Th>
+                      <Group
+                        gap={4}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                        onClick={() => handleSort('block_soft_limit')}
+                      >
+                        {t('blockSoft')}
+                        {effectiveSortBy === 'block_soft_limit' && (
+                          <Text size="xs" c="dimmed">
+                            {sortDirection === 'asc' ? '▲' : '▼'}
                           </Text>
                         )}
                       </Group>
-                    )}
-                  </Stack>
-                </Table.Td>
-                <Table.Td>
-                  <Button size="xs" variant="light" onClick={() => setEditQuota(q)}>
-                    {t('edit')}
-                  </Button>
-                </Table.Td>
-              </Table.Tr>
-            )
-          })}
-        </Table.Tbody>
-      </Table>
-      {sortedUsers.length === 0 && (
+                    </Table.Th>
+                  )}
+                  <Table.Th>
+                    <Group
+                      gap={4}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => handleSort('block_hard_limit')}
+                    >
+                      {t('blockHard')}
+                      {effectiveSortBy === 'block_hard_limit' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
+                  {!isReducedColumns && (
+                    <>
+                      <Table.Th>
+                        <Group
+                          gap={4}
+                          style={{ cursor: 'pointer', userSelect: 'none' }}
+                          onClick={() => handleSort('inode_current')}
+                        >
+                          {t('inodeUsed')}
+                          {effectiveSortBy === 'inode_current' && (
+                            <Text size="xs" c="dimmed">
+                              {sortDirection === 'asc' ? '▲' : '▼'}
+                            </Text>
+                          )}
+                        </Group>
+                      </Table.Th>
+                      <Table.Th>
+                        <Group
+                          gap={4}
+                          style={{ cursor: 'pointer', userSelect: 'none' }}
+                          onClick={() => handleSort('inode_soft_limit')}
+                        >
+                          {t('inodeSoft')}
+                          {effectiveSortBy === 'inode_soft_limit' && (
+                            <Text size="xs" c="dimmed">
+                              {sortDirection === 'asc' ? '▲' : '▼'}
+                            </Text>
+                          )}
+                        </Group>
+                      </Table.Th>
+                      <Table.Th>
+                        <Group
+                          gap={4}
+                          style={{ cursor: 'pointer', userSelect: 'none' }}
+                          onClick={() => handleSort('inode_hard_limit')}
+                        >
+                          {t('inodeHard')}
+                          {effectiveSortBy === 'inode_hard_limit' && (
+                            <Text size="xs" c="dimmed">
+                              {sortDirection === 'asc' ? '▲' : '▼'}
+                            </Text>
+                          )}
+                        </Group>
+                      </Table.Th>
+                    </>
+                  )}
+                  <Table.Th>
+                    <Group
+                      gap={4}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => handleSort('status')}
+                    >
+                      {t('status')}
+                      {effectiveSortBy === 'status' && (
+                        <Text size="xs" c="dimmed">
+                          {sortDirection === 'asc' ? '▲' : '▼'}
+                        </Text>
+                      )}
+                    </Group>
+                  </Table.Th>
+                  <Table.Th>{t('actions')}</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {sortedUsers.map((q) => {
+                  const status = statusByUid.get(q.uid) ?? getQuotaStatus(q)
+                  const def = showDefaultSummary ? deviceDefault ?? null : null
+                  const blockSoftAbove = !!(
+                    def &&
+                    !isReducedColumns &&
+                    def.block_soft_limit > 0 &&
+                    (q.block_soft_limit > def.block_soft_limit || q.block_soft_limit === 0)
+                  )
+                  const blockHardAbove = !!(
+                    def &&
+                    def.block_hard_limit > 0 &&
+                    (q.block_hard_limit > def.block_hard_limit || q.block_hard_limit === 0)
+                  )
+                  const inodeSoftAbove = !!(
+                    def &&
+                    !isReducedColumns &&
+                    def.inode_soft_limit > 0 &&
+                    (q.inode_soft_limit > def.inode_soft_limit || q.inode_soft_limit === 0)
+                  )
+                  const inodeHardAbove = !!(
+                    def &&
+                    !isReducedColumns &&
+                    def.inode_hard_limit > 0 &&
+                    (q.inode_hard_limit > def.inode_hard_limit || q.inode_hard_limit === 0)
+                  )
+                  const limitCellStyle = (above: boolean) =>
+                    above
+                      ? { backgroundColor: 'var(--mantine-color-yellow-light)' }
+                      : undefined
+                  const wrapLimit = (above: boolean, content: React.ReactNode) =>
+                    above ? (
+                      <Tooltip label={t('aboveDefault')} withArrow openDelay={300}>
+                        <span style={{ display: 'inline-block' }}>{content}</span>
+                      </Tooltip>
+                    ) : (
+                      content
+                    )
+                  const overBlockSoft =
+                    !isReducedColumns &&
+                    q.block_soft_limit > 0 &&
+                    q.block_current >= q.block_soft_limit * 1024
+                  const overInodeSoft =
+                    !isReducedColumns &&
+                    q.inode_soft_limit > 0 &&
+                    q.inode_current >= q.inode_soft_limit
+                  const showGraceSection =
+                    !isReducedColumns &&
+                    ((q.block_time_limit > 0 || q.inode_time_limit > 0) ||
+                      overBlockSoft ||
+                      overInodeSoft)
+                  return (
+                    <Table.Tr key={q.uid}>
+                      <Table.Td>{q.uid}</Table.Td>
+                      <Table.Td>{q.name}</Table.Td>
+                      <Table.Td>
+                        <BlockSize size={q.block_current} />
+                      </Table.Td>
+                      {!isReducedColumns && (
+                        <Table.Td style={limitCellStyle(blockSoftAbove)}>
+                          {wrapLimit(
+                            blockSoftAbove,
+                            <BlockSize size={q.block_soft_limit * 1024} />
+                          )}
+                        </Table.Td>
+                      )}
+                      <Table.Td style={limitCellStyle(blockHardAbove)}>
+                        {wrapLimit(
+                          blockHardAbove,
+                          <BlockSize size={q.block_hard_limit * 1024} />
+                        )}
+                      </Table.Td>
+                      {!isReducedColumns && (
+                        <>
+                          <Table.Td>
+                            <INodeSize size={q.inode_current} />
+                          </Table.Td>
+                          <Table.Td style={limitCellStyle(inodeSoftAbove)}>
+                            {wrapLimit(
+                              inodeSoftAbove,
+                              <INodeSize size={q.inode_soft_limit} />
+                            )}
+                          </Table.Td>
+                          <Table.Td style={limitCellStyle(inodeHardAbove)}>
+                            {wrapLimit(
+                              inodeHardAbove,
+                              <INodeSize size={q.inode_hard_limit} />
+                            )}
+                          </Table.Td>
+                        </>
+                      )}
+                      <Table.Td>
+                        <Stack gap={2}>
+                          <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
+                            {t(getQuotaStatusLabelKey(status))}
+                          </Badge>
+                          {showGraceSection && (
+                            <Group gap="xs" wrap="wrap">
+                              {(q.block_time_limit > 0 || overBlockSoft) && (
+                                <Text size="xs" span>
+                                  <Text component="span" c="dimmed" inherit>
+                                    {t('blockGrace')}:
+                                  </Text>{' '}
+                                  {q.block_time_limit > 0 ? (
+                                    <Text component="span" c="yellow" fw={600} inherit>
+                                      <GraceEndRelative time={q.block_time_limit} />
+                                    </Text>
+                                  ) : (
+                                    <Text component="span" c="red" fw={600} inherit>
+                                      {t('graceExpired')}
+                                    </Text>
+                                  )}
+                                </Text>
+                              )}
+                              {(q.inode_time_limit > 0 || overInodeSoft) && (
+                                <Text size="xs" span>
+                                  <Text component="span" c="dimmed" inherit>
+                                    {t('inodeGrace')}:
+                                  </Text>{' '}
+                                  {q.inode_time_limit > 0 ? (
+                                    <Text component="span" c="yellow" fw={600} inherit>
+                                      <GraceEndRelative time={q.inode_time_limit} />
+                                    </Text>
+                                  ) : (
+                                    <Text component="span" c="red" fw={600} inherit>
+                                      {t('graceExpired')}
+                                    </Text>
+                                  )}
+                                </Text>
+                              )}
+                            </Group>
+                          )}
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        <Button size="xs" variant="light" onClick={() => setEditQuota(q)}>
+                          {t('edit')}
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  )
+                })}
+              </Table.Tbody>
+            </Table>
+          </Box>
+        </ScrollArea>
+      )}
+      {!isMobile && sortedUsers.length === 0 && (
         <Text size="sm" c="dimmed">
           {t('noUsersMatch')}
         </Text>
@@ -609,6 +660,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
         onClose={() => setAddQuotaOpened(false)}
         title={t('addQuotaForUser')}
         size="sm"
+        fullScreen={isMobile}
       >
         <Stack gap="md">
           <TextInput
@@ -626,14 +678,15 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
               {addQuotaError}
             </Text>
           )}
-          <Group justify="flex-end" gap="sm">
-            <Button variant="default" onClick={() => setAddQuotaOpened(false)}>
+          <Group justify="flex-end" gap="sm" wrap="wrap">
+            <Button variant="default" onClick={() => setAddQuotaOpened(false)} w={{ base: '100%', xs: 'auto' }}>
               {t('cancel')}
             </Button>
             <Button
               loading={addQuotaResolving}
               onClick={handleAddQuotaContinue}
               disabled={!addQuotaUsername.trim()}
+              w={{ base: '100%', xs: 'auto' }}
             >
               {t('continue')}
             </Button>

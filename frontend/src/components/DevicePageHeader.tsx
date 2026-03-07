@@ -8,10 +8,10 @@ export interface DevicePageHeaderProps {
 
 export function DevicePageHeader({ hostId, deviceName }: DevicePageHeaderProps) {
   return (
-    <Group justify="space-between" gap="sm">
-      <Group gap="sm">
+    <Group justify="space-between" gap="sm" wrap="wrap">
+      <Group gap="sm" style={{ minWidth: 0 }}>
         <IconDisc size={24} />
-        <Text size="lg" fw={600}>
+        <Text size="lg" fw={600} style={{ wordBreak: 'break-word' }}>
           {hostId} › {deviceName}
         </Text>
       </Group>
