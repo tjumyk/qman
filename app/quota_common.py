@@ -5,13 +5,15 @@ _MIN_UID = 1000
 _MIN_GID = 1000
 _NOBODY_UID = 65534
 _NOBODY_GID = 65534
+_MAX_UID = 9999
+_MAX_GID = 9999
 
 
 def should_include_uid(uid: int) -> bool:
     """Return True if this uid should be included in user quota listings (exclude system and nobody)."""
-    return uid >= _MIN_UID and uid != _NOBODY_UID
+    return uid >= _MIN_UID and uid != _NOBODY_UID and uid <= _MAX_UID
 
 
 def should_include_gid(gid: int) -> bool:
     """Return True if this gid should be included in group quota listings (exclude system and nobody)."""
-    return gid >= _MIN_GID and gid != _NOBODY_GID
+    return gid >= _MIN_GID and gid != _NOBODY_GID and gid <= _MAX_GID
