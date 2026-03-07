@@ -171,7 +171,7 @@ class DeviceQuotaResponse(BaseModel):
 
 
 def quota_tuple_to_dict(quota: tuple[Any, ...]) -> dict[str, Any]:
-    """Convert pyquota 8-tuple to dict for JSON."""
+    """Convert pyquota Quota (named tuple, default from get_user_quota/get_group_quota) to dict for JSON. block_current is in bytes; limits are in 1K blocks."""
     bhard, bsoft, bcurrent, ihard, isoft, icurrent, btime, itime = quota
     return {
         "block_hard_limit": bhard,

@@ -11,9 +11,9 @@ from app.models import quota_tuple_to_dict
 from app.quota_common import should_include_uid, should_include_gid
 
 _QUOTA_FORMAT_NAMES = {
-    pq.QFMT_VFS_OLD: "vfsold",
-    pq.QFMT_VFS_V0: "vfsv0",
-    pq.QFMT_VFS_V1: "vfsv1",
+    pq.QuotaFormat.VFS_OLD: "vfsold",
+    pq.QuotaFormat.VFS_V0: "vfsv0",
+    pq.QuotaFormat.VFS_V1: "vfsv1",
 }
 
 

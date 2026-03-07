@@ -120,14 +120,6 @@ def _get_current_quotas_for_device(
     return current
 
 
-def _current_usage_bytes(q: dict[str, Any], device_name: str, config: dict[str, Any]) -> int:
-    """Return current block usage in bytes. Pyquota reports block_current in 1K blocks; others in bytes."""
-    raw = q.get("block_current", 0) or 0
-    if device_name.startswith("/dev/") and config.get("USE_PYQUOTA"):
-        return int(raw) * 1024
-    return int(raw)
-
-
 def _dynamic_limits_1k(usage_bytes: int) -> tuple[int, int]:
     """Return (soft_1k, hard_1k) from usage in bytes: soft = ceil((usage+1GB)/1GB)*1024^2, hard = ceil((usage+2GB)/1GB)*1024^2."""
     one_gb = 1024**3
@@ -181,7 +173,7 @@ def apply_default_user_quota(self: Any) -> dict[str, Any]:
         dynamic_limits: dict[int, tuple[int, int]] = {}  # uid -> (soft_1k, hard_1k)
         for uid in uids_empty:
             q = current.get(uid, {})
-            usage_bytes = _current_usage_bytes(q, device_name, config)
+            usage_bytes = int(q.get("block_current", 0) or 0)
             use_default = (
                 (block_soft == 0 or usage_bytes < soft_bytes)
                 and (block_hard == 0 or usage_bytes < hard_bytes)
