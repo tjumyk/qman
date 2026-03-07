@@ -155,7 +155,9 @@ function QuotaCard({
                       {t('blockGrace')}:
                     </Text>{' '}
                     {quota.block_time_limit > 0 ? (
-                      <GraceEndRelative time={quota.block_time_limit} />
+                      <Text component="span" c="yellow" fw={600} inherit>
+                        <GraceEndRelative time={quota.block_time_limit} />
+                      </Text>
                     ) : (
                       <Text component="span" c="red" fw={600} inherit>
                         {t('graceExpired')}
@@ -180,7 +182,9 @@ function QuotaCard({
                       {t('inodeGrace')}:
                     </Text>{' '}
                     {quota.inode_time_limit > 0 ? (
-                      <GraceEndRelative time={quota.inode_time_limit} />
+                      <Text component="span" c="yellow" fw={600} inherit>
+                        <GraceEndRelative time={quota.inode_time_limit} />
+                      </Text>
                     ) : (
                       <Text component="span" c="red" fw={600} inherit>
                         {t('graceExpired')}

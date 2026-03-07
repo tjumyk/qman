@@ -41,11 +41,13 @@ def _quota_dict_to_tuple(d: dict[str, Any]) -> tuple[int, int, int, int, int, in
 def init_mock_host() -> None:
     """Initialize the mocked host with multiple filesystems, users, and quota settings."""
     now = int(time.time())
-    # Per-user grace end timestamps for debug (alice = uid 1000): future and past
+    # Per-user grace end timestamps for debug: future and past.
+    # quotactl(2) dqb_btime/dqb_itime are "time limit for excessive use" (grace end).
+    # The kernel may leave a past timestamp when grace has expired (not necessarily zero).
     grace_in_5_days = now + 5 * 86400
     grace_in_3_days = now + 3 * 86400
     grace_in_6_hours = now + 6 * 3600  # > 0 but < 1 day
-    grace_2_days_ago = now - 2 * 86400
+    grace_2_days_ago = now - 2 * 86400  # past = expired grace
 
     users = {
         1000: "alice",

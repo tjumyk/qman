@@ -521,7 +521,9 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                               {t('blockGrace')}:
                             </Text>{' '}
 {q.block_time_limit > 0 ? (
-                                <GraceEndRelative time={q.block_time_limit} />
+                                <Text component="span" c="yellow" fw={600} inherit>
+                                  <GraceEndRelative time={q.block_time_limit} />
+                                </Text>
                               ) : (
                                 <Text component="span" c="red" fw={600} inherit>
                                   {t('graceExpired')}
@@ -535,7 +537,9 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                               {t('inodeGrace')}:
                             </Text>{' '}
 {q.inode_time_limit > 0 ? (
-                                <GraceEndRelative time={q.inode_time_limit} />
+                                <Text component="span" c="yellow" fw={600} inherit>
+                                  <GraceEndRelative time={q.inode_time_limit} />
+                                </Text>
                               ) : (
                                 <Text component="span" c="red" fw={600} inherit>
                                   {t('graceExpired')}
