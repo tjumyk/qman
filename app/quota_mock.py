@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 # In-memory mock state per host_id. Initialized by init_mock_host().
@@ -39,6 +40,13 @@ def _quota_dict_to_tuple(d: dict[str, Any]) -> tuple[int, int, int, int, int, in
 
 def init_mock_host() -> None:
     """Initialize the mocked host with multiple filesystems, users, and quota settings."""
+    now = int(time.time())
+    # Per-user grace end timestamps for debug (alice = uid 1000): future and past
+    grace_in_5_days = now + 5 * 86400
+    grace_in_3_days = now + 3 * 86400
+    grace_in_6_hours = now + 6 * 3600  # > 0 but < 1 day
+    grace_2_days_ago = now - 2 * 86400
+
     users = {
         1000: "alice",
         1001: "bob",
@@ -67,13 +75,13 @@ def init_mock_host() -> None:
             "user_quotas": {
                 1000: {
                     "block_hard_limit": 1_000_000,
-                    "block_soft_limit": 900_000,
-                    "block_current": 300_000 * 1024,  # bytes (~293 MiB)
+                    "block_soft_limit": 400_000,
+                    "block_current": 450_000 * 1024,  # over soft for debug
                     "inode_hard_limit": 100_000,
                     "inode_soft_limit": 80_000,
-                    "inode_current": 25_000,
-                    "block_time_limit": 0,
-                    "inode_time_limit": 0,
+                    "inode_current": 85_000,  # over soft for debug (inode grace)
+                    "block_time_limit": grace_in_5_days,
+                    "inode_time_limit": grace_in_3_days,
                 },
                 1001: {
                     "block_hard_limit": 2_000_000,
@@ -82,7 +90,7 @@ def init_mock_host() -> None:
                     "inode_hard_limit": 200_000,
                     "inode_soft_limit": 150_000,
                     "inode_current": 90_000,
-                    "block_time_limit": 0,
+                    "block_time_limit": grace_in_6_hours,  # short grace for debug
                     "inode_time_limit": 0,
                 },
                 1002: {
@@ -389,11 +397,11 @@ def init_mock_host() -> None:
                 1000: {
                     "block_hard_limit": 5_000_000,
                     "block_soft_limit": 4_000_000,
-                    "block_current": 500_000 * 1024,
+                    "block_current": 4_500_000 * 1024,  # over soft for debug
                     "inode_hard_limit": 50_000,
                     "inode_soft_limit": 40_000,
                     "inode_current": 5_000,
-                    "block_time_limit": 0,
+                    "block_time_limit": grace_2_days_ago,  # expired grace for debug
                     "inode_time_limit": 0,
                 },
                 1001: {

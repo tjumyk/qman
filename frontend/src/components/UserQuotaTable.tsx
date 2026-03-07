@@ -29,6 +29,8 @@ import {
   DefaultQuotaModal,
   isDeviceDefaultNonEmpty,
 } from './DefaultQuotaModal'
+import { GraceDuration } from './GraceDuration'
+import { GraceEndRelative } from './GraceEndRelative'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
 
 function syntheticUserQuota(uid: number, name: string): UserQuota {
@@ -162,8 +164,92 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
   const showDefaultSummary =
     deviceDefault !== undefined && isDeviceDefaultNonEmpty(deviceDefault)
 
+  const hasDeviceGrace =
+    !isReducedColumns &&
+    device.user_quota_info &&
+    (device.user_quota_info.block_grace > 0 || device.user_quota_info.inode_grace > 0)
+
+  const showDeviceSummaryBox = deviceDefault !== undefined || hasDeviceGrace
+
   return (
     <Stack gap="md">
+      {showDeviceSummaryBox && (
+        <Box
+          py="xs"
+          px="sm"
+          style={{ borderRadius: 4 }}
+          bg="var(--mantine-color-default-hover)"
+        >
+          {deviceDefault !== undefined && (
+            <Group justify="space-between" wrap="wrap" gap="sm">
+              <Group gap="xs" wrap="wrap">
+                {showDefaultSummary && deviceDefault ? (
+                  <>
+                    <Text size="sm" c="dimmed" span>
+                      {t('defaultQuota')}:
+                    </Text>
+                    {isReducedColumns ? (
+                      <Text size="sm" span>
+                        <BlockSize size={deviceDefault.block_hard_limit * 1024} />
+                      </Text>
+                    ) : (
+                      <>
+                        <Text size="sm" span>
+                          {t('blockSoft')}{' '}
+                          <BlockSize size={deviceDefault.block_soft_limit * 1024} />
+                          {' · '}
+                          {t('blockHard')}{' '}
+                          <BlockSize size={deviceDefault.block_hard_limit * 1024} />
+                        </Text>
+                        <Text size="sm" span>
+                          {t('inodeSoft')}{' '}
+                          <INodeSize size={deviceDefault.inode_soft_limit} />
+                          {' · '}
+                          {t('inodeHard')}{' '}
+                          <INodeSize size={deviceDefault.inode_hard_limit} />
+                        </Text>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <Text size="sm" c="dimmed">
+                    {t('defaultQuotaNotSet')}
+                  </Text>
+                )}
+              </Group>
+              <Button
+                leftSection={<IconSettings size={16} />}
+                variant="light"
+                size="xs"
+                onClick={() => setDefaultQuotaOpened(true)}
+              >
+                {showDefaultSummary ? t('editDefaultQuota') : t('defaultQuota')}
+              </Button>
+            </Group>
+          )}
+          {hasDeviceGrace && (
+            <Group gap="md" wrap="wrap" mt={deviceDefault !== undefined ? 'xs' : 0}>
+              {device.user_quota_info!.block_grace > 0 && (
+                <Text size="sm" span>
+                  <Text component="span" c="dimmed" inherit>
+                    {t('blockGrace')}:
+                  </Text>{' '}
+                  <GraceDuration seconds={device.user_quota_info!.block_grace} />
+                </Text>
+              )}
+              {device.user_quota_info!.inode_grace > 0 && (
+                <Text size="sm" span>
+                  <Text component="span" c="dimmed" inherit>
+                    {t('inodeGrace')}:
+                  </Text>{' '}
+                  <GraceDuration seconds={device.user_quota_info!.inode_grace} />
+                </Text>
+              )}
+            </Group>
+          )}
+        </Box>
+      )}
+
       <Group gap="sm">
         <TextInput
           placeholder={t('searchByNameOrUid')}
@@ -191,61 +277,6 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
           {t('batchSetQuota')}
         </Button>
       </Group>
-
-      {deviceDefault !== undefined && (
-        <Box
-          py="xs"
-          px="sm"
-          style={{ borderRadius: 4 }}
-          bg="var(--mantine-color-default-hover)"
-        >
-          <Group justify="space-between" wrap="wrap" gap="sm">
-            <Group gap="xs" wrap="wrap">
-              {showDefaultSummary && deviceDefault ? (
-                <>
-                  <Text size="sm" c="dimmed" span>
-                    {t('defaultQuota')}:
-                  </Text>
-                  {isReducedColumns ? (
-                    <Text size="sm" span>
-                      <BlockSize size={deviceDefault.block_hard_limit * 1024} />
-                    </Text>
-                  ) : (
-                    <>
-                      <Text size="sm" span>
-                        {t('blockSoft')}{' '}
-                        <BlockSize size={deviceDefault.block_soft_limit * 1024} />
-                        {' · '}
-                        {t('blockHard')}{' '}
-                        <BlockSize size={deviceDefault.block_hard_limit * 1024} />
-                      </Text>
-                      <Text size="sm" span>
-                        {t('inodeSoft')}{' '}
-                        <INodeSize size={deviceDefault.inode_soft_limit} />
-                        {' · '}
-                        {t('inodeHard')}{' '}
-                        <INodeSize size={deviceDefault.inode_hard_limit} />
-                      </Text>
-                    </>
-                  )}
-                </>
-              ) : (
-                <Text size="sm" c="dimmed">
-                  {t('defaultQuotaNotSet')}
-                </Text>
-              )}
-            </Group>
-            <Button
-              leftSection={<IconSettings size={16} />}
-              variant="light"
-              size="xs"
-              onClick={() => setDefaultQuotaOpened(true)}
-            >
-              {showDefaultSummary ? t('edit') : t('defaultQuota')}
-            </Button>
-          </Group>
-        </Box>
-      )}
 
       <Table striped highlightOnHover>
         <Table.Thead>
@@ -424,6 +455,19 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
               ) : (
                 content
               )
+            const overBlockSoft =
+              !isReducedColumns &&
+              q.block_soft_limit > 0 &&
+              q.block_current >= q.block_soft_limit * 1024
+            const overInodeSoft =
+              !isReducedColumns &&
+              q.inode_soft_limit > 0 &&
+              q.inode_current >= q.inode_soft_limit
+            const showGraceSection =
+              !isReducedColumns &&
+              ((q.block_time_limit > 0 || q.inode_time_limit > 0) ||
+                overBlockSoft ||
+                overInodeSoft)
             return (
               <Table.Tr key={q.uid}>
                 <Table.Td>{q.uid}</Table.Td>
@@ -465,9 +509,43 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                   </>
                 )}
                 <Table.Td>
-                  <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
-                    {t(getQuotaStatusLabelKey(status))}
-                  </Badge>
+                  <Stack gap={2}>
+                    <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
+                      {t(getQuotaStatusLabelKey(status))}
+                    </Badge>
+                    {showGraceSection && (
+                      <Group gap="xs" wrap="wrap">
+                        {(q.block_time_limit > 0 || overBlockSoft) && (
+                          <Text size="xs" span>
+                            <Text component="span" c="dimmed" inherit>
+                              {t('blockGrace')}:
+                            </Text>{' '}
+{q.block_time_limit > 0 ? (
+                                <GraceEndRelative time={q.block_time_limit} />
+                              ) : (
+                                <Text component="span" c="red" fw={600} inherit>
+                                  {t('graceExpired')}
+                                </Text>
+                              )}
+                          </Text>
+                        )}
+                        {(q.inode_time_limit > 0 || overInodeSoft) && (
+                          <Text size="xs" span>
+                            <Text component="span" c="dimmed" inherit>
+                              {t('inodeGrace')}:
+                            </Text>{' '}
+{q.inode_time_limit > 0 ? (
+                                <GraceEndRelative time={q.inode_time_limit} />
+                              ) : (
+                                <Text component="span" c="red" fw={600} inherit>
+                                  {t('graceExpired')}
+                                </Text>
+                              )}
+                          </Text>
+                        )}
+                      </Group>
+                    )}
+                  </Stack>
                 </Table.Td>
                 <Table.Td>
                   <Button size="xs" variant="light" onClick={() => setEditQuota(q)}>

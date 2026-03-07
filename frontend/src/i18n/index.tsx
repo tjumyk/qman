@@ -237,6 +237,7 @@ const translations: Record<Locale, Record<string, string>> = {
     batchQuotaSuccess: 'Batch quota applied: {updated}/{total} users updated',
     batchQuotaFailed: 'Failed to apply batch quota',
     defaultQuota: 'Default quota',
+    editDefaultQuota: 'Edit default quota',
     defaultQuotaNotSet: 'No default quota set for this device.',
     defaultQuotaSaved: 'Default quota saved. A background worker will apply it to users with no limits.',
     defaultQuotaSaveFailed: 'Failed to save default quota',
@@ -244,6 +245,18 @@ const translations: Record<Locale, Record<string, string>> = {
       'A background task runs periodically and applies this default to users on this device who have no limits set. Users who already have limits are not changed.',
     aboveDefault: 'Above default',
     fillFromDefault: 'Fill from default',
+    blockGrace: 'Block grace',
+    inodeGrace: 'Inode grace',
+    graceEnds: 'ends',
+    graceExpired: 'Expired',
+    graceTooltipActive:
+      'You are over the soft limit. Reduce your usage before this time, or writes may be blocked when the grace period ends.',
+    graceTooltipExpired:
+      'The grace period has ended and you are still over the soft limit. Reduce your usage now to avoid write blocks, or contact your administrator.',
+    graceDurationDays: '{n} days',
+    graceDurationHours: '{n} hours',
+    graceDurationMinutes: '{n} minutes',
+    graceDurationSeconds: '{n} seconds',
     // Auto-assign mappings
     autoAssign: 'Auto-assign',
     autoAssignMappings: 'Auto-assign Mappings',
@@ -464,6 +477,7 @@ const translations: Record<Locale, Record<string, string>> = {
     apply: '应用',
     batchQuotaSuccess: '批量配额已应用：{updated}/{total} 个用户已更新',
     defaultQuota: '默认配额',
+    editDefaultQuota: '编辑默认配额',
     defaultQuotaNotSet: '此设备未设置默认配额。',
     defaultQuotaSaved: '默认配额已保存。后台任务会将其应用于无限制的用户。',
     defaultQuotaSaveFailed: '保存默认配额失败',
@@ -471,6 +485,18 @@ const translations: Record<Locale, Record<string, string>> = {
       '后台任务会定期运行，并将此默认值应用于本设备上尚未设置限额的用户。已有限额的用户不会被修改。',
     aboveDefault: '高于默认值',
     fillFromDefault: '从默认填充',
+    blockGrace: '块宽限',
+    inodeGrace: 'Inode 宽限',
+    graceEnds: '结束',
+    graceExpired: '已过期',
+    graceTooltipActive:
+      '您已超过软限制。请在此时间前减少用量，否则宽限期结束后写入可能被阻止。',
+    graceTooltipExpired:
+      '宽限期已结束，您仍超过软限制。请立即减少用量以避免写入被阻止，或联系管理员。',
+    graceDurationDays: '{n} 天',
+    graceDurationHours: '{n} 小时',
+    graceDurationMinutes: '{n} 分钟',
+    graceDurationSeconds: '{n} 秒',
     batchQuotaFailed: '批量配额应用失败',
     // Auto-assign mappings
     autoAssign: '自动分配',
