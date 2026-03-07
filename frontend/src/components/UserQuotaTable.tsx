@@ -414,7 +414,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
             )
             const limitCellStyle = (above: boolean) =>
               above
-                ? { backgroundColor: 'var(--mantine-color-yellow-0)' }
+                ? { backgroundColor: 'var(--mantine-color-yellow-light)' }
                 : undefined
             const wrapLimit = (above: boolean, content: React.ReactNode) =>
               above ? (
