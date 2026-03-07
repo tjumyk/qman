@@ -393,24 +393,24 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
               def &&
               !isReducedColumns &&
               def.block_soft_limit > 0 &&
-              q.block_soft_limit > def.block_soft_limit
+              (q.block_soft_limit > def.block_soft_limit || q.block_soft_limit === 0)
             )
             const blockHardAbove = !!(
               def &&
               def.block_hard_limit > 0 &&
-              q.block_hard_limit > def.block_hard_limit
+              (q.block_hard_limit > def.block_hard_limit || q.block_hard_limit === 0)
             )
             const inodeSoftAbove = !!(
               def &&
               !isReducedColumns &&
               def.inode_soft_limit > 0 &&
-              q.inode_soft_limit > def.inode_soft_limit
+              (q.inode_soft_limit > def.inode_soft_limit || q.inode_soft_limit === 0)
             )
             const inodeHardAbove = !!(
               def &&
               !isReducedColumns &&
               def.inode_hard_limit > 0 &&
-              q.inode_hard_limit > def.inode_hard_limit
+              (q.inode_hard_limit > def.inode_hard_limit || q.inode_hard_limit === 0)
             )
             const limitCellStyle = (above: boolean) =>
               above
