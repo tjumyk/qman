@@ -11,6 +11,7 @@ import {
   Modal,
   Box,
   Tooltip,
+  MultiSelect,
 } from '@mantine/core'
 import { IconPlus, IconSettings, IconUsers } from '@tabler/icons-react'
 import { resolveHostUser, getErrorMessage, getDeviceDefaultQuota } from '../api'
@@ -69,10 +70,18 @@ const REDUCED_SORT_COLUMNS: SortColumn[] = [
   'status',
 ]
 
-function compareQuota(a: UserQuota, b: UserQuota, col: SortColumn, dir: 'asc' | 'desc'): number {
+function compareQuota(
+  a: UserQuota,
+  b: UserQuota,
+  col: SortColumn,
+  dir: 'asc' | 'desc',
+  statusByUid?: Map<number, QuotaStatus>
+): number {
   let cmp = 0
   if (col === 'status') {
-    cmp = STATUS_ORDER[getQuotaStatus(a)] - STATUS_ORDER[getQuotaStatus(b)]
+    const statusA = statusByUid?.get(a.uid) ?? getQuotaStatus(a)
+    const statusB = statusByUid?.get(b.uid) ?? getQuotaStatus(b)
+    cmp = STATUS_ORDER[statusA] - STATUS_ORDER[statusB]
   } else if (col === 'name') {
     cmp = a.name.localeCompare(b.name, undefined, { numeric: true })
   } else {
@@ -102,6 +111,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
   const [defaultQuotaOpened, setDefaultQuotaOpened] = useState(false)
   const [sortBy, setSortBy] = useState<SortColumn>('name')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [statusFilter, setStatusFilter] = useState<QuotaStatus[]>([])
 
   const { data: deviceDefault } = useQuery({
     queryKey: ['deviceDefaultQuota', hostId, device.name],
@@ -119,6 +129,11 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
     return sortBy
   }, [isReducedColumns, sortBy])
 
+  const statusByUid = useMemo(() => {
+    const list = device.user_quotas ?? []
+    return new Map(list.map((q) => [q.uid, getQuotaStatus(q)]))
+  }, [device.user_quotas])
+
   const users = useMemo(() => {
     const list = device.user_quotas ?? []
     if (!search.trim()) return list
@@ -130,9 +145,20 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
     )
   }, [device.user_quotas, search])
 
+  const filteredByStatus = useMemo(() => {
+    if (statusFilter.length === 0) return users
+    const set = new Set(statusFilter)
+    return users.filter((q) => {
+      const st = statusByUid.get(q.uid)
+      return st !== undefined && set.has(st)
+    })
+  }, [users, statusFilter, statusByUid])
+
   const sortedUsers = useMemo(() => {
-    return [...users].sort((a, b) => compareQuota(a, b, effectiveSortBy, sortDirection))
-  }, [users, effectiveSortBy, sortDirection])
+    return [...filteredByStatus].sort((a, b) =>
+      compareQuota(a, b, effectiveSortBy, sortDirection, statusByUid)
+    )
+  }, [filteredByStatus, effectiveSortBy, sortDirection, statusByUid])
 
   function handleSort(column: SortColumn) {
     if (isReducedColumns && !REDUCED_SORT_COLUMNS.includes(column)) return
@@ -250,12 +276,24 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
         </Box>
       )}
 
-      <Group gap="sm">
+      <Group gap="sm" wrap="wrap" align="flex-end">
         <TextInput
           placeholder={t('searchByNameOrUid')}
           value={search}
           onChange={(e) => setSearch(e.currentTarget.value)}
           style={{ maxWidth: 300 }}
+        />
+        <MultiSelect
+          placeholder={t('filterByStatus')}
+          clearable
+          data={[
+            { value: 'ok', label: t('statusOk') },
+            { value: 'warning', label: t('statusNearLimit') },
+            { value: 'over', label: t('statusOverLimit') },
+          ]}
+          value={statusFilter}
+          onChange={(v) => setStatusFilter(v as QuotaStatus[])}
+          style={{ minWidth: 160 }}
         />
         <Button
           leftSection={<IconPlus size={16} />}
@@ -418,7 +456,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
         </Table.Thead>
         <Table.Tbody>
           {sortedUsers.map((q) => {
-            const status = getQuotaStatus(q)
+            const status = statusByUid.get(q.uid) ?? getQuotaStatus(q)
             const def = showDefaultSummary ? deviceDefault ?? null : null
             const blockSoftAbove = !!(
               def &&
@@ -561,7 +599,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
           })}
         </Table.Tbody>
       </Table>
-      {users.length === 0 && (
+      {sortedUsers.length === 0 && (
         <Text size="sm" c="dimmed">
           {t('noUsersMatch')}
         </Text>

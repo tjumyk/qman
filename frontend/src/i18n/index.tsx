@@ -71,6 +71,7 @@ const translations: Record<Locale, Record<string, string>> = {
     needAttentionCount: 'need attention',
     // Table & form
     searchByNameOrUid: 'Search by name or uid...',
+    filterByStatus: 'Filter by status',
     edit: 'Edit',
     cancel: 'Cancel',
     save: 'Save',
@@ -316,6 +317,7 @@ const translations: Record<Locale, Record<string, string>> = {
     noUsersMatch: '没有匹配的用户。',
     needAttentionCount: '需关注',
     searchByNameOrUid: '按姓名或 uid 搜索…',
+    filterByStatus: '按状态筛选',
     edit: '编辑',
     cancel: '取消',
     save: '保存',
