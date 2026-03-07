@@ -100,9 +100,9 @@ def create_app(config_path: str | None = None) -> Flask:
         from app.celery_app import make_celery
         make_celery(app)
 
-        @app.cli.command("sync-volume-actual-disk")
-        def sync_volume_actual_disk_cmd() -> None:
-            """Manually trigger the sync_volume_actual_disk Celery task (same as sync-volume-actual-disk-periodic)."""
+        @app.cli.command("sync-docker-volume-actual-disk")
+        def sync_docker_volume_actual_disk_cmd() -> None:
+            """Manually trigger the sync_volume_actual_disk Celery task (same as sync-docker-volume-actual-disk-periodic)."""
             from app.celery_app import celery_app
             result = celery_app.send_task("app.tasks.docker_quota_tasks.sync_volume_actual_disk")
             print(f"Sent sync_volume_actual_disk task to queue (id={result.id})")

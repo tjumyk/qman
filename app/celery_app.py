@@ -44,7 +44,7 @@ def make_celery(app=None) -> Celery:
                 "schedule": schedule(run_every=sync_interval),
                 "options": {"queue": "qman.docker"},
             },
-            "sync-volume-actual-disk-periodic": {
+            "sync-docker-volume-actual-disk-periodic": {
                 "task": "app.tasks.docker_quota_tasks.sync_volume_actual_disk",
                 "schedule": schedule(run_every=volume_actual_disk_interval),
                 "options": {"queue": "qman.docker"},
@@ -100,7 +100,7 @@ def make_celery(app=None) -> Celery:
                 "schedule": schedule(run_every=sync_interval),
                 "options": {"queue": "qman.docker"},
             },
-            "sync-volume-actual-disk-periodic": {
+            "sync-docker-volume-actual-disk-periodic": {
                 "task": "app.tasks.docker_quota_tasks.sync_volume_actual_disk",
                 "schedule": schedule(run_every=volume_actual_disk_interval),
                 "options": {"queue": "qman.docker"},
