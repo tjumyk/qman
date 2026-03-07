@@ -10,6 +10,7 @@ import {
   Group,
   Modal,
   Box,
+  Tooltip,
 } from '@mantine/core'
 import { IconPlus, IconSettings, IconUsers } from '@tabler/icons-react'
 import { resolveHostUser, getErrorMessage, getDeviceDefaultQuota } from '../api'
@@ -387,6 +388,42 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
         <Table.Tbody>
           {sortedUsers.map((q) => {
             const status = getQuotaStatus(q)
+            const def = showDefaultSummary ? deviceDefault ?? null : null
+            const blockSoftAbove = !!(
+              def &&
+              !isReducedColumns &&
+              def.block_soft_limit > 0 &&
+              q.block_soft_limit > def.block_soft_limit
+            )
+            const blockHardAbove = !!(
+              def &&
+              def.block_hard_limit > 0 &&
+              q.block_hard_limit > def.block_hard_limit
+            )
+            const inodeSoftAbove = !!(
+              def &&
+              !isReducedColumns &&
+              def.inode_soft_limit > 0 &&
+              q.inode_soft_limit > def.inode_soft_limit
+            )
+            const inodeHardAbove = !!(
+              def &&
+              !isReducedColumns &&
+              def.inode_hard_limit > 0 &&
+              q.inode_hard_limit > def.inode_hard_limit
+            )
+            const limitCellStyle = (above: boolean) =>
+              above
+                ? { backgroundColor: 'var(--mantine-color-yellow-0)' }
+                : undefined
+            const wrapLimit = (above: boolean, content: React.ReactNode) =>
+              above ? (
+                <Tooltip label={t('aboveDefault')} withArrow openDelay={300}>
+                  <span style={{ display: 'inline-block' }}>{content}</span>
+                </Tooltip>
+              ) : (
+                content
+              )
             return (
               <Table.Tr key={q.uid}>
                 <Table.Td>{q.uid}</Table.Td>
@@ -395,23 +432,35 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                   <BlockSize size={q.block_current} />
                 </Table.Td>
                 {!isReducedColumns && (
-                  <Table.Td>
-                    <BlockSize size={q.block_soft_limit * 1024} />
+                  <Table.Td style={limitCellStyle(blockSoftAbove)}>
+                    {wrapLimit(
+                      blockSoftAbove,
+                      <BlockSize size={q.block_soft_limit * 1024} />
+                    )}
                   </Table.Td>
                 )}
-                <Table.Td>
-                  <BlockSize size={q.block_hard_limit * 1024} />
+                <Table.Td style={limitCellStyle(blockHardAbove)}>
+                  {wrapLimit(
+                    blockHardAbove,
+                    <BlockSize size={q.block_hard_limit * 1024} />
+                  )}
                 </Table.Td>
                 {!isReducedColumns && (
                   <>
                     <Table.Td>
                       <INodeSize size={q.inode_current} />
                     </Table.Td>
-                    <Table.Td>
-                      <INodeSize size={q.inode_soft_limit} />
+                    <Table.Td style={limitCellStyle(inodeSoftAbove)}>
+                      {wrapLimit(
+                        inodeSoftAbove,
+                        <INodeSize size={q.inode_soft_limit} />
+                      )}
                     </Table.Td>
-                    <Table.Td>
-                      <INodeSize size={q.inode_hard_limit} />
+                    <Table.Td style={limitCellStyle(inodeHardAbove)}>
+                      {wrapLimit(
+                        inodeHardAbove,
+                        <INodeSize size={q.inode_hard_limit} />
+                      )}
                     </Table.Td>
                   </>
                 )}
