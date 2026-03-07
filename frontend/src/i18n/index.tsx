@@ -242,6 +242,7 @@ const translations: Record<Locale, Record<string, string>> = {
     defaultQuotaSaveFailed: 'Failed to save default quota',
     defaultQuotaUsageMessage:
       'A background task runs periodically and applies this default to users on this device who have no limits set. Users who already have limits are not changed.',
+    aboveDefault: 'Above default',
     fillFromDefault: 'Fill from default',
     // Auto-assign mappings
     autoAssign: 'Auto-assign',
@@ -468,6 +469,7 @@ const translations: Record<Locale, Record<string, string>> = {
     defaultQuotaSaveFailed: '保存默认配额失败',
     defaultQuotaUsageMessage:
       '后台任务会定期运行，并将此默认值应用于本设备上尚未设置限额的用户。已有限额的用户不会被修改。',
+    aboveDefault: '高于默认值',
     fillFromDefault: '从默认填充',
     batchQuotaFailed: '批量配额应用失败',
     // Auto-assign mappings
