@@ -9,6 +9,7 @@ import {
   Badge,
   Group,
   Modal,
+  Box,
 } from '@mantine/core'
 import { IconPlus, IconSettings, IconUsers } from '@tabler/icons-react'
 import { resolveHostUser, getErrorMessage, getDeviceDefaultQuota } from '../api'
@@ -23,7 +24,10 @@ import {
 import { useI18n } from '../i18n'
 import { EditQuotaModal } from './EditQuotaModal'
 import { BatchQuotaModal } from './BatchQuotaModal'
-import { DefaultQuotaModal } from './DefaultQuotaModal'
+import {
+  DefaultQuotaModal,
+  isDeviceDefaultNonEmpty,
+} from './DefaultQuotaModal'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
 
 function syntheticUserQuota(uid: number, name: string): UserQuota {
@@ -154,6 +158,9 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
     }
   }
 
+  const showDefaultSummary =
+    deviceDefault !== undefined && isDeviceDefaultNonEmpty(deviceDefault)
+
   return (
     <Stack gap="md">
       <Group gap="sm">
@@ -182,14 +189,63 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
         >
           {t('batchSetQuota')}
         </Button>
-        <Button
-          leftSection={<IconSettings size={16} />}
-          variant="light"
-          onClick={() => setDefaultQuotaOpened(true)}
-        >
-          {t('defaultQuota')}
-        </Button>
       </Group>
+
+      {deviceDefault !== undefined && (
+        <Box
+          py="xs"
+          px="sm"
+          style={{ borderRadius: 4 }}
+          bg="var(--mantine-color-default-hover)"
+        >
+          <Group justify="space-between" wrap="wrap" gap="sm">
+            <Group gap="xs" wrap="wrap">
+              {showDefaultSummary && deviceDefault ? (
+                <>
+                  <Text size="sm" c="dimmed" span>
+                    {t('defaultQuota')}:
+                  </Text>
+                  {isReducedColumns ? (
+                    <Text size="sm" span>
+                      <BlockSize size={deviceDefault.block_hard_limit * 1024} />
+                    </Text>
+                  ) : (
+                    <>
+                      <Text size="sm" span>
+                        {t('blockSoft')}{' '}
+                        <BlockSize size={deviceDefault.block_soft_limit * 1024} />
+                        {' · '}
+                        {t('blockHard')}{' '}
+                        <BlockSize size={deviceDefault.block_hard_limit * 1024} />
+                      </Text>
+                      <Text size="sm" span>
+                        {t('inodeSoft')}{' '}
+                        <INodeSize size={deviceDefault.inode_soft_limit} />
+                        {' · '}
+                        {t('inodeHard')}{' '}
+                        <INodeSize size={deviceDefault.inode_hard_limit} />
+                      </Text>
+                    </>
+                  )}
+                </>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  {t('defaultQuotaNotSet')}
+                </Text>
+              )}
+            </Group>
+            <Button
+              leftSection={<IconSettings size={16} />}
+              variant="light"
+              size="xs"
+              onClick={() => setDefaultQuotaOpened(true)}
+            >
+              {showDefaultSummary ? t('edit') : t('defaultQuota')}
+            </Button>
+          </Group>
+        </Box>
+      )}
+
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>

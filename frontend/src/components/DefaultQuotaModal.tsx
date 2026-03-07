@@ -100,6 +100,11 @@ export function DefaultQuotaModal({
         <Text size="sm" c="dimmed">
           {hostId} / {device.name}
         </Text>
+        <Alert variant="light" color="gray" py="xs">
+          <Text size="sm" c="dimmed">
+            {t('defaultQuotaUsageMessage')}
+          </Text>
+        </Alert>
         {isLoading ? (
           <Group justify="center" py="md">
             <Loader size="sm" />
