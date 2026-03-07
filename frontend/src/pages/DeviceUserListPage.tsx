@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Stack, Text, Loader, Alert, Group } from '@mantine/core'
-import { IconDisc } from '@tabler/icons-react'
+import { Stack, Text, Loader, Alert } from '@mantine/core'
 import { fetchQuotas } from '../api'
 import { useI18n } from '../i18n'
-import { DeviceUsage } from '../components/DeviceUsage'
+import { DeviceInfo } from '../components/DeviceInfo'
+import { DevicePageHeader } from '../components/DevicePageHeader'
 import { DockerDetailTabs } from '../components/docker/DockerDetailTabs'
 import { UserQuotaTable } from '../components/UserQuotaTable'
 
@@ -45,48 +45,17 @@ export function DeviceUserListPage() {
   // Docker devices use special tabbed view with containers, images, volumes
   const isDockerDevice = device.fstype === 'docker'
 
-  if (isDockerDevice) {
-    return (
-      <Stack gap="md">
-        <Group justify="space-between" gap="sm">
-          <Group gap="sm">
-            <IconDisc size={24} />
-            <Text size="lg" fw={600}>
-              {hostId} › {deviceName}
-            </Text>
-          </Group>
-        </Group>
-        <DockerDetailTabs hostId={hostId} device={device} />
-      </Stack>
-    )
-  }
-
   return (
     <Stack gap="md">
-      <Group justify="space-between" gap="sm">
-        <Group gap="sm">
-          <IconDisc size={24} />
-          <Text size="lg" fw={600}>
-            {hostId} › {deviceName}
-          </Text>
-        </Group>
-      </Group>
-      <Stack gap={2}>
-        <Text size="sm" c="dimmed">
-          {t('fstypeLabel')}: {device.fstype}
-        </Text>
-        <Text size="sm" c="dimmed">
-          {t('mountPointsLabel')}: {device.mount_points.join(', ')}
-        </Text>
-        {device.usage && (
-          <DeviceUsage
-            usage={device.usage}
-            userQuotas={device.user_quotas}
-            quotaFormat={device.user_quota_format}
-          />
-        )}
-      </Stack>
-      <UserQuotaTable hostId={hostId} device={device} />
+      <DevicePageHeader hostId={hostId} deviceName={deviceName} />
+      {isDockerDevice ? (
+        <DockerDetailTabs hostId={hostId} device={device} />
+      ) : (
+        <>
+          <DeviceInfo device={device} />
+          <UserQuotaTable hostId={hostId} device={device} />
+        </>
+      )}
     </Stack>
   )
 }

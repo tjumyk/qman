@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Tabs, Stack, Text } from '@mantine/core'
+import { Tabs, Stack } from '@mantine/core'
 import { IconUsers, IconBox, IconPhoto, IconDatabase } from '@tabler/icons-react'
 import { useI18n } from '../../i18n'
-import { DeviceUsage } from '../DeviceUsage'
+import { DeviceInfo } from '../DeviceInfo'
 import { UserQuotaTable } from '../UserQuotaTable'
 import { ContainersTab } from './ContainersTab'
 import { ImagesTab } from './ImagesTab'
@@ -20,21 +20,7 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
 
   return (
     <Stack gap="md">
-      <Stack gap={2}>
-        <Text size="sm" c="dimmed">
-          {t('fstypeLabel')}: {device.fstype}
-        </Text>
-        <Text size="sm" c="dimmed">
-          {t('mountPointsLabel')}: {device.mount_points.join(', ')}
-        </Text>
-        {device.usage && (
-          <DeviceUsage
-            usage={device.usage}
-            userQuotas={device.user_quotas}
-            quotaFormat="docker"
-          />
-        )}
-      </Stack>
+      <DeviceInfo device={device} />
 
       <Tabs value={activeTab} onChange={setActiveTab}>
         <Tabs.List>
