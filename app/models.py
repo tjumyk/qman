@@ -36,6 +36,7 @@ class AppConfig(BaseModel):
     CELERY_BROKER_URL: str | None = None  # When USE_DOCKER_QUOTA: e.g. redis://localhost:6379/0
     CELERY_RESULT_BACKEND: str | None = None  # Optional
     DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS: int | None = None  # Celery beat interval (default 300)
+    QUOTA_DEFAULT_APPLY_INTERVAL_SECONDS: int | None = None  # Celery beat interval for apply_default_user_quota (default 600 = 10 min)
     DOCKER_QUOTA_ENFORCEMENT_ORDER: str | None = None  # newest_first | oldest_first | largest_first (default newest_first)
     DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED: bool | None = None  # When True, use last_mounted_at in volume scan skip logic (default False)
     DOCKER_QUOTA_CACHE_TTL_SECONDS: int | None = None  # Container/image list cache TTL (default 600 = 10 minutes)
@@ -137,6 +138,16 @@ class BatchQuotaResult(BaseModel):
     updated_users: int
     skipped_users: int
     errors: list[str] = Field(default_factory=list)
+
+
+class DeviceDefaultQuotaResponse(BaseModel):
+    """Default user quota for a device (GET response / PUT body)."""
+
+    device_name: str
+    block_soft_limit: int = 0
+    block_hard_limit: int = 0
+    inode_soft_limit: int = 0
+    inode_hard_limit: int = 0
 
 
 # Device quota: optional user/group quotas and info (built from pyquota/psutil)

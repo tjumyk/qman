@@ -432,6 +432,43 @@ def register_api_routes(app: Any) -> None:
             logger.warning("Failed to set batch quota for host=%s, device=%s: %s (took %.2fs)", slave_id, device, str(e), elapsed)
             return jsonify(msg=str(e)), 500
 
+    @app.route("/api/quotas/<string:slave_id>/default-quota")
+    @oauth.requires_admin
+    def get_default_quota(slave_id: str) -> tuple[Any, int]:
+        """Get default user quota for a device on a host. Query param: device=."""
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            return jsonify(msg="slave not found"), 404
+        device = request.args.get("device")
+        if not device:
+            return jsonify(msg="device query parameter required"), 400
+        try:
+            url = f"{slave['url']}/remote-api/quotas/defaults?device={urllib.parse.quote(device)}"
+            resp = requests.get(url, auth=make_auth(slave), timeout=_REMOTE_API_TIMEOUT_QUOTA)
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            logger.warning("Failed to get default quota for host=%s, device=%s: %s", slave_id, device, e)
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/api/quotas/<string:slave_id>/default-quota", methods=["PUT"])
+    @oauth.requires_admin
+    def set_default_quota(slave_id: str) -> tuple[Any, int]:
+        """Set default user quota for a device on a host. Query param: device=. Body: block_soft_limit, block_hard_limit, inode_soft_limit, inode_hard_limit."""
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            return jsonify(msg="slave not found"), 404
+        device = request.args.get("device")
+        if not device:
+            return jsonify(msg="device query parameter required"), 400
+        body = request.get_json(silent=True) or {}
+        try:
+            url = f"{slave['url']}/remote-api/quotas/defaults?device={urllib.parse.quote(device)}"
+            resp = requests.put(url, json=body, auth=make_auth(slave), timeout=_REMOTE_API_TIMEOUT_SET_QUOTA)
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            logger.warning("Failed to set default quota for host=%s, device=%s: %s", slave_id, device, e)
+            return jsonify(msg=str(e)), 502
+
     @app.route("/api/hosts")
     @oauth.requires_login
     def get_hosts() -> tuple[Any, int] | Any:

@@ -6,7 +6,8 @@ import { setUserQuota, getErrorMessage } from '../api'
 import { useI18n } from '../i18n'
 import { BlockLimitEditor } from './BlockLimitEditor'
 import { BlockSize } from './BlockSize'
-import type { UserQuota, SetUserQuotaBody } from '../api/schemas'
+import type { UserQuota, SetUserQuotaBody, DeviceDefaultQuota } from '../api/schemas'
+import { isDeviceDefaultNonEmpty } from './DefaultQuotaModal'
 
 interface EditQuotaModalProps {
   opened: boolean
@@ -16,6 +17,8 @@ interface EditQuotaModalProps {
   quota: UserQuota | null
   /** When "zfs", inode fields are hidden (ZFS user quotas are space-only). */
   userQuotaFormat?: string
+  /** When set and non-empty, show "Fill from default" button to populate form. */
+  deviceDefault?: DeviceDefaultQuota | null
 }
 
 export function EditQuotaModal({
@@ -25,6 +28,7 @@ export function EditQuotaModal({
   deviceName,
   quota,
   userQuotaFormat,
+  deviceDefault,
 }: EditQuotaModalProps) {
   const isZfs = userQuotaFormat === 'zfs'
   const isDocker = userQuotaFormat === 'docker'
@@ -110,6 +114,26 @@ export function EditQuotaModal({
             <BlockSize size={currentUsageBytes} />
           </Text>
         </Box>
+
+        {isDeviceDefaultNonEmpty(deviceDefault) && (
+          <Button
+            variant="light"
+            size="sm"
+            onClick={() => {
+              if (isSingleLimitFormat) {
+                setBlockHard(deviceDefault!.block_hard_limit)
+                setBlockSoft(deviceDefault!.block_hard_limit)
+              } else {
+                setBlockSoft(deviceDefault!.block_soft_limit)
+                setBlockHard(deviceDefault!.block_hard_limit)
+                setInodeSoft(deviceDefault!.inode_soft_limit)
+                setInodeHard(deviceDefault!.inode_hard_limit)
+              }
+            }}
+          >
+            {t('fillFromDefault')}
+          </Button>
+        )}
 
         {isSingleLimitFormat ? (
           <div>

@@ -135,3 +135,19 @@ class DockerVolumeLastUsed(Base):
 
     volume_name: Mapped[str] = mapped_column(String(255), primary_key=True)
     last_mounted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+# --- Default user quota per device (slave; used by all disk types) ---
+
+
+class DeviceDefaultQuota(Base):
+    """Per-device default user quota (soft/hard block and inode). Stored on slave."""
+
+    __tablename__ = "device_default_quota"
+
+    device_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    block_soft_limit: Mapped[int] = mapped_column(Integer, default=0)
+    block_hard_limit: Mapped[int] = mapped_column(Integer, default=0)
+    inode_soft_limit: Mapped[int] = mapped_column(Integer, default=0)
+    inode_hard_limit: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

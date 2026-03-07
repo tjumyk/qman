@@ -236,6 +236,11 @@ const translations: Record<Locale, Record<string, string>> = {
     apply: 'Apply',
     batchQuotaSuccess: 'Batch quota applied: {updated}/{total} users updated',
     batchQuotaFailed: 'Failed to apply batch quota',
+    defaultQuota: 'Default quota',
+    defaultQuotaNotSet: 'No default quota set for this device.',
+    defaultQuotaSaved: 'Default quota saved. A background worker will apply it to users with no limits.',
+    defaultQuotaSaveFailed: 'Failed to save default quota',
+    fillFromDefault: 'Fill from default',
     // Auto-assign mappings
     autoAssign: 'Auto-assign',
     autoAssignMappings: 'Auto-assign Mappings',
@@ -455,6 +460,11 @@ const translations: Record<Locale, Record<string, string>> = {
     utilizationPercent: '利用率',
     apply: '应用',
     batchQuotaSuccess: '批量配额已应用：{updated}/{total} 个用户已更新',
+    defaultQuota: '默认配额',
+    defaultQuotaNotSet: '此设备未设置默认配额。',
+    defaultQuotaSaved: '默认配额已保存。后台任务会将其应用于无限制的用户。',
+    defaultQuotaSaveFailed: '保存默认配额失败',
+    fillFromDefault: '从默认填充',
     batchQuotaFailed: '批量配额应用失败',
     // Auto-assign mappings
     autoAssign: '自动分配',

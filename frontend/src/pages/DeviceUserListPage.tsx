@@ -13,8 +13,8 @@ import {
   Group,
   Modal,
 } from '@mantine/core'
-import { IconDisc, IconPlus, IconUsers } from '@tabler/icons-react'
-import { fetchQuotas, resolveHostUser, getErrorMessage } from '../api'
+import { IconDisc, IconPlus, IconSettings, IconUsers } from '@tabler/icons-react'
+import { fetchQuotas, resolveHostUser, getErrorMessage, getDeviceDefaultQuota } from '../api'
 import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
 import {
@@ -26,6 +26,7 @@ import {
 import { useI18n } from '../i18n'
 import { EditQuotaModal } from '../components/EditQuotaModal'
 import { BatchQuotaModal } from '../components/BatchQuotaModal'
+import { DefaultQuotaModal } from '../components/DefaultQuotaModal'
 import { DeviceUsage } from '../components/DeviceUsage'
 import { DockerDetailTabs } from '../components/docker/DockerDetailTabs'
 import type { UserQuota } from '../api/schemas'
@@ -81,6 +82,7 @@ export function DeviceUserListPage() {
   const [addQuotaResolving, setAddQuotaResolving] = useState(false)
   const [addQuotaError, setAddQuotaError] = useState<string | null>(null)
   const [batchQuotaOpened, setBatchQuotaOpened] = useState(false)
+  const [defaultQuotaOpened, setDefaultQuotaOpened] = useState(false)
   const [sortBy, setSortBy] = useState<SortColumn>('name')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const { t } = useI18n()
@@ -95,6 +97,12 @@ export function DeviceUserListPage() {
   }
 
   const { data, isLoading, error } = useQuery({ queryKey: ['quotas'], queryFn: fetchQuotas })
+
+  const { data: deviceDefault } = useQuery({
+    queryKey: ['deviceDefaultQuota', hostId, deviceName],
+    queryFn: () => getDeviceDefaultQuota(hostId!, deviceName!),
+    enabled: !!hostId && !!deviceName,
+  })
 
   const device = useMemo(() => {
     if (!hostId || !deviceName || !data) return null
@@ -224,6 +232,13 @@ export function DeviceUserListPage() {
           onClick={() => setBatchQuotaOpened(true)}
         >
           {t('batchSetQuota')}
+        </Button>
+        <Button
+          leftSection={<IconSettings size={16} />}
+          variant="light"
+          onClick={() => setDefaultQuotaOpened(true)}
+        >
+          {t('defaultQuota')}
         </Button>
       </Group>
       <Table striped highlightOnHover>
@@ -453,10 +468,18 @@ export function DeviceUserListPage() {
         deviceName={deviceName}
         quota={editQuota}
         userQuotaFormat={device.user_quota_format}
+        deviceDefault={deviceDefault ?? undefined}
       />
       <BatchQuotaModal
         opened={batchQuotaOpened}
         onClose={() => setBatchQuotaOpened(false)}
+        hostId={hostId}
+        device={device}
+        deviceDefault={deviceDefault ?? undefined}
+      />
+      <DefaultQuotaModal
+        opened={defaultQuotaOpened}
+        onClose={() => setDefaultQuotaOpened(false)}
         hostId={hostId}
         device={device}
       />

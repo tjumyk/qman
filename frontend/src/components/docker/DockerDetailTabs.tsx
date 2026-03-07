@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Tabs, Stack, Text, Table, Button, Badge, TextInput, Group, Modal } from '@mantine/core'
-import { IconUsers, IconBox, IconPhoto, IconDatabase, IconPlus } from '@tabler/icons-react'
+import { IconUsers, IconBox, IconPhoto, IconDatabase, IconPlus, IconSettings } from '@tabler/icons-react'
 import { BlockSize } from '../BlockSize'
 import {
   getQuotaStatus,
@@ -11,6 +12,8 @@ import {
 import { useI18n } from '../../i18n'
 import { EditQuotaModal } from '../EditQuotaModal'
 import { BatchQuotaModal } from '../BatchQuotaModal'
+import { DefaultQuotaModal } from '../DefaultQuotaModal'
+import { getDeviceDefaultQuota } from '../../api'
 import { DeviceUsage } from '../DeviceUsage'
 import { ContainersTab } from './ContainersTab'
 import { ImagesTab } from './ImagesTab'
@@ -72,8 +75,15 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
   const [addQuotaResolving, setAddQuotaResolving] = useState(false)
   const [addQuotaError, setAddQuotaError] = useState<string | null>(null)
   const [batchQuotaOpened, setBatchQuotaOpened] = useState(false)
+  const [defaultQuotaOpened, setDefaultQuotaOpened] = useState(false)
   const [sortBy, setSortBy] = useState<UserSortColumn>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+
+  const { data: deviceDefault } = useQuery({
+    queryKey: ['deviceDefaultQuota', hostId, device.name],
+    queryFn: () => getDeviceDefaultQuota(hostId, device.name),
+    enabled: !!hostId && !!device.name,
+  })
 
   const users = device.user_quotas || []
   const filteredUsers = useMemo(() => {
@@ -170,6 +180,13 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
                 onClick={() => setBatchQuotaOpened(true)}
               >
                 {t('batchSetQuota')}
+              </Button>
+              <Button
+                leftSection={<IconSettings size={16} />}
+                variant="light"
+                onClick={() => setDefaultQuotaOpened(true)}
+              >
+                {t('defaultQuota')}
               </Button>
             </Group>
 
@@ -337,11 +354,20 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
         deviceName={device.name}
         quota={editQuota}
         userQuotaFormat={device.user_quota_format}
+        deviceDefault={deviceDefault ?? undefined}
       />
 
       <BatchQuotaModal
         opened={batchQuotaOpened}
         onClose={() => setBatchQuotaOpened(false)}
+        hostId={hostId}
+        device={device}
+        deviceDefault={deviceDefault ?? undefined}
+      />
+
+      <DefaultQuotaModal
+        opened={defaultQuotaOpened}
+        onClose={() => setDefaultQuotaOpened(false)}
         hostId={hostId}
         device={device}
       />

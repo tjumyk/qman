@@ -10,6 +10,7 @@ import {
   dockerImagesResponseSchema,
   dockerVolumesResponseSchema,
   batchQuotaResultSchema,
+  deviceDefaultQuotaSchema,
 } from './schemas'
 import type {
   Me,
@@ -23,6 +24,8 @@ import type {
   DockerVolumesResponse,
   BatchQuotaRequest,
   BatchQuotaResult,
+  DeviceDefaultQuota,
+  SetDeviceDefaultQuotaBody,
 } from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
@@ -232,6 +235,35 @@ export async function setBatchQuota(
     { timeout: TIMEOUT_SET_QUOTA }
   )
   return batchQuotaResultSchema.parse(data)
+}
+
+export async function getDeviceDefaultQuota(
+  hostId: string,
+  device: string
+): Promise<DeviceDefaultQuota | null> {
+  try {
+    const { data } = await api.get<unknown>(
+      `quotas/${encodeURIComponent(hostId)}/default-quota`,
+      { params: { device }, timeout: TIMEOUT_QUOTA }
+    )
+    return deviceDefaultQuotaSchema.parse(data)
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) return null
+    throw err
+  }
+}
+
+export async function setDeviceDefaultQuota(
+  hostId: string,
+  device: string,
+  body: SetDeviceDefaultQuotaBody
+): Promise<DeviceDefaultQuota> {
+  const { data } = await api.put<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/default-quota`,
+    body,
+    { params: { device }, timeout: TIMEOUT_SET_QUOTA }
+  )
+  return deviceDefaultQuotaSchema.parse(data)
 }
 
 export type HostPingStatus = {

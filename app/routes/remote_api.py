@@ -677,6 +677,48 @@ def register_remote_api_routes(app: Any) -> None:
             "unattributed_bytes": unattributed_bytes,
         })
 
+    @app.route("/remote-api/quotas/defaults")
+    @requires_api_key
+    def remote_get_default_quota() -> tuple[Any, int] | Any:
+        """Get default user quota for a device. Query param: device=."""
+        import urllib.parse
+        device = request.args.get("device")
+        if not device:
+            return jsonify(msg="device query parameter required"), 400
+        device = urllib.parse.unquote(device)
+        from app.default_quota_store import get_device_default_quota
+        default = get_device_default_quota(device)
+        if default is None:
+            return jsonify(msg="no default quota set for this device"), 404
+        return jsonify(default)
+
+    @app.route("/remote-api/quotas/defaults", methods=["PUT"])
+    @requires_api_key
+    def remote_set_default_quota() -> tuple[Any, int] | Any:
+        """Set default user quota for a device. Query param: device=. Body: block_soft_limit, block_hard_limit, inode_soft_limit, inode_hard_limit (optional, default 0)."""
+        import urllib.parse
+        device = request.args.get("device")
+        if not device:
+            return jsonify(msg="device query parameter required"), 400
+        device = urllib.parse.unquote(device)
+        body = request.get_json(silent=True) or {}
+        try:
+            block_soft = int(body.get("block_soft_limit", 0) or 0)
+            block_hard = int(body.get("block_hard_limit", 0) or 0)
+            inode_soft = int(body.get("inode_soft_limit", 0) or 0)
+            inode_hard = int(body.get("inode_hard_limit", 0) or 0)
+        except (TypeError, ValueError):
+            return jsonify(msg="quota limits must be integers"), 400
+        if any(x < 0 for x in (block_soft, block_hard, inode_soft, inode_hard)):
+            return jsonify(msg="quota limits must be non-negative"), 400
+        from app.default_quota_store import set_device_default_quota
+        try:
+            result = set_device_default_quota(device, block_soft, block_hard, inode_soft, inode_hard)
+            return jsonify(result)
+        except Exception as e:
+            logger.warning("Failed to set default quota for device=%s: %s", device, e)
+            return jsonify(msg=str(e)), 500
+
     @app.route("/remote-api/quotas/batch", methods=["POST"])
     @requires_api_key
     def remote_set_batch_quota() -> tuple[Any, int] | Any:

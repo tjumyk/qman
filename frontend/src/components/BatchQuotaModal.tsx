@@ -18,13 +18,16 @@ import { fetchHostUsers, setBatchQuota, getErrorMessage } from '../api'
 import { useI18n } from '../i18n'
 import { BlockLimitEditor } from './BlockLimitEditor'
 import { BlockSize } from './BlockSize'
-import type { DeviceQuota, UserQuota, BatchQuotaRequest } from '../api/schemas'
+import type { DeviceQuota, UserQuota, BatchQuotaRequest, DeviceDefaultQuota } from '../api/schemas'
+import { isDeviceDefaultNonEmpty } from './DefaultQuotaModal'
 
 interface BatchQuotaModalProps {
   opened: boolean
   onClose: () => void
   hostId: string
   device: DeviceQuota
+  /** When set and non-empty, show "Fill from default" button to populate form. */
+  deviceDefault?: DeviceDefaultQuota | null
 }
 
 export function BatchQuotaModal({
@@ -32,6 +35,7 @@ export function BatchQuotaModal({
   onClose,
   hostId,
   device,
+  deviceDefault,
 }: BatchQuotaModalProps) {
   const isZfs = device.user_quota_format === 'zfs'
   const isDocker = device.user_quota_format === 'docker'
@@ -204,6 +208,26 @@ export function BatchQuotaModal({
         <Text size="sm" c="dimmed">
           {hostId} / {device.name}
         </Text>
+
+        {isDeviceDefaultNonEmpty(deviceDefault) && (
+          <Button
+            variant="light"
+            size="sm"
+            onClick={() => {
+              if (isSingleLimitFormat) {
+                setBlockHard(deviceDefault!.block_hard_limit)
+                setBlockSoft(deviceDefault!.block_hard_limit)
+              } else {
+                setBlockSoft(deviceDefault!.block_soft_limit)
+                setBlockHard(deviceDefault!.block_hard_limit)
+                setInodeSoft(deviceDefault!.inode_soft_limit)
+                setInodeHard(deviceDefault!.inode_hard_limit)
+              }
+            }}
+          >
+            {t('fillFromDefault')}
+          </Button>
+        )}
 
         {loadingUsers ? (
           <Group justify="center" py="md">

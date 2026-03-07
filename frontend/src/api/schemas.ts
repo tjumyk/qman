@@ -98,6 +98,23 @@ export const batchQuotaResultSchema = z.object({
 })
 export type BatchQuotaResult = z.infer<typeof batchQuotaResultSchema>
 
+export const deviceDefaultQuotaSchema = z.object({
+  device_name: z.string(),
+  block_soft_limit: z.number(),
+  block_hard_limit: z.number(),
+  inode_soft_limit: z.number(),
+  inode_hard_limit: z.number(),
+})
+export type DeviceDefaultQuota = z.infer<typeof deviceDefaultQuotaSchema>
+
+export const setDeviceDefaultQuotaBodySchema = z.object({
+  block_soft_limit: z.number().optional(),
+  block_hard_limit: z.number().optional(),
+  inode_soft_limit: z.number().optional(),
+  inode_hard_limit: z.number().optional(),
+})
+export type SetDeviceDefaultQuotaBody = z.infer<typeof setDeviceDefaultQuotaBodySchema>
+
 export const resolveUserResponseSchema = z.object({
   uid: z.number(),
   name: z.string(),
