@@ -14,8 +14,13 @@ interface BlockLimitEditorProps {
 
 const units = ['KB', 'MB', 'GB', 'TB']
 const GB_IN_1K = 1024 * 1024
+/** Default unit index when value is 0 (GB). */
+const DEFAULT_UNIT_INDEX = 2
 
 function toValueAndUnit(blocks: number): { value: number; unitIndex: number } {
+  if (blocks === 0) {
+    return { value: 0, unitIndex: DEFAULT_UNIT_INDEX }
+  }
   let value = blocks
   let unitIndex = 0
   while (value > 0 && value % 1024 === 0 && unitIndex < units.length - 1) {
@@ -33,6 +38,21 @@ function toBlocks(value: number, unitIndex: number): number {
     u -= 1
   }
   return Math.round(v)
+}
+
+/** Round usage (in 1K blocks) up to a sensible unit and return value in 1K blocks. */
+function ceilingToSensibleUnit(blocks1k: number): number {
+  if (blocks1k <= 0) return 0
+  const multipliers = [1, 1024, 1024 * 1024, 1024 * 1024 * 1024]
+  let unitIndex = 0
+  for (let i = multipliers.length - 1; i >= 0; i--) {
+    if (blocks1k >= multipliers[i]) {
+      unitIndex = i
+      break
+    }
+  }
+  const mult = multipliers[unitIndex]
+  return Math.ceil(blocks1k / mult) * mult
 }
 
 export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets }: BlockLimitEditorProps) {
@@ -62,6 +82,11 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
     notify(num, newUnitIndex)
   }
 
+  const matchUsageValue =
+    currentUsage1k !== undefined && currentUsage1k > 0
+      ? ceilingToSensibleUnit(currentUsage1k)
+      : null
+
   const presets = showPresets ? (
     <Group gap={4} wrap="wrap">
       <Button
@@ -71,11 +96,11 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
       >
         {t('presetNoLimit')}
       </Button>
-      {currentUsage1k !== undefined && currentUsage1k > 0 && (
+      {matchUsageValue !== null && (
         <Button
           size="compact-xs"
-          variant={value === currentUsage1k ? 'filled' : 'light'}
-          onClick={() => onChange(currentUsage1k)}
+          variant={value === matchUsageValue ? 'filled' : 'light'}
+          onClick={() => onChange(matchUsageValue)}
         >
           {t('presetMatchUsage')}
         </Button>
