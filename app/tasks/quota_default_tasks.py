@@ -1,6 +1,7 @@
 """Celery task: apply default user quota to users with all-empty limits (all disk types)."""
 
 import json
+import math
 import os
 import pwd
 from typing import Any
@@ -119,6 +120,23 @@ def _get_current_quotas_for_device(
     return current
 
 
+def _current_usage_bytes(q: dict[str, Any], device_name: str, config: dict[str, Any]) -> int:
+    """Return current block usage in bytes. Pyquota reports block_current in 1K blocks; others in bytes."""
+    raw = q.get("block_current", 0) or 0
+    if device_name.startswith("/dev/") and config.get("USE_PYQUOTA"):
+        return int(raw) * 1024
+    return int(raw)
+
+
+def _dynamic_limits_1k(usage_bytes: int) -> tuple[int, int]:
+    """Return (soft_1k, hard_1k) from usage in bytes: soft = ceil((usage+1GB)/1GB)*1024^2, hard = ceil((usage+2GB)/1GB)*1024^2."""
+    one_gb = 1024**3
+    soft_gb = math.ceil((usage_bytes + one_gb) / one_gb)
+    hard_gb = math.ceil((usage_bytes + 2 * one_gb) / one_gb)
+    blocks_per_gb = 1024 * 1024
+    return (soft_gb * blocks_per_gb, hard_gb * blocks_per_gb)
+
+
 def _all_limits_empty(q: dict[str, Any], device: str, config: dict[str, Any]) -> bool:
     """True if block and inode limits are all 0. For Docker/ZFS only block matters."""
     if device == "docker" or (not device.startswith("/dev/") and config["USE_ZFS"]):
@@ -148,19 +166,37 @@ def apply_default_user_quota(self: Any) -> dict[str, Any]:
         inode_soft = dev_default["inode_soft_limit"]
         inode_hard = dev_default["inode_hard_limit"]
         current = _get_current_quotas_for_device(device_name, users, config)
-        uids_to_apply: list[int] = []
+        uids_empty: list[int] = []
         for uid, _name in users:
             q = current.get(uid, {})
             if _all_limits_empty(q, device_name, config):
-                uids_to_apply.append(uid)
-        if not uids_to_apply:
+                uids_empty.append(uid)
+        if not uids_empty:
             by_device[device_name] = {"applied": 0, "errors": []}
             continue
+
+        soft_bytes = block_soft * 1024
+        hard_bytes = block_hard * 1024
+        uids_default: list[int] = []
+        dynamic_limits: dict[int, tuple[int, int]] = {}  # uid -> (soft_1k, hard_1k)
+        for uid in uids_empty:
+            q = current.get(uid, {})
+            usage_bytes = _current_usage_bytes(q, device_name, config)
+            use_default = (
+                (block_soft == 0 or usage_bytes < soft_bytes)
+                and (block_hard == 0 or usage_bytes < hard_bytes)
+            )
+            if use_default:
+                uids_default.append(uid)
+            else:
+                soft_1k, hard_1k = _dynamic_limits_1k(usage_bytes)
+                dynamic_limits[uid] = (soft_1k, hard_1k)
+
         errors: list[str] = []
         applied = 0
         if config["MOCK_QUOTA"]:
             from app.quota_mock import set_user_quota_mock
-            for uid in uids_to_apply:
+            for uid in uids_default:
                 try:
                     set_user_quota_mock(
                         device_name, uid,
@@ -170,9 +206,20 @@ def apply_default_user_quota(self: Any) -> dict[str, Any]:
                     applied += 1
                 except Exception as e:
                     errors.append(f"uid={uid}: {e}")
+            for uid in dynamic_limits:
+                soft_1k, hard_1k = dynamic_limits[uid]
+                try:
+                    set_user_quota_mock(
+                        device_name, uid,
+                        hard_1k, soft_1k,
+                        inode_hard, inode_soft,
+                    )
+                    applied += 1
+                except Exception as e:
+                    errors.append(f"uid={uid}: {e}")
         elif device_name.startswith("/dev/") and config["USE_PYQUOTA"]:
             import pyquota as pq
-            for uid in uids_to_apply:
+            for uid in uids_default:
                 try:
                     pq.set_user_quota(
                         device_name, uid,
@@ -182,17 +229,34 @@ def apply_default_user_quota(self: Any) -> dict[str, Any]:
                     applied += 1
                 except Exception as e:
                     errors.append(f"uid={uid}: {e}")
+            for uid in dynamic_limits:
+                soft_1k, hard_1k = dynamic_limits[uid]
+                try:
+                    pq.set_user_quota(
+                        device_name, uid,
+                        hard_1k, soft_1k,
+                        inode_hard, inode_soft,
+                    )
+                    applied += 1
+                except Exception as e:
+                    errors.append(f"uid={uid}: {e}")
         elif device_name == "docker" and config["USE_DOCKER_QUOTA"]:
             from app.docker_quota.attribution_store import batch_set_user_quota_limits
+            uid_limits: dict[int, int] = {}
+            for uid in uids_default:
+                uid_limits[uid] = block_hard
+            for uid in dynamic_limits:
+                _soft_1k, hard_1k = dynamic_limits[uid]
+                uid_limits[uid] = hard_1k
             try:
-                uid_limits = {uid: block_hard for uid in uids_to_apply}
-                batch_set_user_quota_limits(uid_limits)
-                applied = len(uids_to_apply)
+                if uid_limits:
+                    batch_set_user_quota_limits(uid_limits)
+                    applied = len(uid_limits)
             except Exception as e:
                 errors.append(str(e))
         elif config["USE_ZFS"]:
             from app.quota_zfs import set_user_quota as zfs_set_user_quota
-            for uid in uids_to_apply:
+            for uid in uids_default:
                 try:
                     zfs_set_user_quota(
                         dataset=device_name,
@@ -205,14 +269,28 @@ def apply_default_user_quota(self: Any) -> dict[str, Any]:
                     applied += 1
                 except Exception as e:
                     errors.append(f"uid={uid}: {e}")
+            for uid in dynamic_limits:
+                _soft_1k, hard_1k = dynamic_limits[uid]
+                try:
+                    zfs_set_user_quota(
+                        dataset=device_name,
+                        uid=uid,
+                        block_hard_limit=hard_1k,
+                        block_soft_limit=hard_1k,
+                        inode_hard_limit=inode_hard,
+                        inode_soft_limit=inode_soft,
+                    )
+                    applied += 1
+                except Exception as e:
+                    errors.append(f"uid={uid}: {e}")
         else:
             errors.append("backend not enabled for this device")
         total_applied += applied
         by_device[device_name] = {"applied": applied, "errors": errors}
         if applied or errors:
             logger.info(
-                "apply_default_user_quota device=%s applied=%d errors=%d",
-                device_name, applied, len(errors),
+                "apply_default_user_quota device=%s applied=%d default=%d dynamic=%d errors=%d",
+                device_name, applied, len(uids_default), len(dynamic_limits), len(errors),
             )
     return {
         "devices_processed": len(devices),
