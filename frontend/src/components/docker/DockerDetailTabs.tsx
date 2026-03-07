@@ -22,7 +22,7 @@ export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
     <Stack gap="md">
       <DeviceInfo device={device} />
 
-      <Tabs value={activeTab} onChange={setActiveTab}>
+      <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="users" leftSection={<IconUsers size={16} />}>
             {t('usersTab')}

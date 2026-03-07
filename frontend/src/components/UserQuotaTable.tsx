@@ -73,7 +73,9 @@ function compareQuota(a: UserQuota, b: UserQuota, col: SortColumn, dir: 'asc' | 
     const bVal = b[col] as number
     cmp = aVal - bVal
   }
-  return dir === 'asc' ? cmp : -cmp
+  if (cmp !== 0) return dir === 'asc' ? cmp : -cmp
+  // Stable sort: tie-break by uid
+  return a.uid - b.uid
 }
 
 export interface UserQuotaTableProps {
