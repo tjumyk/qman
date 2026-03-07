@@ -241,16 +241,12 @@ export async function getDeviceDefaultQuota(
   hostId: string,
   device: string
 ): Promise<DeviceDefaultQuota | null> {
-  try {
-    const { data } = await api.get<unknown>(
-      `quotas/${encodeURIComponent(hostId)}/default-quota`,
-      { params: { device }, timeout: TIMEOUT_QUOTA }
-    )
-    return deviceDefaultQuotaSchema.parse(data)
-  } catch (err) {
-    if (isAxiosError(err) && err.response?.status === 404) return null
-    throw err
-  }
+  const { data } = await api.get<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/default-quota`,
+    { params: { device }, timeout: TIMEOUT_QUOTA }
+  )
+  if (data == null) return null
+  return deviceDefaultQuotaSchema.parse(data)
 }
 
 export async function setDeviceDefaultQuota(

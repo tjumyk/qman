@@ -688,8 +688,6 @@ def register_remote_api_routes(app: Any) -> None:
         device = urllib.parse.unquote(device)
         from app.default_quota_store import get_device_default_quota
         default = get_device_default_quota(device)
-        if default is None:
-            return jsonify(msg="no default quota set for this device"), 404
         return jsonify(default)
 
     @app.route("/remote-api/quotas/defaults", methods=["PUT"])
