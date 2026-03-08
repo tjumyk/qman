@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Stack, Text, SimpleGrid, Card, Badge, Loader, Alert, Anchor, Group } from '@mantine/core'
-import { IconGauge } from '@tabler/icons-react'
+import { Stack, Text, SimpleGrid, Card, Badge, Loader, Alert, Anchor, Group, ActionIcon, Tooltip } from '@mantine/core'
+import { IconGauge, IconChevronRight } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { fetchQuotas } from '../api'
 import { useI18n } from '../i18n'
@@ -40,14 +40,27 @@ export function DashboardPage() {
           {t('dashboard')}
         </Text>
       </Group>
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing={{ base: 'sm', md: 'md' }}>
+      <SimpleGrid cols={{ base: 2, sm: 2, md: 4 }} spacing={{ base: 'sm', md: 'md' }}>
         <Card shadow="sm" padding="lg" radius="md" withBorder>
           <Text size="sm" c="dimmed">
             {t('totalHosts')}
           </Text>
-          <Text size="xl" fw={700}>
-            {stats.hostCount}
-          </Text>
+          <Group justify="space-between" align="center" wrap="nowrap" gap="xs">
+            <Text size="xl" fw={700}>
+              {stats.hostCount}
+            </Text>
+            <Tooltip label={t('hostList')}>
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                color="gray"
+                onClick={() => navigate('/manage/hosts')}
+                aria-label={t('hostList')}
+              >
+                <IconChevronRight size={16} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         </Card>
         <Card shadow="sm" padding="lg" radius="md" withBorder>
           <Text size="sm" c="dimmed">
