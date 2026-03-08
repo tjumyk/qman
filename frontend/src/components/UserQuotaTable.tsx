@@ -34,7 +34,7 @@ import {
   isDeviceDefaultNonEmpty,
 } from './DefaultQuotaModal'
 import { GraceDuration } from './GraceDuration'
-import { GraceEndRelative } from './GraceEndRelative'
+import { QuotaGraceDisplay } from './QuotaGraceDisplay'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
 
 function syntheticUserQuota(uid: number, name: string): UserQuota {
@@ -541,19 +541,6 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                     ) : (
                       content
                     )
-                  const overBlockSoft =
-                    !isReducedColumns &&
-                    q.block_soft_limit > 0 &&
-                    q.block_current >= q.block_soft_limit * 1024
-                  const overInodeSoft =
-                    !isReducedColumns &&
-                    q.inode_soft_limit > 0 &&
-                    q.inode_current >= q.inode_soft_limit
-                  const showGraceSection =
-                    !isReducedColumns &&
-                    ((q.block_time_limit > 0 || q.inode_time_limit > 0) ||
-                      overBlockSoft ||
-                      overInodeSoft)
                   return (
                     <Table.Tr key={q.uid}>
                       <Table.Td>{q.uid}</Table.Td>
@@ -599,42 +586,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                           <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
                             {t(getQuotaStatusLabelKey(status))}
                           </Badge>
-                          {showGraceSection && (
-                            <Group gap="xs" wrap="wrap">
-                              {(q.block_time_limit > 0 || overBlockSoft) && (
-                                <Text size="xs" span>
-                                  <Text component="span" c="dimmed" inherit>
-                                    {t('blockGrace')}:
-                                  </Text>{' '}
-                                  {q.block_time_limit > 0 ? (
-                                    <Text component="span" c="yellow" fw={600} inherit>
-                                      <GraceEndRelative time={q.block_time_limit} />
-                                    </Text>
-                                  ) : (
-                                    <Text component="span" c="red" fw={600} inherit>
-                                      {t('graceExpired')}
-                                    </Text>
-                                  )}
-                                </Text>
-                              )}
-                              {(q.inode_time_limit > 0 || overInodeSoft) && (
-                                <Text size="xs" span>
-                                  <Text component="span" c="dimmed" inherit>
-                                    {t('inodeGrace')}:
-                                  </Text>{' '}
-                                  {q.inode_time_limit > 0 ? (
-                                    <Text component="span" c="yellow" fw={600} inherit>
-                                      <GraceEndRelative time={q.inode_time_limit} />
-                                    </Text>
-                                  ) : (
-                                    <Text component="span" c="red" fw={600} inherit>
-                                      {t('graceExpired')}
-                                    </Text>
-                                  )}
-                                </Text>
-                              )}
-                            </Group>
-                          )}
+                          <QuotaGraceDisplay quota={q} />
                         </Stack>
                       </Table.Td>
                       <Table.Td>

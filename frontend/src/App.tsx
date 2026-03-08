@@ -16,7 +16,7 @@ import {
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
+import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink } from '@tabler/icons-react'
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -40,6 +40,7 @@ function AppShellWithNav() {
   const { t, locale, setLocale } = useI18n()
   const { setColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('light')
+  const isMobile = useMediaQuery('(max-width: 36em)')
 
   const navTo = (path: string) => {
     close()
@@ -50,6 +51,43 @@ function AppShellWithNav() {
   useEffect(() => {
     close()
   }, [location.pathname, close])
+
+  const themeAndLocaleControls = (
+    <Group gap="sm">
+      <SegmentedControl
+        size="xs"
+        value={computedColorScheme}
+        onChange={(v) => setColorScheme(v as 'light' | 'dark')}
+        data={[
+          {
+            label: (
+              <Box component="span" display="flex" style={{ alignItems: 'center', justifyContent: 'center' }}>
+                <IconSun size={16} />
+              </Box>
+            ),
+            value: 'light',
+          },
+          {
+            label: (
+              <Box component="span" display="flex" style={{ alignItems: 'center', justifyContent: 'center' }}>
+                <IconMoon size={16} />
+              </Box>
+            ),
+            value: 'dark',
+          },
+        ]}
+      />
+      <SegmentedControl
+        size="xs"
+        value={locale}
+        onChange={(v) => setLocale(v as 'en' | 'zh-Hans')}
+        data={[
+          { label: t('langZh'), value: 'zh-Hans' },
+          { label: t('langEn'), value: 'en' },
+        ]}
+      />
+    </Group>
+  )
 
   if (isLoading) {
     return (
@@ -110,39 +148,8 @@ function AppShellWithNav() {
             </UnstyledButton>
           </Group>
           <Group gap="sm" wrap="wrap" style={{ marginLeft: 'auto', flexShrink: 0 }}>
-            <SegmentedControl
-              size="xs"
-              value={computedColorScheme}
-              onChange={(v) => setColorScheme(v as 'light' | 'dark')}
-              data={[
-                {
-                  label: (
-                    <Box component="span" display="flex" style={{ alignItems: 'center', justifyContent: 'center' }}>
-                      <IconSun size={16} />
-                    </Box>
-                  ),
-                  value: 'light',
-                },
-                {
-                  label: (
-                    <Box component="span" display="flex" style={{ alignItems: 'center', justifyContent: 'center' }}>
-                      <IconMoon size={16} />
-                    </Box>
-                  ),
-                  value: 'dark',
-                },
-              ]}
-            />
-            <SegmentedControl
-              size="xs"
-              value={locale}
-              onChange={(v) => setLocale(v as 'en' | 'zh-Hans')}
-              data={[
-                { label: t('langZh'), value: 'zh-Hans' },
-                { label: t('langEn'), value: 'en' },
-              ]}
-            />
-            <Menu shadow="md" width={200} position="bottom-end" trigger="hover" openDelay={100} closeDelay={150}>
+            {!isMobile && themeAndLocaleControls}
+            <Menu shadow="md" width={isMobile ? 260 : 200} position="bottom-end" trigger={isMobile ? 'click' : 'hover'} openDelay={100} closeDelay={150}>
             <Menu.Target>
               <UnstyledButton style={{ cursor: 'pointer' }}>
                 <Group gap="xs">
@@ -155,6 +162,14 @@ function AppShellWithNav() {
               </UnstyledButton>
             </Menu.Target>
             <Menu.Dropdown>
+              {isMobile && (
+                <>
+                  <Stack gap="xs" p="xs">
+                    {themeAndLocaleControls}
+                  </Stack>
+                  <Menu.Divider />
+                </>
+              )}
               <Menu.Item component="a" href="/account/profile">
                 {t('myProfile')}
               </Menu.Item>

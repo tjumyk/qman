@@ -7,6 +7,7 @@ import { setUserQuota, getErrorMessage } from '../api'
 import { useI18n } from '../i18n'
 import { BlockLimitEditor } from './BlockLimitEditor'
 import { BlockSize } from './BlockSize'
+import { INodeSize } from './INodeSize'
 import type { UserQuota, SetUserQuotaBody, DeviceDefaultQuota } from '../api/schemas'
 import { isDeviceDefaultNonEmpty } from './DefaultQuotaModal'
 
@@ -112,9 +113,16 @@ export function EditQuotaModal({
           <Text size="sm" fw={500} mb={4}>
             {t('currentUsage')}
           </Text>
-          <Text size="sm">
-            <BlockSize size={currentUsageBytes} />
-          </Text>
+          <Stack gap={4}>
+            <Text size="sm">
+              {t('blockUsage')}: <BlockSize size={currentUsageBytes} />
+            </Text>
+            {!isSingleLimitFormat && (
+              <Text size="sm">
+                {t('inodeUsage')}: <INodeSize size={quota.inode_current} />
+              </Text>
+            )}
+          </Stack>
         </Box>
 
         {isDeviceDefaultNonEmpty(deviceDefault) && (
@@ -150,6 +158,7 @@ export function EditQuotaModal({
               }}
               currentUsage1k={currentUsage1k}
               showPresets
+              selectComboboxProps={{ withinPortal: !isMobile }}
             />
           </div>
         ) : (
@@ -163,6 +172,7 @@ export function EditQuotaModal({
                 onChange={setBlockSoft}
                 currentUsage1k={currentUsage1k}
                 showPresets
+                selectComboboxProps={{ withinPortal: !isMobile }}
               />
             </div>
             <div>
@@ -174,6 +184,7 @@ export function EditQuotaModal({
                 onChange={setBlockHard}
                 currentUsage1k={currentUsage1k}
                 showPresets
+                selectComboboxProps={{ withinPortal: !isMobile }}
               />
             </div>
             <NumberInput

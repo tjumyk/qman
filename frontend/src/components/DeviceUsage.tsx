@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Stack, Text, Progress, Group, Badge, Box, Tooltip } from '@mantine/core'
+import { useMediaQuery } from '@mantine/hooks'
 import { BlockSize } from './BlockSize'
 import { useI18n } from '../i18n'
 import type { DiskUsage, UserQuota } from '../api/schemas'
@@ -40,6 +41,7 @@ interface DeviceUsageProps {
 
 export function DeviceUsage({ usage, userQuotas, quotaFormat }: DeviceUsageProps) {
   const { t } = useI18n()
+  const isMobile = useMediaQuery('(max-width: 36em)')
   const otherLabel = t('otherUsageLabel')
   const { used, total, free: userFree } = usage
   const physicalFree = total - used
@@ -159,14 +161,27 @@ export function DeviceUsage({ usage, userQuotas, quotaFormat }: DeviceUsageProps
     badge?: ReactNode
   }) => (
     <Stack gap={4} style={{ width: '100%' }}>
-      <Box style={{ display: 'flex', alignItems: 'center', gap: labelBarGap }}>
-        <Text size="sm" fw={500} style={{ width: labelWidth, flexShrink: 0 }}>{label}</Text>
-        <Box style={{ flex: 1, minWidth: 0 }}>{bar}</Box>
-      </Box>
-      <Box style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: barStartOffset }}>
-        <Text size="xs" c="dimmed">{summary}</Text>
-        {badge}
-      </Box>
+      {isMobile ? (
+        <>
+          <Text size="sm" fw={500}>{label}</Text>
+          <Box style={{ width: '100%', minWidth: 0 }}>{bar}</Box>
+          <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Text size="xs" c="dimmed">{summary}</Text>
+            {badge}
+          </Box>
+        </>
+      ) : (
+        <>
+          <Box style={{ display: 'flex', alignItems: 'center', gap: labelBarGap }}>
+            <Text size="sm" fw={500} style={{ width: labelWidth, flexShrink: 0 }}>{label}</Text>
+            <Box style={{ flex: 1, minWidth: 0 }}>{bar}</Box>
+          </Box>
+          <Box style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: barStartOffset }}>
+            <Text size="xs" c="dimmed">{summary}</Text>
+            {badge}
+          </Box>
+        </>
+      )}
     </Stack>
   )
 
@@ -254,7 +269,7 @@ export function DeviceUsage({ usage, userQuotas, quotaFormat }: DeviceUsageProps
         badge={overSoldHard ? <Badge size="xs" color="red" variant="light">{t('overSoldLabel')}</Badge> : <Badge size="xs" color="green" variant="light">{t('freeSpaceLabel')}</Badge>}
       />
 
-      <Group gap="md" wrap="wrap" style={{ paddingLeft: barStartOffset }}>
+      <Group gap="md" wrap="wrap" style={{ paddingLeft: isMobile ? 0 : barStartOffset }}>
         {rootReserved > 0 && (
           <Group gap={4}>
             <Box w={8} h={8} style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-yellow-5)' }} />

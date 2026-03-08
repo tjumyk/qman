@@ -10,6 +10,8 @@ interface BlockLimitEditorProps {
   currentUsage1k?: number
   /** Show preset buttons (default: false) */
   showPresets?: boolean
+  /** Pass to the unit Select's combobox (e.g. withinPortal: false when inside a fullscreen modal on mobile) */
+  selectComboboxProps?: { withinPortal?: boolean }
 }
 
 const units = ['KB', 'MB', 'GB', 'TB']
@@ -55,7 +57,7 @@ function ceilingToSensibleUnit(blocks1k: number): number {
   return Math.ceil(blocks1k / mult) * mult
 }
 
-export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets }: BlockLimitEditorProps) {
+export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets, selectComboboxProps }: BlockLimitEditorProps) {
   const { t } = useI18n()
   const [num, setNum] = useState(() => toValueAndUnit(value).value)
   const [unit, setUnit] = useState(() => toValueAndUnit(value).unitIndex)
@@ -162,6 +164,7 @@ export function BlockLimitEditor({ value, onChange, currentUsage1k, showPresets 
           value={String(unit)}
           onChange={(val) => val != null && handleUnitChange(parseInt(val, 10))}
           style={{ width: 70 }}
+          comboboxProps={selectComboboxProps}
         />
       </Group>
       {presets}

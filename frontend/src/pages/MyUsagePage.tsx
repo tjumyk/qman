@@ -11,16 +11,15 @@ import {
   Group,
   SimpleGrid,
   Title,
-  Tooltip,
 } from '@mantine/core'
-import { IconChartBar, IconHelp } from '@tabler/icons-react'
+import { IconChartBar } from '@tabler/icons-react'
 import { Link } from 'react-router-dom'
 import { Anchor } from '@mantine/core'
 import { fetchMeMappings, fetchMeQuotas } from '../api'
 import { useI18n } from '../i18n'
 import { BlockSize } from '../components/BlockSize'
-import { GraceEndRelative } from '../components/GraceEndRelative'
 import { INodeSize } from '../components/INodeSize'
+import { QuotaGraceDisplay } from '../components/QuotaGraceDisplay'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
 
@@ -83,19 +82,6 @@ function QuotaCard({
   const inodeLimit = quota.inode_hard_limit > 0 ? quota.inode_hard_limit : quota.inode_soft_limit
   const inodePct = inodeLimit > 0 ? Math.min(100, (quota.inode_current / inodeLimit) * 100) : 0
 
-  const overBlockSoft =
-    !reduced &&
-    quota.block_soft_limit > 0 &&
-    quota.block_current >= quota.block_soft_limit * 1024
-  const overInodeSoft =
-    !reduced && quota.inode_soft_limit > 0 && quota.inode_current >= quota.inode_soft_limit
-  const showPerUserGrace =
-    !reduced &&
-    (quota.block_time_limit > 0 ||
-      quota.inode_time_limit > 0 ||
-      overBlockSoft ||
-      overInodeSoft)
-
   return (
     <Card shadow="sm" padding="sm" radius="md" withBorder>
       <Stack gap="xs">
@@ -146,64 +132,7 @@ function QuotaCard({
               </Text>
             </div>
           )}
-          {showPerUserGrace && (
-            <Group gap="sm" wrap="wrap" mt={4}>
-              {(quota.block_time_limit > 0 || overBlockSoft) && (
-                <Group gap={4} wrap="nowrap" align="center">
-                  <Text size="xs" span>
-                    <Text component="span" c="dimmed" inherit>
-                      {t('blockGrace')}:
-                    </Text>{' '}
-                    {quota.block_time_limit > 0 ? (
-                      <Text component="span" c="yellow" fw={600} inherit>
-                        <GraceEndRelative time={quota.block_time_limit} />
-                      </Text>
-                    ) : (
-                      <Text component="span" c="red" fw={600} inherit>
-                        {t('graceExpired')}
-                      </Text>
-                    )}
-                  </Text>
-                  <Tooltip
-                    label={t(quota.block_time_limit > 0 ? 'graceTooltipActive' : 'graceTooltipExpired')}
-                    withArrow
-                    openDelay={300}
-                  >
-                    <Group gap={0} style={{ cursor: 'help' }} component="span" display="inline-flex">
-                      <IconHelp size={14} style={{ opacity: 0.7 }} />
-                    </Group>
-                  </Tooltip>
-                </Group>
-              )}
-              {(quota.inode_time_limit > 0 || overInodeSoft) && (
-                <Group gap={4} wrap="nowrap" align="center">
-                  <Text size="xs" span>
-                    <Text component="span" c="dimmed" inherit>
-                      {t('inodeGrace')}:
-                    </Text>{' '}
-                    {quota.inode_time_limit > 0 ? (
-                      <Text component="span" c="yellow" fw={600} inherit>
-                        <GraceEndRelative time={quota.inode_time_limit} />
-                      </Text>
-                    ) : (
-                      <Text component="span" c="red" fw={600} inherit>
-                        {t('graceExpired')}
-                      </Text>
-                    )}
-                  </Text>
-                  <Tooltip
-                    label={t(quota.inode_time_limit > 0 ? 'graceTooltipActive' : 'graceTooltipExpired')}
-                    withArrow
-                    openDelay={300}
-                  >
-                    <Group gap={0} style={{ cursor: 'help' }} component="span" display="inline-flex">
-                      <IconHelp size={14} style={{ opacity: 0.7 }} />
-                    </Group>
-                  </Tooltip>
-                </Group>
-              )}
-            </Group>
-          )}
+          <QuotaGraceDisplay quota={quota} showTooltips/>
         </Stack>
       </Stack>
     </Card>

@@ -557,6 +557,7 @@ export function AdminMappingsPage() {
               placeholder={oauthUsersLoading ? t('loading') : t('loadOAuthUsersFirst')}
               disabled={!oauthUsers?.length}
               style={{ flex: 1 }}
+              comboboxProps={{ withinPortal: !isMobile }}
             />
             <Button
               variant="subtle"
@@ -577,12 +578,14 @@ export function AdminMappingsPage() {
               setSelectedHostUserName(null)
             }}
             placeholder={t('selectHost')}
+            comboboxProps={{ withinPortal: !isMobile }}
           />
           <Select
             label={t('hostUser')}
             data={hostUserOptions}
             value={selectedHostUserName}
             onChange={setSelectedHostUserName}
+            comboboxProps={{ withinPortal: !isMobile }}
             placeholder={
               selectedHostId
                 ? hostUsersForHostLoading

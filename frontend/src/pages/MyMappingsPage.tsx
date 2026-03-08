@@ -186,12 +186,14 @@ export function MyMappingsPage() {
               setSelectedHostUserName(null)
             }}
             placeholder={t('selectHost')}
+            comboboxProps={{ withinPortal: !isMobile }}
           />
           <Select
             label={t('hostUser')}
             data={hostUserOptions}
             value={selectedHostUserName}
             onChange={setSelectedHostUserName}
+            comboboxProps={{ withinPortal: !isMobile }}
             placeholder={
               selectedHostId
                 ? hostUsersLoading

@@ -245,10 +245,14 @@ export function BatchQuotaModal({
                 <Text size="sm" fw={500} mb={4}>
                   {t('quotaLimit')}
                 </Text>
-                <BlockLimitEditor value={blockHard} onChange={(v) => {
-                  setBlockHard(v)
-                  setBlockSoft(v)
-                }} />
+                <BlockLimitEditor
+                  value={blockHard}
+                  onChange={(v) => {
+                    setBlockHard(v)
+                    setBlockSoft(v)
+                  }}
+                  selectComboboxProps={{ withinPortal: !isMobile }}
+                />
               </div>
             ) : (
               <>
@@ -256,13 +260,21 @@ export function BatchQuotaModal({
                   <Text size="sm" fw={500} mb={4}>
                     {t('blockSoftLimit1k')}
                   </Text>
-                  <BlockLimitEditor value={blockSoft} onChange={setBlockSoft} />
+                  <BlockLimitEditor
+                  value={blockSoft}
+                  onChange={setBlockSoft}
+                  selectComboboxProps={{ withinPortal: !isMobile }}
+                />
                 </div>
                 <div>
                   <Text size="sm" fw={500} mb={4}>
                     {t('blockHardLimit1k')}
                   </Text>
-                  <BlockLimitEditor value={blockHard} onChange={setBlockHard} />
+                  <BlockLimitEditor
+                  value={blockHard}
+                  onChange={setBlockHard}
+                  selectComboboxProps={{ withinPortal: !isMobile }}
+                />
                 </div>
                 <NumberInput
                   label={t('inodeSoftLimit')}
