@@ -78,7 +78,7 @@ export function QuotaGraceDisplay({
     )
 
   return (
-    <Group gap={0} wrap="wrap">
+    <Group gap="xs" wrap="wrap">
       {blockGraceVisible && wrapWithTooltip(blockGraceContent, quota.block_time_limit > 0)}
       {inodeGraceVisible && wrapWithTooltip(inodeGraceContent, quota.inode_time_limit > 0)}
     </Group>
