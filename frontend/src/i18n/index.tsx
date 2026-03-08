@@ -39,8 +39,8 @@ const translations: Record<Locale, Record<string, string>> = {
     admin: 'admin',
     // Status
     statusOk: 'OK',
-    statusNearLimit: 'Near limit',
-    statusOverLimit: 'Over limit',
+    statusOverSoftLimit: 'Over soft limit',
+    statusOverHardLimit: 'Over hard limit',
     online: 'Online',
     offline: 'Offline',
     // Errors & loading
@@ -288,8 +288,8 @@ const translations: Record<Locale, Record<string, string>> = {
     langZh: '中文',
     admin: '管理员',
     statusOk: '正常',
-    statusNearLimit: '接近限制',
-    statusOverLimit: '超出限制',
+    statusOverSoftLimit: '超过软限',
+    statusOverHardLimit: '超过硬限',
     online: '在线',
     offline: '离线',
     error: '错误',

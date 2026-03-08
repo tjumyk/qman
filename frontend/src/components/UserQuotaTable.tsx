@@ -292,8 +292,8 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
           clearable
           data={[
             { value: 'ok', label: t('statusOk') },
-            { value: 'warning', label: t('statusNearLimit') },
-            { value: 'over', label: t('statusOverLimit') },
+            { value: 'warning', label: t('statusOverSoftLimit') },
+            { value: 'over', label: t('statusOverHardLimit') },
           ]}
           value={statusFilter}
           onChange={(v) => setStatusFilter(v as QuotaStatus[])}

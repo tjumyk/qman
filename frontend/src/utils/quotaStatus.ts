@@ -30,22 +30,10 @@ export function getQuotaStatusColor(status: QuotaStatus): string {
 export function getQuotaStatusLabelKey(status: QuotaStatus): string {
   switch (status) {
     case 'over':
-      return 'statusOverLimit'
+      return 'statusOverHardLimit'
     case 'warning':
-      return 'statusNearLimit'
+      return 'statusOverSoftLimit'
     default:
       return 'statusOk'
-  }
-}
-
-/** @deprecated Use getQuotaStatusLabelKey(status) with t() for translated label. */
-export function getQuotaStatusLabel(status: QuotaStatus): string {
-  switch (status) {
-    case 'over':
-      return 'Over limit'
-    case 'warning':
-      return 'Near limit'
-    default:
-      return 'OK'
   }
 }
