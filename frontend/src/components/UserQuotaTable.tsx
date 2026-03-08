@@ -351,6 +351,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                       <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
                         {t(getQuotaStatusLabelKey(status))}
                       </Badge>
+                      <QuotaGraceDisplay quota={q} />
                     </Stack>
                     <Button size="xs" variant="light" onClick={() => setEditQuota(q)}>
                       {t('edit')}
