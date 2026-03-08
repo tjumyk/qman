@@ -297,8 +297,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
           ]}
           value={statusFilter}
           onChange={(v) => setStatusFilter(v as QuotaStatus[])}
-          style={{ minWidth: 160 }}
-          w={{ base: '100%', sm: undefined }}
+          w={{ base: '100%', sm: 200 }}
         />
         <Button
           leftSection={<IconPlus size={16} />}
@@ -351,7 +350,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                       <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
                         {t(getQuotaStatusLabelKey(status))}
                       </Badge>
-                      <QuotaGraceDisplay quota={q} />
+                      {!isReducedColumns && <QuotaGraceDisplay quota={q} />}
                     </Stack>
                     <Button size="xs" variant="light" onClick={() => setEditQuota(q)}>
                       {t('edit')}
@@ -587,7 +586,7 @@ export function UserQuotaTable({ hostId, device }: UserQuotaTableProps) {
                           <Badge size="sm" color={getQuotaStatusColor(status)} variant="light">
                             {t(getQuotaStatusLabelKey(status))}
                           </Badge>
-                          <QuotaGraceDisplay quota={q} />
+                          {!isReducedColumns && <QuotaGraceDisplay quota={q} />}
                         </Stack>
                       </Table.Td>
                       <Table.Td>

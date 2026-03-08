@@ -132,7 +132,7 @@ function QuotaCard({
               </Text>
             </div>
           )}
-          <QuotaGraceDisplay quota={quota} showTooltips/>
+          {!reduced && <QuotaGraceDisplay quota={quota} showTooltips/>}
         </Stack>
       </Stack>
     </Card>
