@@ -51,6 +51,9 @@ class AppConfig(BaseModel):
     NOTIFICATION_FROM: str | None = None  # From address for notification emails
     NOTIFICATION_OAUTH_ACCESS_TOKEN: str | None = None  # Optional: token to resolve oauth user -> email (server-side)
     SLAVE_EVENT_SECRET: str | None = None  # Master: secret for POST /api/internal/slave-events (X-API-Key)
+    QUOTA_NOTIFICATION_SCAN_INTERVAL_SECONDS: int | None = None  # Celery beat interval for scan_disk_quota_notifications (default 3600)
+    QUOTA_NOTIFICATION_GRACE_ALERT_WINDOW_SECONDS: int | None = None  # Window before grace end to alert (default 86400)
+    QUOTA_NOTIFICATION_DEDUPE_WINDOW_SECONDS: int | None = None  # Master: dedupe window for identical state notifications (default 86400)
 
 
 # --- API: Error ---

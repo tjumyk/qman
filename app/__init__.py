@@ -77,6 +77,12 @@ def create_app(config_path: str | None = None) -> Flask:
     if config.MASTER_EVENT_CALLBACK_SECRET is not None:
         app.config["MASTER_EVENT_CALLBACK_SECRET"] = config.MASTER_EVENT_CALLBACK_SECRET
     # Notifications (master)
+    if config.QUOTA_NOTIFICATION_SCAN_INTERVAL_SECONDS is not None:
+        app.config["QUOTA_NOTIFICATION_SCAN_INTERVAL_SECONDS"] = config.QUOTA_NOTIFICATION_SCAN_INTERVAL_SECONDS
+    if config.QUOTA_NOTIFICATION_GRACE_ALERT_WINDOW_SECONDS is not None:
+        app.config["QUOTA_NOTIFICATION_GRACE_ALERT_WINDOW_SECONDS"] = config.QUOTA_NOTIFICATION_GRACE_ALERT_WINDOW_SECONDS
+    if config.QUOTA_NOTIFICATION_DEDUPE_WINDOW_SECONDS is not None:
+        app.config["QUOTA_NOTIFICATION_DEDUPE_WINDOW_SECONDS"] = config.QUOTA_NOTIFICATION_DEDUPE_WINDOW_SECONDS
     if config.SMTP_HOST is not None:
         app.config["SMTP_HOST"] = config.SMTP_HOST
     if config.SMTP_PORT is not None:

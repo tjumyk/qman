@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models (minimal schema for project rules)."""
 
 from datetime import datetime
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Integer, String, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -151,3 +151,84 @@ class DeviceDefaultQuota(Base):
     inode_soft_limit: Mapped[int] = mapped_column(Integer, default=0)
     inode_hard_limit: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class NotificationEmailLog(Base):
+    """Log of quota-related notification emails sent (or attempted) by the master."""
+
+    __tablename__ = "notification_email_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    host_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    host_user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quota_type: Mapped[str] = mapped_column(String(32), default="unknown")
+
+    event_type: Mapped[str] = mapped_column(String(64))
+
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    body_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    send_status: Mapped[str] = mapped_column(String(32), default="pending")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    dedupe_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Optional identifier to link multiple log rows that were sent in a single
+    # batched email (e.g. multiple disk quota events combined into one message).
+    batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Full HTML body of the email (optional, for detailed inspection in admin UI).
+    body_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DiskQuotaNotificationState(Base):
+    """Last known quota notification state per user/device on a slave."""
+
+    __tablename__ = "disk_quota_notification_state"
+
+    device_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    uid: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    last_status: Mapped[str] = mapped_column(String(32))
+    last_block_time_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_inode_time_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class NotificationEvent(Base):
+    """Generic quota/Docker event received from slaves.
+
+    Represents a single logical event (disk or Docker). Email sending is tracked
+    separately via NotificationEmailLog, and events may or may not be linked to
+    an email log row.
+    """
+
+    __tablename__ = "notification_event"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    host_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    host_user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quota_type: Mapped[str] = mapped_column(String(32), default="unknown")
+
+    event_type: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Normalized state identifier used for throttling (e.g. disk/docker + host/user/device + state category).
+    state_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Optional link to the email log row that included this event (if any).
+    email_log_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("notification_email_log.id"), nullable=True)

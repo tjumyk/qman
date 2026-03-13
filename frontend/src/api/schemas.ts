@@ -216,3 +216,69 @@ export const dockerVolumesResponseSchema = z.object({
   unattributed_bytes: z.number(),
 })
 export type DockerVolumesResponse = z.infer<typeof dockerVolumesResponseSchema>
+
+// Notification center
+export const notificationLogEntrySchema = z.object({
+  id: z.number(),
+  created_at: z.string().nullable(),
+  oauth_user_id: z.number().nullable(),
+  email: z.string().nullable(),
+  host_id: z.string().nullable(),
+  host_user_name: z.string().nullable(),
+  device_name: z.string().nullable(),
+  quota_type: z.string(),
+  event_type: z.string(),
+  subject: z.string().nullable(),
+  send_status: z.string(),
+  error_message: z.string().nullable(),
+  batch_id: z.string().nullable(),
+  // Detailed view may include associated events; keep shape loose here and model
+  // the richer structure separately in the page component when needed.
+})
+export type NotificationLogEntry = z.infer<typeof notificationLogEntrySchema>
+
+export const notificationEventSchema = z.object({
+  id: z.number(),
+  created_at: z.string().nullable(),
+  oauth_user_id: z.number().nullable(),
+  email: z.string().nullable(),
+  host_id: z.string().nullable(),
+  host_user_name: z.string().nullable(),
+  device_name: z.string().nullable(),
+  quota_type: z.string(),
+  event_type: z.string(),
+  payload: z.string().nullable(),
+  state_key: z.string().nullable(),
+})
+export type NotificationEvent = z.infer<typeof notificationEventSchema>
+
+export const notificationDetailSchema = z.object({
+  id: z.number(),
+  created_at: z.string().nullable(),
+  updated_at: z.string().nullable(),
+  oauth_user_id: z.number().nullable(),
+  email: z.string().nullable(),
+  host_id: z.string().nullable(),
+  host_user_name: z.string().nullable(),
+  device_name: z.string().nullable(),
+  quota_type: z.string(),
+  event_type: z.string(),
+  subject: z.string().nullable(),
+  body_preview: z.string().nullable(),
+  body_html: z.string().nullable(),
+  send_status: z.string(),
+  error_message: z.string().nullable(),
+  dedupe_key: z.string().nullable(),
+  last_state: z.string().nullable(),
+  batch_id: z.string().nullable(),
+  events: z.array(notificationEventSchema),
+})
+export type NotificationDetail = z.infer<typeof notificationDetailSchema>
+
+export const notificationLogListResponseSchema = z.object({
+  items: z.array(notificationLogEntrySchema),
+  total: z.number(),
+  page: z.number(),
+  page_size: z.number(),
+})
+export type NotificationLogListResponse = z.infer<typeof notificationLogListResponseSchema>

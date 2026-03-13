@@ -11,6 +11,8 @@ import {
   dockerVolumesResponseSchema,
   batchQuotaResultSchema,
   deviceDefaultQuotaSchema,
+  notificationLogListResponseSchema,
+  notificationDetailSchema,
 } from './schemas'
 import type {
   Me,
@@ -26,6 +28,8 @@ import type {
   BatchQuotaResult,
   DeviceDefaultQuota,
   SetDeviceDefaultQuotaBody,
+  NotificationLogListResponse,
+  NotificationDetail,
 } from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
@@ -305,4 +309,38 @@ export async function fetchDockerVolumes(hostId: string): Promise<DockerVolumesR
     { timeout: TIMEOUT_QUOTA }
   )
   return dockerVolumesResponseSchema.parse(data)
+}
+
+export async function fetchAdminNotifications(
+  params: {
+    page?: number
+    pageSize?: number
+    hostId?: string
+    deviceName?: string
+    oauthUserId?: number
+    email?: string
+    eventType?: string
+    sendStatus?: string
+    batchId?: string
+  } = {}
+): Promise<NotificationLogListResponse> {
+  const search = new URLSearchParams()
+  if (params.page && params.page > 1) search.set('page', String(params.page))
+  if (params.pageSize) search.set('page_size', String(params.pageSize))
+  if (params.hostId) search.set('host_id', params.hostId)
+  if (params.deviceName) search.set('device_name', params.deviceName)
+  if (typeof params.oauthUserId === 'number') search.set('oauth_user_id', String(params.oauthUserId))
+  if (params.email) search.set('email', params.email)
+  if (params.eventType) search.set('event_type', params.eventType)
+  if (params.sendStatus) search.set('send_status', params.sendStatus)
+  if (params.batchId) search.set('batch_id', params.batchId)
+  const qs = search.toString()
+  const url = qs ? `admin/notifications?${qs}` : 'admin/notifications'
+  const { data } = await api.get<unknown>(url)
+  return notificationLogListResponseSchema.parse(data)
+}
+
+export async function fetchAdminNotificationDetail(id: number): Promise<NotificationDetail> {
+  const { data } = await api.get<unknown>(`admin/notifications/${id}`)
+  return notificationDetailSchema.parse(data)
 }

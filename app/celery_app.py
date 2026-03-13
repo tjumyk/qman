@@ -11,6 +11,7 @@ _DEFAULT_ENFORCE_INTERVAL = 300.0  # 5 minutes - quota enforcement
 _DEFAULT_SYNC_INTERVAL = 600.0  # 10 minutes - attribution sync (audit logs, Docker events, images, volumes)
 _DEFAULT_VOLUME_ACTUAL_DISK_INTERVAL = 600.0  # 10 minutes - actual disk usage scan (du)
 _DEFAULT_QUOTA_DEFAULT_APPLY_INTERVAL = 600.0  # 10 minutes - apply default user quota to empty-limit users
+_DEFAULT_QUOTA_NOTIFICATION_SCAN_INTERVAL = 3600.0  # 60 minutes - disk quota notification scan
 
 
 def make_celery(app=None) -> Celery:
@@ -36,6 +37,12 @@ def make_celery(app=None) -> Celery:
         sync_interval = float(app.config.get("DOCKER_QUOTA_SYNC_INTERVAL_SECONDS", _DEFAULT_SYNC_INTERVAL))
         volume_actual_disk_interval = float(app.config.get("DOCKER_VOLUME_ACTUAL_DISK_SYNC_INTERVAL_SECONDS", _DEFAULT_VOLUME_ACTUAL_DISK_INTERVAL))
         quota_default_apply_interval = float(app.config.get("QUOTA_DEFAULT_APPLY_INTERVAL_SECONDS", _DEFAULT_QUOTA_DEFAULT_APPLY_INTERVAL))
+        quota_notification_interval = float(
+            app.config.get(
+                "QUOTA_NOTIFICATION_SCAN_INTERVAL_SECONDS",
+                _DEFAULT_QUOTA_NOTIFICATION_SCAN_INTERVAL,
+            )
+        )
         celery_app.conf.beat_schedule = {
             "enforce-docker-quota-periodic": {
                 "task": "app.tasks.docker_quota_tasks.enforce_docker_quota",
@@ -57,6 +64,11 @@ def make_celery(app=None) -> Celery:
                 "schedule": schedule(run_every=quota_default_apply_interval),
                 "options": {"queue": "qman.docker"},
             },
+            "scan-disk-quota-notifications-periodic": {
+                "task": "app.tasks.quota_notification_tasks.scan_disk_quota_notifications",
+                "schedule": schedule(run_every=quota_notification_interval),
+                "options": {"queue": "qman.docker"},
+            },
         }
     else:
         import json
@@ -68,6 +80,7 @@ def make_celery(app=None) -> Celery:
         sync_interval = _DEFAULT_SYNC_INTERVAL
         volume_actual_disk_interval = _DEFAULT_VOLUME_ACTUAL_DISK_INTERVAL
         quota_default_apply_interval = _DEFAULT_QUOTA_DEFAULT_APPLY_INTERVAL
+        quota_notification_interval = _DEFAULT_QUOTA_NOTIFICATION_SCAN_INTERVAL
         config_path = os.environ.get("CONFIG_PATH", "config.json")
         if config_path and os.path.isfile(config_path):
             try:
@@ -87,6 +100,8 @@ def make_celery(app=None) -> Celery:
                     volume_actual_disk_interval = float(data["DOCKER_VOLUME_ACTUAL_DISK_SYNC_INTERVAL_SECONDS"])
                 if data.get("QUOTA_DEFAULT_APPLY_INTERVAL_SECONDS") is not None:
                     quota_default_apply_interval = float(data["QUOTA_DEFAULT_APPLY_INTERVAL_SECONDS"])
+                if data.get("QUOTA_NOTIFICATION_SCAN_INTERVAL_SECONDS") is not None:
+                    quota_notification_interval = float(data["QUOTA_NOTIFICATION_SCAN_INTERVAL_SECONDS"])
             except Exception as e:
                 logger.warning("Could not load Celery config from %s: %s", config_path, e)
         if broker_url is None:
@@ -121,6 +136,11 @@ def make_celery(app=None) -> Celery:
                 "schedule": schedule(run_every=quota_default_apply_interval),
                 "options": {"queue": "qman.docker"},
             },
+            "scan-disk-quota-notifications-periodic": {
+                "task": "app.tasks.quota_notification_tasks.scan_disk_quota_notifications",
+                "schedule": schedule(run_every=quota_notification_interval),
+                "options": {"queue": "qman.docker"},
+            },
         }
     return celery_app
 
@@ -135,6 +155,7 @@ celery_app = Celery(
     include=[
         "app.tasks.docker_quota_tasks",
         "app.tasks.quota_default_tasks",
+        "app.tasks.quota_notification_tasks",
     ],
 )
 make_celery()  # set defaults

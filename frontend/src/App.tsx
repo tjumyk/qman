@@ -17,7 +17,7 @@ import {
   useMantineColorScheme,
 } from '@mantine/core'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
-import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink, IconBell } from '@tabler/icons-react'
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useLocation, Outlet } from 'react-router-dom'
@@ -30,6 +30,7 @@ import { HostListPage } from './pages/HostListPage'
 import { HostDetailPage } from './pages/HostDetailPage'
 import { DeviceUserListPage } from './pages/DeviceUserListPage'
 import { AdminMappingsPage } from './pages/AdminMappingsPage'
+import { AdminNotificationsPage } from './pages/AdminNotificationsPage'
 import { PageBreadcrumbs } from './components/PageBreadcrumbs'
 
 function AppShellWithNav() {
@@ -215,6 +216,12 @@ function AppShellWithNav() {
                 active={location.pathname === '/manage/mappings'}
                 onClick={() => navTo('/manage/mappings')}
               />
+              <NavLink
+                leftSection={<IconBell size={18} />}
+                label={t('notificationCenter')}
+                active={location.pathname === '/manage/notifications'}
+                onClick={() => navTo('/manage/notifications')}
+              />
             </>
           )}
         </AppShell.Section>
@@ -255,6 +262,7 @@ function App() {
           <Route path="manage/hosts/:hostId" element={<HostDetailPage />} />
           <Route path="manage/hosts/:hostId/devices/:deviceName" element={<DeviceUserListPage />} />
           <Route path="manage/mappings" element={<AdminMappingsPage />} />
+          <Route path="manage/notifications" element={<AdminNotificationsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

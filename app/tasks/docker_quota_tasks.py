@@ -136,11 +136,13 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
         total_used = usage_by_uid.get(uid, 0)
         if total_used <= limit_bytes:
             continue
-        events.append({
-            "host_user_name": None,
-            "event_type": "quota_exceeded",
-            "detail": {"uid": uid, "block_current": total_used, "block_hard_limit": limit_1k},
-        })
+        events.append(
+            {
+                "host_user_name": None,
+                "event_type": "docker_quota_exceeded",
+                "detail": {"uid": uid, "block_current": total_used, "block_hard_limit": limit_1k},
+            }
+        )
         try:
             import pwd
             events[-1]["host_user_name"] = pwd.getpwuid(uid).pw_name
@@ -168,11 +170,13 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
                     new_total_used = updated_usage_by_uid.get(uid, 0)
                     total_removed += 1
                     removed.append(cid)
-                    events.append({
-                        "host_user_name": events[-1]["host_user_name"],
-                        "event_type": "container_removed",
-                        "detail": {"container_id": cid[:12], "size_bytes": size, "new_usage": new_total_used},
-                    })
+                    events.append(
+                        {
+                            "host_user_name": events[-1]["host_user_name"],
+                            "event_type": "docker_container_removed",
+                            "detail": {"container_id": cid[:12], "size_bytes": size, "new_usage": new_total_used},
+                        }
+                    )
                     logger.info(
                         "Container %s removed due to quota; uid=%s new_usage=%s (includes image layers)",
                         cid[:12], uid, new_total_used,

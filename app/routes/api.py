@@ -4,6 +4,7 @@ import re
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -771,6 +772,171 @@ def register_api_routes(app: Any) -> None:
         except Exception as e:
             return jsonify(msg=str(e)), 502
         return jsonify([{"id": u.id, "name": u.name} for u in users])
+
+    @app.route("/api/admin/notifications")
+    @oauth.requires_admin
+    def get_admin_notifications() -> tuple[Any, int] | Any:
+        """List notification email log entries for admin notification center."""
+        from app.models_db import NotificationEmailLog
+
+        db = SessionLocal()
+        try:
+            # Basic pagination
+            try:
+                page = int(request.args.get("page", "1"))
+            except ValueError:
+                page = 1
+            try:
+                page_size = int(request.args.get("page_size", "50"))
+            except ValueError:
+                page_size = 50
+            page = max(page, 1)
+            page_size = max(min(page_size, 200), 1)
+            offset = (page - 1) * page_size
+
+            q = db.query(NotificationEmailLog)
+
+            host_id = request.args.get("host_id")
+            if host_id:
+                q = q.filter(NotificationEmailLog.host_id == host_id)
+
+            device_name = request.args.get("device_name")
+            if device_name:
+                q = q.filter(NotificationEmailLog.device_name == device_name)
+
+            oauth_user_id = request.args.get("oauth_user_id")
+            if oauth_user_id:
+                try:
+                    oauth_user_id_int = int(oauth_user_id)
+                    q = q.filter(NotificationEmailLog.oauth_user_id == oauth_user_id_int)
+                except ValueError:
+                    pass
+
+            email = request.args.get("email")
+            if email:
+                q = q.filter(NotificationEmailLog.email == email)
+
+            event_type = request.args.get("event_type")
+            if event_type:
+                q = q.filter(NotificationEmailLog.event_type == event_type)
+
+            send_status = request.args.get("send_status")
+            if send_status:
+                q = q.filter(NotificationEmailLog.send_status == send_status)
+
+            batch_id = request.args.get("batch_id")
+            if batch_id:
+                q = q.filter(NotificationEmailLog.batch_id == batch_id)
+
+            # Time range filters (ISO8601 strings)
+            created_from = request.args.get("from")
+            created_to = request.args.get("to")
+            if created_from:
+                try:
+                    dt_from = datetime.fromisoformat(created_from)
+                    q = q.filter(NotificationEmailLog.created_at >= dt_from)
+                except ValueError:
+                    pass
+            if created_to:
+                try:
+                    dt_to = datetime.fromisoformat(created_to)
+                    q = q.filter(NotificationEmailLog.created_at <= dt_to)
+                except ValueError:
+                    pass
+
+            total = q.count()
+            rows = (
+                q.order_by(NotificationEmailLog.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+                .all()
+            )
+
+            items: list[dict[str, Any]] = []
+            for r in rows:
+                items.append(
+                    {
+                        "id": r.id,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "oauth_user_id": r.oauth_user_id,
+                        "email": r.email,
+                        "host_id": r.host_id,
+                        "host_user_name": r.host_user_name,
+                        "device_name": r.device_name,
+                        "quota_type": r.quota_type,
+                        "event_type": r.event_type,
+                        "subject": r.subject,
+                        "send_status": r.send_status,
+                        "error_message": r.error_message,
+                        "batch_id": r.batch_id,
+                    }
+                )
+            return jsonify({"items": items, "total": total, "page": page, "page_size": page_size})
+        finally:
+            db.close()
+
+    @app.route("/api/admin/notifications/<int:log_id>")
+    @oauth.requires_admin
+    def get_admin_notification_detail(log_id: int) -> tuple[Any, int] | Any:
+        """Get full detail for a single notification log entry."""
+        from app.models_db import NotificationEmailLog, NotificationEvent
+
+        db = SessionLocal()
+        try:
+            row = db.query(NotificationEmailLog).filter(NotificationEmailLog.id == log_id).first()
+            if not row:
+                return jsonify(msg="notification not found"), 404
+
+            events = (
+                db.query(NotificationEvent)
+                .filter(NotificationEvent.email_log_id == row.id)
+                .order_by(NotificationEvent.created_at.asc())
+                .all()
+            )
+
+            events_payload: list[dict[str, Any]] = []
+            for ev in events:
+                events_payload.append(
+                    {
+                        "id": ev.id,
+                        "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                        "oauth_user_id": ev.oauth_user_id,
+                        "email": ev.email,
+                        "host_id": ev.host_id,
+                        "host_user_name": ev.host_user_name,
+                        "device_name": ev.device_name,
+                        "quota_type": ev.quota_type,
+                        "event_type": ev.event_type,
+                        "payload": ev.payload,
+                        "state_key": ev.state_key,
+                    }
+                )
+
+            return jsonify(
+                {
+                    "id": row.id,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                    "oauth_user_id": row.oauth_user_id,
+                    "email": row.email,
+                    "host_id": row.host_id,
+                    "host_user_name": row.host_user_name,
+                    "device_name": row.device_name,
+                    "quota_type": row.quota_type,
+                    "event_type": row.event_type,
+                    "subject": row.subject,
+                    "body_preview": row.body_preview,
+                    "body_html": row.body_html,
+                    "send_status": row.send_status,
+                    "error_message": row.error_message,
+                    "dedupe_key": row.dedupe_key,
+                    "last_state": row.last_state,
+                    "batch_id": row.batch_id,
+                    "events": events_payload,
+                }
+            )
+        finally:
+            db.close()
 
     @app.route("/api/quotas/<string:slave_id>/docker/containers")
     @oauth.requires_admin

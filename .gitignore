@@ -12,3 +12,4 @@ __pycache__/
 qman.sqlite
 
 /*.log
+/tmp-email-previews/
