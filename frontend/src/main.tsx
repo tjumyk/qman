@@ -27,10 +27,17 @@ const queryClient = new QueryClient({
 })
 
 async function loadShiki() {
-  const { createHighlighter } = await import('shiki')
-  const highlighter = await createHighlighter({
-    langs: ['json'],
-    themes: [],
+  const { createHighlighterCore } = await import('shiki/core')
+  const { createJavaScriptRegexEngine } = await import('shiki/engine/javascript')
+  const [{ default: jsonLang }, { default: githubDark }] = await Promise.all([
+    import('@shikijs/langs/json'),
+    import('@shikijs/themes/github-dark'),
+  ])
+
+  const highlighter = await createHighlighterCore({
+    langs: [jsonLang],
+    themes: [githubDark],
+    engine: createJavaScriptRegexEngine(),
   })
 
   return highlighter
