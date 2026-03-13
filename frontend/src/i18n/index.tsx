@@ -287,7 +287,6 @@ const translations: Record<Locale, Record<string, string>> = {
     bodyPreview: 'Body preview',
     payloadJson: 'Payload JSON',
     time: 'Time',
-    hostUser: 'Host user',
   },
   'zh-Hans': {
     appTitle: 'DQMS',
@@ -548,7 +547,6 @@ const translations: Record<Locale, Record<string, string>> = {
     bodyPreview: '邮件内容预览',
     payloadJson: 'Payload JSON',
     time: '时间',
-    hostUser: '主机用户',
   },
 }
 
