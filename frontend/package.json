@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
+    "@mantine/code-highlight": "^8.3.14",
     "@mantine/core": "^8.3.14",
     "@mantine/hooks": "^8.3.14",
     "@mantine/notifications": "^8.3.14",
@@ -25,6 +26,7 @@
     "react-dom": "^19.2.0",
     "react-redux": "^9.2.0",
     "react-router-dom": "^7.13.0",
+    "shiki": "^4.0.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

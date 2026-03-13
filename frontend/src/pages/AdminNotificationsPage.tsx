@@ -1,7 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Stack, Text, Loader, Alert, Group, Card, Table, ScrollArea, Badge, Select, TextInput, Pagination, Modal, Box } from '@mantine/core'
+import { CodeHighlight } from '@mantine/code-highlight'
 import { IconBell } from '@tabler/icons-react'
 import { useState } from 'react'
+import { useDebouncedValue } from '@mantine/hooks'
 import DOMPurify from 'dompurify'
 import { fetchAdminNotifications, fetchAdminNotificationDetail } from '../api'
 import type { NotificationLogEntry, NotificationDetail, NotificationLogListResponse } from '../api/schemas'
@@ -10,10 +12,13 @@ import { useI18n } from '../i18n'
 export function AdminNotificationsPage() {
   const { t } = useI18n()
   const [page, setPage] = useState(1)
-  const [hostFilter, setHostFilter] = useState('')
-  const [emailFilter, setEmailFilter] = useState('')
+  const [hostFilterInput, setHostFilterInput] = useState('')
+  const [emailFilterInput, setEmailFilterInput] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [selected, setSelected] = useState<NotificationLogEntry | null>(null)
+
+  const [hostFilter] = useDebouncedValue(hostFilterInput, 300)
+  const [emailFilter] = useDebouncedValue(emailFilterInput, 300)
 
   const { data: detail } = useQuery<NotificationDetail>({
     queryKey: ['admin-notification-detail', selected?.id],
@@ -31,7 +36,15 @@ export function AdminNotificationsPage() {
         email: emailFilter.trim() || undefined,
         sendStatus: statusFilter || undefined,
       }),
+    placeholderData: keepPreviousData,
   })
+
+  const formatDateTime = (value: string | null | undefined): string => {
+    if (!value) return ''
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString()
+  }
 
   if (isLoading && !data) {
     return (
@@ -70,20 +83,20 @@ export function AdminNotificationsPage() {
           <TextInput
             label={t('host')}
             placeholder={t('host')}
-            value={hostFilter}
+            value={hostFilterInput}
             onChange={(e) => {
               setPage(1)
-              setHostFilter(e.currentTarget.value)
+              setHostFilterInput(e.currentTarget.value)
             }}
             w={{ base: '100%', sm: 200 }}
           />
           <TextInput
             label={t('email')}
             placeholder={t('email')}
-            value={emailFilter}
+            value={emailFilterInput}
             onChange={(e) => {
               setPage(1)
-              setEmailFilter(e.currentTarget.value)
+              setEmailFilterInput(e.currentTarget.value)
             }}
             w={{ base: '100%', sm: 260 }}
           />
@@ -118,6 +131,7 @@ export function AdminNotificationsPage() {
                   <Table.Th>{t('time')}</Table.Th>
                   <Table.Th>{t('email')}</Table.Th>
                   <Table.Th>{t('host')}</Table.Th>
+                  <Table.Th>{t('hostUser')}</Table.Th>
                   <Table.Th>{t('eventType')}</Table.Th>
                   <Table.Th>{t('sendStatus')}</Table.Th>
                   <Table.Th>{t('subject')}</Table.Th>
@@ -126,11 +140,10 @@ export function AdminNotificationsPage() {
               <Table.Tbody>
                 {items.map((n: NotificationLogEntry) => (
                   <Table.Tr key={n.id} onClick={() => setSelected(n)} style={{ cursor: 'pointer' }}>
-                    <Table.Td>{n.created_at ?? ''}</Table.Td>
+                    <Table.Td>{formatDateTime(n.created_at)}</Table.Td>
                     <Table.Td>{n.email ?? ''}</Table.Td>
-                    <Table.Td>
-                      {n.host_id ?? ''} {n.host_user_name ? ` / ${n.host_user_name}` : ''}
-                    </Table.Td>
+                    <Table.Td>{n.host_id ?? ''}</Table.Td>
+                    <Table.Td>{n.host_user_name ?? ''}</Table.Td>
                     <Table.Td>{n.event_type}</Table.Td>
                     <Table.Td>
                       <Badge
@@ -165,14 +178,16 @@ export function AdminNotificationsPage() {
         {selected && (
           <Stack gap="sm">
             <Text size="sm">
-              <strong>{t('time')}:</strong> {selected.created_at ?? ''}
+              <strong>{t('time')}:</strong> {formatDateTime(selected.created_at)}
             </Text>
             <Text size="sm">
               <strong>{t('email')}:</strong> {selected.email ?? ''}
             </Text>
             <Text size="sm">
-              <strong>{t('host')}:</strong> {selected.host_id ?? ''}{' '}
-              {selected.host_user_name ? ` / ${selected.host_user_name}` : ''}
+              <strong>{t('host')}:</strong> {selected.host_id ?? ''}
+            </Text>
+            <Text size="sm">
+              <strong>{t('hostUser')}:</strong> {selected.host_user_name ?? ''}
             </Text>
             <Text size="sm">
               <strong>{t('eventType')}:</strong> {selected.event_type}
@@ -216,7 +231,7 @@ export function AdminNotificationsPage() {
                 {detail.events.length > 0 && (
                   <Box mt="sm">
                     <Text size="sm" fw={500} mb={4}>
-                      {t('notifications')}
+                      {t('events')}
                     </Text>
                     <ScrollArea.Autosize mah={260}>
                       <Table striped highlightOnHover withColumnBorders>
@@ -224,6 +239,7 @@ export function AdminNotificationsPage() {
                           <Table.Tr>
                             <Table.Th>{t('time')}</Table.Th>
                             <Table.Th>{t('host')}</Table.Th>
+                            <Table.Th>{t('hostUser')}</Table.Th>
                             <Table.Th>{t('eventType')}</Table.Th>
                             <Table.Th>{t('subject')}</Table.Th>
                           </Table.Tr>
@@ -231,10 +247,9 @@ export function AdminNotificationsPage() {
                         <Table.Tbody>
                           {detail.events.map((ev) => (
                             <Table.Tr key={ev.id}>
-                              <Table.Td>{ev.created_at ?? ''}</Table.Td>
-                              <Table.Td>
-                                {ev.host_id ?? ''} {ev.host_user_name ? ` / ${ev.host_user_name}` : ''}
-                              </Table.Td>
+                              <Table.Td>{formatDateTime(ev.created_at)}</Table.Td>
+                              <Table.Td>{ev.host_id ?? ''}</Table.Td>
+                              <Table.Td>{ev.host_user_name ?? ''}</Table.Td>
                               <Table.Td>{ev.event_type}</Table.Td>
                               <Table.Td>{detail.subject ?? ''}</Table.Td>
                             </Table.Tr>
@@ -250,16 +265,8 @@ export function AdminNotificationsPage() {
                       {t('payloadJson')}
                     </Text>
                     <ScrollArea.Autosize mah={260}>
-                      <Box
-                        component="pre"
-                        style={{
-                          whiteSpace: 'pre-wrap',
-                          backgroundColor: 'var(--mantine-color-default-hover)',
-                          padding: 8,
-                          borderRadius: 4,
-                        }}
-                      >
-                        {JSON.stringify(
+                      <CodeHighlight
+                        code={JSON.stringify(
                           detail.events.map((ev) => {
                             try {
                               return ev.payload ? JSON.parse(ev.payload) : null
@@ -270,7 +277,15 @@ export function AdminNotificationsPage() {
                           null,
                           2,
                         )}
-                      </Box>
+                        language="json"
+                        withCopyButton={false}
+                        styles={{
+                          code: {
+                            backgroundColor: 'var(--mantine-color-default-hover)',
+                            borderRadius: 4,
+                          },
+                        }}
+                      />
                     </ScrollArea.Autosize>
                   </Box>
                 )}

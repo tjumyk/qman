@@ -5,9 +5,11 @@ import { Notifications } from '@mantine/notifications'
 import { NavigationProgress } from '@mantine/nprogress'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Provider } from 'react-redux'
+import { CodeHighlightAdapterProvider, createShikiAdapter } from '@mantine/code-highlight'
 import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 import '@mantine/nprogress/styles.css'
+import '@mantine/code-highlight/styles.css'
 import App from './App'
 import { I18nProvider } from './i18n'
 import { store } from './store'
@@ -24,17 +26,31 @@ const queryClient = new QueryClient({
   },
 })
 
+async function loadShiki() {
+  const { createHighlighter } = await import('shiki')
+  const highlighter = await createHighlighter({
+    langs: ['json'],
+    themes: [],
+  })
+
+  return highlighter
+}
+
+const shikiAdapter = createShikiAdapter(loadShiki)
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Provider store={store}>
       <QueryClientProvider client={queryClient}>
         <MantineProvider theme={theme} defaultColorScheme="auto">
-          <I18nProvider>
-            <NavigationProgress />
-            <QueryProgressIndicator />
-            <Notifications position="top-right" />
-            <App />
-          </I18nProvider>
+          <CodeHighlightAdapterProvider adapter={shikiAdapter}>
+            <I18nProvider>
+              <NavigationProgress />
+              <QueryProgressIndicator />
+              <Notifications position="top-right" />
+              <App />
+            </I18nProvider>
+          </CodeHighlightAdapterProvider>
         </MantineProvider>
       </QueryClientProvider>
     </Provider>

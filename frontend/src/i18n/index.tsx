@@ -273,6 +273,7 @@ const translations: Record<Locale, Record<string, string>> = {
     notificationCenter: 'Notification center',
     notificationCenterDescription: 'Historical log of quota-related notification emails (success, failed, or skipped).',
     notifications: 'Notifications',
+    events: 'Events',
     eventType: 'Event type',
     sendStatus: 'Send status',
     email: 'Email',
@@ -284,7 +285,9 @@ const translations: Record<Locale, Record<string, string>> = {
     noNotifications: 'No notifications have been recorded yet.',
     failedToLoadNotifications: 'Failed to load notifications',
     bodyPreview: 'Body preview',
+    payloadJson: 'Payload JSON',
     time: 'Time',
+    hostUser: 'Host user',
   },
   'zh-Hans': {
     appTitle: 'DQMS',
@@ -531,6 +534,7 @@ const translations: Record<Locale, Record<string, string>> = {
     notificationCenter: '通知中心',
     notificationCenterDescription: '配额相关邮件通知的历史记录（成功、失败或跳过）。',
     notifications: '通知',
+    events: '事件',
     eventType: '事件类型',
     sendStatus: '发送状态',
     email: '邮箱',
@@ -542,7 +546,9 @@ const translations: Record<Locale, Record<string, string>> = {
     noNotifications: '当前没有任何通知记录。',
     failedToLoadNotifications: '加载通知记录失败',
     bodyPreview: '邮件内容预览',
+    payloadJson: 'Payload JSON',
     time: '时间',
+    hostUser: '主机用户',
   },
 }
 
