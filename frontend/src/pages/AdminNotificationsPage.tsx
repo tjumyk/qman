@@ -4,7 +4,7 @@ import { IconBell } from '@tabler/icons-react'
 import { useState } from 'react'
 import DOMPurify from 'dompurify'
 import { fetchAdminNotifications, fetchAdminNotificationDetail } from '../api'
-import type { NotificationLogEntry, NotificationDetail } from '../api/schemas'
+import type { NotificationLogEntry, NotificationDetail, NotificationLogListResponse } from '../api/schemas'
 import { useI18n } from '../i18n'
 
 export function AdminNotificationsPage() {
@@ -15,13 +15,13 @@ export function AdminNotificationsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [selected, setSelected] = useState<NotificationLogEntry | null>(null)
 
-  const { data: detail } = useQuery({
+  const { data: detail } = useQuery<NotificationDetail>({
     queryKey: ['admin-notification-detail', selected?.id],
     queryFn: (): Promise<NotificationDetail> => fetchAdminNotificationDetail(selected!.id),
     enabled: !!selected,
   })
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error } = useQuery<NotificationLogListResponse>({
     queryKey: ['admin-notifications', page, hostFilter, emailFilter, statusFilter],
     queryFn: () =>
       fetchAdminNotifications({
@@ -31,7 +31,6 @@ export function AdminNotificationsPage() {
         email: emailFilter.trim() || undefined,
         sendStatus: statusFilter || undefined,
       }),
-    keepPreviousData: true,
   })
 
   if (isLoading && !data) {
@@ -125,7 +124,7 @@ export function AdminNotificationsPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {items.map((n) => (
+                {items.map((n: NotificationLogEntry) => (
                   <Table.Tr key={n.id} onClick={() => setSelected(n)} style={{ cursor: 'pointer' }}>
                     <Table.Td>{n.created_at ?? ''}</Table.Td>
                     <Table.Td>{n.email ?? ''}</Table.Td>
