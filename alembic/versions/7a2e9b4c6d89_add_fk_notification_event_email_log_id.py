@@ -19,18 +19,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-  """Upgrade schema."""
-  op.create_foreign_key(
-      "fk_notification_event_email_log_id",
-      "notification_event",
-      "notification_email_log",
-      ["email_log_id"],
-      ["id"],
-      ondelete="SET NULL",
-  )
+    """Upgrade schema."""
+    # SQLite does not support ALTER TABLE ADD CONSTRAINT directly; use batch mode.
+    with op.batch_alter_table("notification_event") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_notification_event_email_log_id",
+            "notification_email_log",
+            ["email_log_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
 
 def downgrade() -> None:
-  """Downgrade schema."""
-  op.drop_constraint("fk_notification_event_email_log_id", "notification_event", type_="foreignkey")
+    """Downgrade schema."""
+    with op.batch_alter_table("notification_event") as batch_op:
+        batch_op.drop_constraint("fk_notification_event_email_log_id", type_="foreignkey")
 
