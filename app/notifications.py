@@ -6,10 +6,11 @@ and records all email attempts in NotificationEmailLog with basic throttling.
 
 import json
 import smtplib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from flask import current_app, request
 
@@ -136,18 +137,18 @@ def _build_docker_quota_email(
     if normalized == "docker_quota_exceeded":
         subject = "[Qman] Docker quota exceeded"
         lead_en = "Your Docker quota on this host has been exceeded."
-        lead_zh = "此主机上的 Docker 配额已被超出。"
+        lead_zh = "您在此主机上的 Docker 配额已被超出。"
     else:
         subject = "[Qman] Container(s) removed due to Docker quota"
         lead_en = "One or more of your Docker containers were removed due to quota enforcement."
-        lead_zh = "由于配额限制，部分 Docker 容器已被移除。"
+        lead_zh = "由于配额限制，您的部分 Docker 容器已被移除。"
 
     detail_json = json.dumps(detail, ensure_ascii=False, indent=2)
 
     my_usage = _my_usage_url()
 
     body_zh = (
-        f"<p>你好 {host_user_name}，</p>"
+        f"<p>您好 {host_user_name}，</p>"
         f"<p>{lead_zh}</p>"
         f"<p><strong>主机:</strong> {host_id}</p>"
         "<p><strong>详细信息:</strong></p>"
@@ -249,8 +250,35 @@ def _build_disk_quota_event_section(
         dt = datetime.utcfromtimestamp(ts_int)
         return dt.isoformat() + "Z"
 
+    def _format_ts_utc_display(ts: Any) -> str | None:
+        """Format timestamp as UTC with explicit 'UTC' label for English email."""
+        try:
+            ts_int = int(ts)
+        except (TypeError, ValueError):
+            return None
+        if ts_int <= 0:
+            return None
+        dt = datetime.fromtimestamp(ts_int, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+
+    def _format_ts_beijing(ts: Any) -> str | None:
+        """Format timestamp in Asia/Shanghai (Beijing time) for Chinese email."""
+        try:
+            ts_int = int(ts)
+        except (TypeError, ValueError):
+            return None
+        if ts_int <= 0:
+            return None
+        utc_dt = datetime.fromtimestamp(ts_int, tz=timezone.utc)
+        beijing_dt = utc_dt.astimezone(ZoneInfo("Asia/Shanghai"))
+        return beijing_dt.strftime("%Y-%m-%d %H:%M:%S")
+
     block_grace_end = _format_ts(block_time_limit)
     inode_grace_end = _format_ts(inode_time_limit)
+    block_grace_end_utc = _format_ts_utc_display(block_time_limit)
+    inode_grace_end_utc = _format_ts_utc_display(inode_time_limit)
+    block_grace_end_beijing = _format_ts_beijing(block_time_limit)
+    inode_grace_end_beijing = _format_ts_beijing(inode_time_limit)
 
     section_parts: list[str] = []
     section_parts.append(
@@ -290,26 +318,27 @@ def _build_disk_quota_event_section(
         section_parts.append("<li>" + " ".join(inode_parts) + ".</li>")
 
     # Grace period: show remaining time in a human-readable form when applicable.
+    # English: show UTC time with explicit "UTC" label.
     grace_items: list[str] = []
     if isinstance(block_time_limit, (int, float, str)):
         try:
             ts_int = int(block_time_limit)
-            if ts_int > now_ts and block_grace_end:
+            if ts_int > now_ts and block_grace_end_utc:
                 remaining = ts_int - now_ts
                 grace_items.append(
                     f"<li>Block grace ends in about {_format_duration(remaining)} "
-                    f"(at <strong>{block_grace_end}</strong>).</li>"
+                    f"(at <strong>{block_grace_end_utc}</strong>).</li>"
                 )
         except (TypeError, ValueError):
             pass
     if isinstance(inode_time_limit, (int, float, str)):
         try:
             ts_int = int(inode_time_limit)
-            if ts_int > now_ts and inode_grace_end:
+            if ts_int > now_ts and inode_grace_end_utc:
                 remaining = ts_int - now_ts
                 grace_items.append(
                     f"<li>Inode grace ends in about {_format_duration(remaining)} "
-                    f"(at <strong>{inode_grace_end}</strong>).</li>"
+                    f"(at <strong>{inode_grace_end_utc}</strong>).</li>"
                 )
         except (TypeError, ValueError):
             pass
@@ -371,26 +400,27 @@ def _build_disk_quota_event_section(
             zh_inode_bits.append("（" + "，".join(limit_bits_zh) + "）")
         zh_parts.append("<li>" + " ".join(zh_inode_bits) + "。</li>")
 
+    # Chinese: show Beijing time (Asia/Shanghai).
     zh_grace_items: list[str] = []
     if isinstance(block_time_limit, (int, float, str)):
         try:
             ts_int = int(block_time_limit)
-            if ts_int > now_ts and block_grace_end:
+            if ts_int > now_ts and block_grace_end_beijing:
                 remaining = ts_int - now_ts
                 zh_grace_items.append(
                     f"<li>块配额宽限期将在大约 {_format_duration(remaining)} 后结束"
-                    f"（UTC 时间 <strong>{block_grace_end}</strong>）。</li>"
+                    f"（北京时间 <strong>{block_grace_end_beijing}</strong>）。</li>"
                 )
         except (TypeError, ValueError):
             pass
     if isinstance(inode_time_limit, (int, float, str)):
         try:
             ts_int = int(inode_time_limit)
-            if ts_int > now_ts and inode_grace_end:
+            if ts_int > now_ts and inode_grace_end_beijing:
                 remaining = ts_int - now_ts
                 zh_grace_items.append(
                     f"<li>Inode 配额宽限期将在大约 {_format_duration(remaining)} 后结束"
-                    f"（UTC 时间 <strong>{inode_grace_end}</strong>）。</li>"
+                    f"（北京时间 <strong>{inode_grace_end_beijing}</strong>）。</li>"
                 )
         except (TypeError, ValueError):
             pass
@@ -543,16 +573,16 @@ def _disk_event_zh_heading(event_type: str, device_name: str) -> str:
 def _disk_event_zh_lead(event_type: str) -> str:
     """Return a Simplified Chinese lead sentence for the event."""
     if event_type == "disk_soft_limit_exceeded":
-        return "你的磁盘使用量已超过配置的软限制。"
+        return "您的磁盘使用量已超过配置的软限制。"
     if event_type == "disk_soft_grace_ending":
-        return "你的磁盘使用量仍高于软限制，并且宽限期即将结束。"
+        return "您的磁盘使用量仍高于软限制，并且宽限期即将结束。"
     if event_type == "disk_soft_grace_expired":
-        return "你的磁盘使用量已超过软限制，且宽限期已经结束。"
+        return "您的磁盘使用量已超过软限制，且宽限期已经结束。"
     if event_type == "disk_hard_limit_reached":
-        return "你的磁盘使用量已达到硬限制，写入操作很可能已经被阻止。"
+        return "您的磁盘使用量已达到硬限制，写入操作很可能已经被阻止。"
     if event_type == "disk_back_to_ok":
-        return "你的磁盘使用量已回到配置的配额限制之内。"
-    return "你的磁盘配额状态发生了变化。"
+        return "您的磁盘使用量已回到配置的配额限制之内。"
+    return "您的磁盘配额状态发生了变化。"
 
 
 def _maybe_send_email_for_events(
@@ -811,8 +841,8 @@ def process_slave_events(host_id: str, events: list[dict[str, Any]]) -> None:
             my_usage = _my_usage_url()
 
             body_zh = (
-                f"<p>你好 {host_user_name_for_email}，</p>"
-                f"<p>这封邮件与主机 <code>{host_id}</code> 上的磁盘配额有关。</p>"
+                f"<p>您好 {host_user_name_for_email}，</p>"
+                f"<p>这封邮件与您在主机 <code>{host_id}</code> 上的磁盘配额有关。</p>"
                 + "".join(zh_sections)
                 + f"<p style=\"margin-top:12px;\">查看当前配额使用情况："
                 f'<a href="{my_usage}">{my_usage}</a>'
@@ -822,7 +852,7 @@ def process_slave_events(host_id: str, events: list[dict[str, Any]]) -> None:
 
             body_en = (
                 f"<p>Hello {host_user_name_for_email},</p>"
-                f"<p>This email is about disk quota on host <code>{host_id}</code>.</p>"
+                f"<p>This email is about your disk quota on host <code>{host_id}</code>.</p>"
                 + "".join(en_sections)
                 + f"<p style=\"margin-top:12px;\">View your current quota usage: "
                 f'<a href="{my_usage}">{my_usage}</a>'

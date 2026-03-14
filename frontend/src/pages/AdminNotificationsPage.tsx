@@ -41,7 +41,11 @@ export function AdminNotificationsPage() {
 
   const formatDateTime = (value: string | null | undefined): string => {
     if (!value) return ''
-    const date = new Date(value)
+    const trimmed = value.trim()
+    // Backend sends UTC as naive ISO (e.g. "2025-03-14T12:00:00"); treat as UTC so toLocaleString shows local time
+    const asUtc =
+      trimmed && !/Z|[+-]\d{2}:?\d{2}$/.test(trimmed) ? `${trimmed}Z` : trimmed
+    const date = new Date(asUtc)
     if (Number.isNaN(date.getTime())) return value
     return date.toLocaleString()
   }
