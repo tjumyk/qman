@@ -55,7 +55,7 @@ ACTION_TO_SUBCOMMANDS: dict[str, set[str]] = {
     "pull": {"pull"},
     "load": {"load"},
     "import": {"import"},
-    "tag": {"build", "tag"},  # tag events can come from build or explicit tag
+    "tag": {"build", "tag"},  # tag events can come from build (or buildx build) or explicit tag
     "commit": {"commit"},
     "create": {"run", "create"},  # container create events
 }
@@ -313,7 +313,13 @@ def sync_containers_from_audit() -> int:
         if ts_float is None:
             ts_missing += 1
             continue
-        
+
+        # Only use audit events that could have created a container (run/create)
+        # so we don't attribute to someone who only ran e.g. "docker ps" or "docker container ls"
+        subcommand = (ev.get("docker_subcommand") or "").lower()
+        if subcommand not in (ACTION_TO_SUBCOMMANDS.get("create") or set()):
+            continue
+
         audit_by_ts.append((ts_float, uid))
     
     audit_by_ts.sort(key=lambda x: x[0])

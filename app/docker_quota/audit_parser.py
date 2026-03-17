@@ -19,7 +19,10 @@ DOCKER_SUBCOMMAND_CATEGORIES: dict[str, set[str]] = {
     "image_create": {"pull", "build", "load", "import", "commit"},
     "container_create": {"run", "create"},
     "container_exec": {"exec"},
-    "other": {"ps", "images", "inspect", "logs", "stats", "top", "port", "diff", "cp", "export", "save", "tag", "push", "login", "logout", "search", "version", "info", "system", "network", "volume", "compose"},
+    "other": {
+        "ps", "images", "image", "inspect", "logs", "stats", "top", "port", "diff", "cp", "export", "save", "tag", "push", "login", "logout", "search", "version", "info", "system", "network", "volume", "compose",
+        "container", "ls", "events", "rm", "start", "stop", "restart", "attach", "buildx", "builder", "context",
+    },
 }
 
 # Reverse mapping: subcommand -> category
@@ -30,30 +33,56 @@ for category, subcommands in DOCKER_SUBCOMMAND_CATEGORIES.items():
 
 
 def extract_docker_subcommand(proctitle: str | None) -> str | None:
-    """Extract the docker subcommand from a proctitle string.
+    """Extract the docker subcommand (verb) from a proctitle string for attribution matching.
+    
+    Handles both legacy form and object form so that attribution works for:
+    - "docker run ..." and "docker container run ..." -> "run"
+    - "docker pull ..." and "docker image pull ..." -> "pull"
+    - "docker build ...", "docker buildx build ...", "docker builder build ..." -> "build"
     
     Examples:
         "docker load -i pg15.tar.gz" -> "load"
-        "docker exec -i -u root ..." -> "exec"
-        "docker pull nginx:latest" -> "pull"
-        "docker run --rm busybox" -> "run"
-        "docker-compose up" -> None (not a docker command)
-    
-    Returns the subcommand (e.g., "load", "exec", "pull") or None if not parseable.
+        "docker container run -it redis" -> "run"
+        "docker image pull nginx:latest" -> "pull"
+        "docker buildx build ..." / "docker builder build ..." -> "build"
+        "docker start 2027" -> "start" (2027 is container ID prefix; we require first token to start with [a-z] so it is never mistaken for subcommand)
+        "docker __complete attach" -> None (internal, not [a-z] lead)
+
+    The first token after "docker" must start with a letter ([a-z]). So container ID prefixes
+    like "2027" or "33f7fa7dcbfb" are never parsed as the subcommand.
+    Returns the subcommand/verb (e.g., "load", "run", "pull") or None if not parseable.
     """
     if not proctitle:
         return None
-    
+
     # Normalize: proctitle may have null bytes replaced with spaces
     proctitle = proctitle.replace("\x00", " ").strip()
-    
-    # Match "docker <subcommand>" pattern
-    # The subcommand is the first non-flag argument after "docker"
-    match = re.match(r"^docker\s+([a-z][a-z0-9-]*)", proctitle, re.IGNORECASE)
-    if match:
-        return match.group(1).lower()
-    
-    return None
+
+    # Must start with "docker " (not docker-compose)
+    if not re.match(r"^docker\s+", proctitle, re.IGNORECASE):
+        return None
+
+    rest = proctitle[6:].lstrip()  # after "docker"
+    if not rest:
+        return None
+
+    # First token: subcommand or object (container/image/buildx)
+    first_match = re.match(r"^([a-z][a-z0-9-]*)\s*", rest, re.IGNORECASE)
+    if not first_match:
+        return None
+    first = first_match.group(1).lower()
+    rest = rest[first_match.end() :].lstrip()
+
+    # Object form: first token is object type, second is verb (Docker CLI reference).
+    # We only include objects whose verb can overlap with attribution-relevant verbs
+    # (run, create, build, pull, ...) so that we extract the real verb. Adding e.g.
+    # "volume" would make "docker volume create" yield "create" and could falsely
+    # match container-create attribution; so we only add: container, image, buildx, builder.
+    if first in ("container", "image", "buildx", "builder") and rest:
+        verb_match = re.match(r"^([a-z][a-z0-9-]*)\s*", rest, re.IGNORECASE)
+        if verb_match:
+            return verb_match.group(1).lower()
+    return first
 
 
 def get_subcommand_category(subcommand: str | None) -> str | None:
