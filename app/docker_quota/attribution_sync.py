@@ -436,7 +436,7 @@ def sync_from_docker_events() -> int:
     # Log event counts by type for diagnosis
     container_events = sum(1 for e in events if (e.get("type") or "").lower() == "container")
     image_events = sum(1 for e in events if (e.get("type") or "").lower() == "image")
-    since_dt = datetime.fromtimestamp(since_ts).strftime("%Y-%m-%d %H:%M:%S")
+    since_dt = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     logger.info(
         "sync_from_docker_events: docker_events=%d (container=%d, image=%d) since %s, audit_events=%d",
         len(events), container_events, image_events, since_dt, len(audit_events)

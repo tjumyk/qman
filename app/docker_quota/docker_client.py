@@ -372,52 +372,65 @@ def stop_container(container_id: str) -> bool:
         return False
 
 
-def collect_events_since(since_ts: float, max_seconds: float = 90.0, max_events: int = 2000) -> list[dict[str, Any]]:
-    """Collect Docker API events since given Unix timestamp. Returns list of {type, action, id, time_nano, ...}.
+def collect_events_since(since_ts: int, until_ts: int | None = None, max_seconds: float = 90.0, max_events: int = 2000) -> list[dict[str, Any]]:
+    """Collect Docker API events since given Unix timestamp (in seconds) and until given Unix timestamp (in seconds, if provided). Returns list of {type, action, id, time_nano, ...}.
     Stops after max_seconds or when max_events is reached (events() is a blocking generator).
     
     Note: Docker API requests can take ~1 minute, so default max_seconds is 90 to avoid early abort.
     """
     try:
-        import datetime
         import docker
         import threading
-        since_dt = datetime.datetime.utcfromtimestamp(since_ts)
-        client = docker.from_env()
+
+        if max_events <= 0:
+            return []
+
+        # ensure since_ts is int, until_ts is int if provided
+        since_ts = int(since_ts) 
+        until_ts = int(until_ts) if until_ts is not None else None
+
         out: list[dict[str, Any]] = []
-        done = threading.Event()
 
-        def consume() -> None:
-            try:
-                for ev in client.events(since=since_dt, decode=True):
-                    if done.is_set() or len(out) >= max_events:
-                        break
-                    # ID is in Actor.ID, not directly in the event
-                    actor = ev.get("Actor") or {}
-                    actor_id = actor.get("ID") or ev.get("id") or ev.get("ID")
-                    out.append({
-                        "type": ev.get("Type"),
-                        "action": ev.get("Action"),
-                        "id": actor_id,
-                        "time_nano": ev.get("timeNano") or ev.get("time"),
-                        "from": ev.get("from"),
-                        "actor_attributes": actor.get("Attributes") or {},
-                    })
-            except Exception as e:
-                logger.warning("Docker events stream error: %s", e)
-            finally:
+        client = docker.from_env()
+        try:
+            # opens a real-time event stream, need to be closed by another thread
+            event_stream = client.events(since=since_ts, until=until_ts, decode=True)
+
+            def consume() -> None:
                 try:
-                    client.close()
-                except Exception:
-                    pass
+                    for ev in event_stream:
+                        # ID is in Actor.ID, not directly in the event
+                        actor = ev.get("Actor") or {}
+                        actor_id = actor.get("ID") or ev.get("id") or ev.get("ID")
+                        out.append({
+                            "type": ev.get("Type"),
+                            "action": ev.get("Action"),
+                            "id": actor_id,
+                            "time_nano": ev.get("timeNano") or ev.get("time"),
+                            "from": ev.get("from"),
+                            "actor_attributes": actor.get("Attributes") or {},
+                        })
+                        if len(out) >= max_events:
+                            break
+                except Exception as e:
+                    logger.warning("Docker events stream error: %s", e)
 
-        t = threading.Thread(target=consume, daemon=True)
-        t.start()
-        done.wait(timeout=max_seconds)
-        done.set()
-        # Allow extra time for thread cleanup if Docker API is slow
-        t.join(timeout=5.0)
-        return out
+            t = threading.Thread(target=consume, daemon=True)
+            t.start()
+            t.join(timeout=max_seconds)  # wait for at most max_seconds for events
+            if t.is_alive():
+                logger.warning("Docker events stream timed out after %s seconds", max_seconds)
+            try:
+                event_stream.close()  # unblocks consumer thread; double close is harmless
+            except Exception:
+                pass
+            t.join(timeout=5.0)  # allow extra time for thread cleanup if Docker API is slow
+            return list(out)  # return a copy to avoid possible modifications from consumer thread
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("Docker events failed: %s", e)
         return []
