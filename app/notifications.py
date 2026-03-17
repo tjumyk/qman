@@ -48,27 +48,28 @@ def send_email(to_email: str, subject: str, body: str, *, html: bool = False) ->
     smtp_user = current_app.config.get("SMTP_USER")
     smtp_password = current_app.config.get("SMTP_PASSWORD")
     from_addr = current_app.config.get("NOTIFICATION_FROM") or (smtp_user or "qman@localhost")
+    smtp_from = smtp_user or from_addr  # smtp_user is used as first argument for server.sendmail(), not the From: header
     if not smtp_host:
         logger.warning("SMTP_HOST not configured; skipping email to %s", to_email)
         return False
     subtype = "html" if html else "plain"
     msg = MIMEText(body, subtype, "utf-8")
     msg["Subject"] = subject
-    msg["From"] = formataddr(("Qman Quota", from_addr))
+    msg["From"] = formataddr(("Qman", from_addr))
     msg["To"] = to_email
     try:
         if smtp_port == 465:
             with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
                 if smtp_user and smtp_password:
                     server.login(smtp_user, smtp_password)
-                server.sendmail(from_addr, [to_email], msg.as_string())
+                server.sendmail(smtp_from, [to_email], msg.as_string())  
         else:
             with smtplib.SMTP(smtp_host, smtp_port) as server:
                 if smtp_port == 587:
                     server.starttls()
                 if smtp_user and smtp_password:
                     server.login(smtp_user, smtp_password)
-                server.sendmail(from_addr, [to_email], msg.as_string())
+                server.sendmail(smtp_from, [to_email], msg.as_string())
         logger.info("Notification email sent to %s: %s", to_email, subject)
         return True
     except Exception as e:
