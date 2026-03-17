@@ -140,10 +140,13 @@ def collect_volume_actual_disk() -> dict[str, int]:
     last_used_all = get_volume_last_used_all()
 
     def should_skip(vol_name: str) -> bool:
-        """Skip iff: has successful scan and RefCount==0; when skip_use_last_mounted, also require last_mounted_at set and last_mounted_at <= scan_finished_at."""
+        """Skip iff: has successful scan and RefCount==0; when skip_use_last_mounted, also require last_mounted_at set and last_mounted_at <= scan_finished_at.
+        When get_system_df failed (no volume data), ref_count_by_name is empty — do not skip, so we still scan volumes."""
         disk_usage = disk_usage_by_name.get(vol_name)
         if not disk_usage or disk_usage.get("actual_disk_bytes") is None or disk_usage.get("scan_finished_at") is None:
             return False
+        if vol_name not in ref_count_by_name:
+            return False  # No ref count data (e.g. df timed out); do not skip
         if ref_count_by_name.get(vol_name, 0) != 0:
             return False
         if not skip_use_last_mounted:
@@ -182,6 +185,15 @@ def collect_volume_actual_disk() -> dict[str, int]:
 
     counts = {"scanned": 0, "success": 0, "timeout": 0, "permission_denied": 0, "parse_failure": 0, "skipped": skipped}
 
+    if not device_to_volumes:
+        elapsed = time.time() - start_time
+        logger.info(
+            "collect_volume_actual_disk: total=%.2fs scanned=%d success=%d timeout=%d permission_denied=%d parse_failure=%d skipped=%d",
+            elapsed, counts["scanned"], counts["success"], counts["timeout"],
+            counts["permission_denied"], counts["parse_failure"], counts["skipped"]
+        )
+        return counts
+
     def scan_volume(vol_name: str, mountpoint: str) -> tuple[str, str | None]:
         """Run du for one volume; return (vol_name, failure_status or None)."""
         now_start = datetime.now(timezone.utc)
@@ -215,7 +227,8 @@ def collect_volume_actual_disk() -> dict[str, int]:
         return results
 
     # Disk-wise parallelism: one task per device, each task runs up to max_concurrent_per_disk scans on that device
-    max_workers = min(len(device_to_volumes), 32)
+    # max_workers must be >= 1 (ThreadPoolExecutor raises ValueError otherwise); can be 0 if device_to_volumes empty (we return early above)
+    max_workers = max(1, min(len(device_to_volumes), 32))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(run_device_volumes, vol_list): dev_key
