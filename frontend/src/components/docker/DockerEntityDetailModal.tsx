@@ -15,6 +15,7 @@ import {
   Paper,
   Title,
 } from '@mantine/core'
+import { CodeHighlight } from '@mantine/code-highlight'
 import { useState } from 'react'
 import {
   fetchDockerInspect,
@@ -115,9 +116,19 @@ export function DockerEntityDetailModal({
           )}
           {inspectJson != null && (
             <ScrollArea h={420}>
-              <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {inspectJson}
-              </Code>
+              <CodeHighlight
+                code={inspectJson}
+                language="json"
+                withCopyButton
+                styles={{
+                  code: {
+                    backgroundColor: 'var(--mantine-color-default-hover)',
+                    borderRadius: 4,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  },
+                }}
+              />
             </ScrollArea>
           )}
         </Tabs.Panel>
