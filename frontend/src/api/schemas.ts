@@ -328,6 +328,7 @@ export const dockerUsageReviewEventSchema = z
     created_at: z.string().nullable().optional(),
     used_for_auto_attribution: z.boolean(),
     manual_resolved_at: z.string().nullable().optional(),
+    manual_resolved_by_oauth_user_id: z.number().nullable().optional(),
     payload: z.string(),
   })
   .passthrough()
@@ -342,3 +343,14 @@ export const dockerUsageAttributeOkSchema = z.object({
   status: z.literal('ok'),
 })
 export type DockerUsageAttributeOk = z.infer<typeof dockerUsageAttributeOkSchema>
+
+export const dockerInspectResponseSchema = z.object({
+  inspect: z.record(z.string(), z.unknown()),
+})
+export type DockerInspectResponse = z.infer<typeof dockerInspectResponseSchema>
+
+export const dockerAttributionDetailSchema = z.object({
+  auto: z.record(z.string(), z.unknown()).nullable(),
+  override: z.record(z.string(), z.unknown()).nullable(),
+})
+export type DockerAttributionDetail = z.infer<typeof dockerAttributionDetailSchema>

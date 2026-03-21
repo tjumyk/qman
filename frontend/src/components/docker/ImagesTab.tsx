@@ -11,11 +11,15 @@ import {
   Group,
   Accordion,
   Checkbox,
+  ActionIcon,
+  Tooltip,
 } from '@mantine/core'
-import { fetchDockerImages } from '../../api'
+import { IconInfoCircle } from '@tabler/icons-react'
+import { fetchDockerImages, type DockerUsageEntityType } from '../../api'
 import { BlockSize } from '../BlockSize'
 import { useI18n } from '../../i18n'
 import { UsageSummaryCards } from './UsageSummaryCard'
+import { DockerEntityDetailModal } from './DockerEntityDetailModal'
 import type { DockerImage, DockerLayer } from '../../api/schemas'
 
 interface ImagesTabProps {
@@ -60,6 +64,11 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
   const [layerSortField, setLayerSortField] = useState<LayerSortField>('size_bytes')
   const [layerSortDirection, setLayerSortDirection] = useState<SortDirection>('desc')
   const [hideZeroSizeLayers, setHideZeroSizeLayers] = useState(true)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailEntity, setDetailEntity] = useState<{
+    entityType: DockerUsageEntityType
+    entityId: string
+  } | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['docker-images', hostId],
@@ -241,6 +250,7 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
                     <ImageSortableHeader field="puller_host_user_name">{t('owner')}</ImageSortableHeader>
                     <ImageSortableHeader field="size_bytes">{t('size')}</ImageSortableHeader>
                     <ImageSortableHeader field="created">{t('created')}</ImageSortableHeader>
+                    <Table.Th w={56} />
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -284,10 +294,38 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
                         <BlockSize size={img.size_bytes} />
                       </Table.Td>
                       <Table.Td>{formatDate(img.created)}</Table.Td>
+                      <Table.Td>
+                        <Tooltip label={t('dockerEntityDetailDetails')}>
+                          <ActionIcon
+                            variant="subtle"
+                            size="sm"
+                            aria-label={t('dockerEntityDetailDetails')}
+                            onClick={() => {
+                              setDetailEntity({ entityType: 'image', entityId: img.image_id })
+                              setDetailOpen(true)
+                            }}
+                          >
+                            <IconInfoCircle size={18} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
               </Table>
+
+              {detailEntity && (
+                <DockerEntityDetailModal
+                  opened={detailOpen}
+                  onClose={() => {
+                    setDetailOpen(false)
+                    setDetailEntity(null)
+                  }}
+                  hostId={hostId}
+                  entityType={detailEntity.entityType}
+                  entityId={detailEntity.entityId}
+                />
+              )}
 
               {filteredImages.length === 0 && (
                 <Text size="sm" c="dimmed">

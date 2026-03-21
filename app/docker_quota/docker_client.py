@@ -616,3 +616,45 @@ def get_container_volume_mounts() -> dict[str, list[dict[str, Any]]]:
         elapsed = time.time() - start_time
         logger.warning("Docker get container volume mounts failed: %s (took %.2fs)", e, elapsed)
         return {}
+
+
+def docker_inspect(kind: str, object_id: str) -> dict[str, Any]:
+    """Return full `docker inspect` JSON dict for a container, image, or volume.
+
+    `kind` is ``container``, ``image``, or ``volume``. `object_id` is container id,
+    image id (e.g. sha256:...), or volume name.
+
+    Raises:
+        docker.errors.NotFound: object does not exist.
+        ValueError: invalid kind.
+    """
+    from docker.errors import NotFound
+
+    k = (kind or "").strip().lower()
+    if k not in {"container", "image", "volume"}:
+        raise ValueError(f"invalid kind: {kind!r}")
+
+    start_time = time.time()
+    try:
+        import docker
+
+        client = docker.from_env()
+        try:
+            api = client.api
+            if k == "container":
+                data = api.inspect_container(object_id)
+            elif k == "image":
+                data = api.inspect_image(object_id)
+            else:
+                data = api.inspect_volume(object_id)
+            elapsed = time.time() - start_time
+            logger.debug("docker_inspect kind=%s id=%s… in %.2fs", k, object_id[:16], elapsed)
+            return data
+        finally:
+            client.close()
+    except NotFound:
+        raise
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.warning("docker_inspect kind=%s failed: %s (took %.2fs)", k, e, elapsed)
+        raise

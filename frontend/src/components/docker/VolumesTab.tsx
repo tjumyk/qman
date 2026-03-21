@@ -1,10 +1,23 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Stack, Text, Table, Loader, Alert, TextInput, Badge, Group, Tooltip } from '@mantine/core'
-import { fetchDockerVolumes } from '../../api'
+import {
+  Stack,
+  Text,
+  Table,
+  Loader,
+  Alert,
+  TextInput,
+  Badge,
+  Group,
+  Tooltip,
+  ActionIcon,
+} from '@mantine/core'
+import { IconInfoCircle } from '@tabler/icons-react'
+import { fetchDockerVolumes, type DockerUsageEntityType } from '../../api'
 import { BlockSize } from '../BlockSize'
 import { useI18n } from '../../i18n'
 import { UsageSummaryCards } from './UsageSummaryCard'
+import { DockerEntityDetailModal } from './DockerEntityDetailModal'
 import type { DockerVolume } from '../../api/schemas'
 
 interface VolumesTabProps {
@@ -30,6 +43,11 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
   const [search, setSearch] = useState('')
   const [sortField, setSortField] = useState<SortField>('volume_name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailEntity, setDetailEntity] = useState<{
+    entityType: DockerUsageEntityType
+    entityId: string
+  } | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['docker-volumes', hostId],
@@ -130,6 +148,7 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
             <SortableHeader field="size_bytes">{t('size')}</SortableHeader>
             <SortableHeader field="ref_count">{t('refCount')}</SortableHeader>
             <SortableHeader field="attribution_source">{t('attributionSource')}</SortableHeader>
+            <Table.Th w={56} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -189,10 +208,38 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
                   </Text>
                 )}
               </Table.Td>
+              <Table.Td>
+                <Tooltip label={t('dockerEntityDetailDetails')}>
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    aria-label={t('dockerEntityDetailDetails')}
+                    onClick={() => {
+                      setDetailEntity({ entityType: 'volume', entityId: v.volume_name })
+                      setDetailOpen(true)
+                    }}
+                  >
+                    <IconInfoCircle size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>
       </Table>
+
+      {detailEntity && (
+        <DockerEntityDetailModal
+          opened={detailOpen}
+          onClose={() => {
+            setDetailOpen(false)
+            setDetailEntity(null)
+          }}
+          hostId={hostId}
+          entityType={detailEntity.entityType}
+          entityId={detailEntity.entityId}
+        />
+      )}
 
       {filteredAndSorted.length === 0 && (
         <Text size="sm" c="dimmed">

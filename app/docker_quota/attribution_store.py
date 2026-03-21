@@ -1099,6 +1099,121 @@ def _get_volume_names_for_container(container_id: str) -> list[str]:
         return []
 
 
+def _json_dt(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def get_container_attribution_breakdown(container_id: str) -> dict[str, Any]:
+    """Return auto vs manual override rows for API JSON (ISO datetimes)."""
+    db = SessionLocal()
+    try:
+        auto: dict[str, Any] | None = None
+        row = (
+            db.query(DockerContainerAttribution)
+            .filter(DockerContainerAttribution.container_id == container_id)
+            .first()
+        )
+        if row:
+            auto = {
+                "container_id": row.container_id,
+                "host_user_name": row.host_user_name,
+                "uid": row.uid,
+                "image_id": row.image_id,
+                "size_bytes": row.size_bytes,
+                "created_at": _json_dt(row.created_at),
+            }
+        override: dict[str, Any] | None = None
+        orow = (
+            db.query(DockerContainerAttributionOverride)
+            .filter(DockerContainerAttributionOverride.container_id == container_id)
+            .first()
+        )
+        if orow:
+            override = {
+                "container_id": orow.container_id,
+                "host_user_name": orow.host_user_name,
+                "uid": orow.uid,
+                "created_at": _json_dt(orow.created_at),
+                "resolved_by_oauth_user_id": orow.resolved_by_oauth_user_id,
+            }
+        return {"auto": auto, "override": override}
+    finally:
+        db.close()
+
+
+def get_image_attribution_breakdown(image_id: str) -> dict[str, Any]:
+    """Return auto vs manual override rows for an image (ISO datetimes)."""
+    db = SessionLocal()
+    try:
+        auto: dict[str, Any] | None = None
+        row = db.query(DockerImageAttribution).filter(DockerImageAttribution.image_id == image_id).first()
+        if row:
+            auto = {
+                "image_id": row.image_id,
+                "puller_host_user_name": row.puller_host_user_name,
+                "puller_uid": row.puller_uid,
+                "size_bytes": row.size_bytes,
+                "created_at": _json_dt(row.created_at),
+            }
+        override: dict[str, Any] | None = None
+        orow = (
+            db.query(DockerImageAttributionOverride)
+            .filter(DockerImageAttributionOverride.image_id == image_id)
+            .first()
+        )
+        if orow:
+            override = {
+                "image_id": orow.image_id,
+                "puller_host_user_name": orow.puller_host_user_name,
+                "puller_uid": orow.puller_uid,
+                "created_at": _json_dt(orow.created_at),
+                "resolved_by_oauth_user_id": orow.resolved_by_oauth_user_id,
+            }
+        return {"auto": auto, "override": override}
+    finally:
+        db.close()
+
+
+def get_volume_attribution_breakdown(volume_name: str) -> dict[str, Any]:
+    """Return auto vs manual override rows for a volume (ISO datetimes)."""
+    db = SessionLocal()
+    try:
+        auto: dict[str, Any] | None = None
+        row = (
+            db.query(DockerVolumeAttribution)
+            .filter(DockerVolumeAttribution.volume_name == volume_name)
+            .first()
+        )
+        if row:
+            auto = {
+                "volume_name": row.volume_name,
+                "host_user_name": row.host_user_name,
+                "uid": row.uid,
+                "size_bytes": row.size_bytes,
+                "attribution_source": row.attribution_source,
+                "first_seen_at": _json_dt(row.first_seen_at),
+            }
+        override: dict[str, Any] | None = None
+        orow = (
+            db.query(DockerVolumeAttributionOverride)
+            .filter(DockerVolumeAttributionOverride.volume_name == volume_name)
+            .first()
+        )
+        if orow:
+            override = {
+                "volume_name": orow.volume_name,
+                "host_user_name": orow.host_user_name,
+                "uid": orow.uid,
+                "created_at": _json_dt(orow.created_at),
+                "resolved_by_oauth_user_id": orow.resolved_by_oauth_user_id,
+            }
+        return {"auto": auto, "override": override}
+    finally:
+        db.close()
+
+
 # --- Effective attribution (manual overrides win) ---
 
 

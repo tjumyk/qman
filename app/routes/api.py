@@ -1016,6 +1016,44 @@ def register_api_routes(app: Any) -> None:
             logger.warning("Failed to fetch Docker volumes from slave %s: %s (took %.2fs)", slave_id, str(e), elapsed)
             return jsonify(msg=str(e)), 502
 
+    @app.route("/api/quotas/<string:slave_id>/docker/inspect")
+    @oauth.requires_admin
+    def get_docker_inspect(slave_id: str) -> tuple[Any, int] | Any:
+        """Proxy to slave: full docker inspect JSON (admin). Query: kind=container|image|volume, id=."""
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            return jsonify(msg="host not found"), 404
+        forward = {k: v for k, v in request.args.items()}
+        try:
+            resp = requests.get(
+                f"{slave['url']}/remote-api/docker/inspect",
+                auth=make_auth(slave),
+                params=forward,
+                timeout=_REMOTE_API_TIMEOUT_QUOTA,
+            )
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/api/quotas/<string:slave_id>/docker/usage/attribution-detail")
+    @oauth.requires_admin
+    def get_docker_attribution_detail(slave_id: str) -> tuple[Any, int] | Any:
+        """Proxy to slave: auto vs override attribution for one entity (admin)."""
+        slave = _slave_by_id(slave_id)
+        if not slave:
+            return jsonify(msg="host not found"), 404
+        forward = {k: v for k, v in request.args.items()}
+        try:
+            resp = requests.get(
+                f"{slave['url']}/remote-api/docker/usage/attribution-detail",
+                auth=make_auth(slave),
+                params=forward,
+                timeout=_REMOTE_API_TIMEOUT_DEFAULT,
+            )
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            return jsonify(msg=str(e)), 502
+
     @app.route("/api/admin/host-users")
     @oauth.requires_admin
     def get_admin_host_users() -> tuple[Any, int] | Any:

@@ -677,6 +677,65 @@ def register_remote_api_routes(app: Any) -> None:
             "unattributed_bytes": unattributed_bytes,
         })
 
+    @app.route("/remote-api/docker/inspect")
+    @requires_api_key
+    def remote_docker_inspect() -> Any:
+        """Return full docker inspect JSON for a container, image, or volume."""
+        if not current_app.config.get("USE_DOCKER_QUOTA", False):
+            return jsonify(msg="Docker quota not enabled on this host"), 400
+
+        kind = (request.args.get("kind") or "").strip().lower()
+        object_id = (request.args.get("id") or "").strip()
+        if kind not in {"container", "image", "volume"}:
+            return jsonify(msg="kind must be container|image|volume"), 400
+        if not object_id:
+            return jsonify(msg="id query parameter required"), 400
+
+        try:
+            from docker.errors import NotFound
+
+            from app.docker_quota.docker_client import docker_inspect
+
+            data = docker_inspect(kind, object_id)
+            return jsonify({"inspect": data})
+        except NotFound:
+            return jsonify(msg="Docker object not found"), 404
+        except ValueError as e:
+            return jsonify(msg=str(e)), 400
+        except Exception as e:
+            logger.warning("remote_docker_inspect failed: %s", e)
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/remote-api/docker/usage/attribution-detail")
+    @requires_api_key
+    def remote_docker_usage_attribution_detail() -> Any:
+        """Return auto-attribution row and manual override row for one entity (JSON-safe)."""
+        from app.docker_quota.attribution_store import (
+            get_container_attribution_breakdown,
+            get_image_attribution_breakdown,
+            get_volume_attribution_breakdown,
+        )
+
+        entity_type = (request.args.get("entity_type") or "").strip().lower()
+        if entity_type not in {"container", "image", "volume"}:
+            return jsonify(msg="entity_type must be container|image|volume"), 400
+
+        if entity_type == "container":
+            cid = request.args.get("container_id") or request.args.get("entity_id")
+            if not cid:
+                return jsonify(msg="container_id (or entity_id) required"), 400
+            return jsonify(get_container_attribution_breakdown(str(cid)))
+        if entity_type == "image":
+            iid = request.args.get("image_id") or request.args.get("entity_id")
+            if not iid:
+                return jsonify(msg="image_id (or entity_id) required"), 400
+            return jsonify(get_image_attribution_breakdown(str(iid)))
+
+        vol = request.args.get("volume_name")
+        if not vol:
+            return jsonify(msg="volume_name required"), 400
+        return jsonify(get_volume_attribution_breakdown(str(vol)))
+
     def _resolve_container_image_and_volumes(container_id: str) -> tuple[str | None, list[str]]:
         """Resolve (image_id, volume_names) for a container using Docker inspect."""
         try:
@@ -922,6 +981,7 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="entity_type must be container|image|volume"), 400
 
         include_used = _parse_bool(request.args.get("include_used"))
+        include_resolved = _parse_bool(request.args.get("include_resolved"))
 
         container_id = request.args.get("container_id") or request.args.get("entity_id")
         image_id = request.args.get("image_id") or request.args.get("entity_id")
@@ -929,22 +989,20 @@ def register_remote_api_routes(app: Any) -> None:
 
         db = SessionLocal()
         try:
-            unresolved_filter = DockerUsageAuditEvent.manual_resolved_at.is_(None)
-            unresolved_docker_filter = DockerUsageDockerEvent.manual_resolved_at.is_(None)
-
             events: list[dict[str, Any]] = []
 
             if entity_type == "container":
                 if not container_id:
                     return jsonify(msg="container_id (or entity_id) required"), 400
-                q_audit = (
-                    db.query(DockerUsageAuditEvent)
-                    .filter(DockerUsageAuditEvent.container_id == container_id, unresolved_filter)
+                q_audit = db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.container_id == container_id
                 )
-                q_docker = (
-                    db.query(DockerUsageDockerEvent)
-                    .filter(DockerUsageDockerEvent.container_id == container_id, unresolved_docker_filter)
+                q_docker = db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.container_id == container_id
                 )
+                if not include_resolved:
+                    q_audit = q_audit.filter(DockerUsageAuditEvent.manual_resolved_at.is_(None))
+                    q_docker = q_docker.filter(DockerUsageDockerEvent.manual_resolved_at.is_(None))
                 if not include_used:
                     q_audit = q_audit.filter(DockerUsageAuditEvent.used_for_auto_attribution.is_(False))
                     q_docker = q_docker.filter(DockerUsageDockerEvent.used_for_auto_attribution.is_(False))
@@ -960,6 +1018,7 @@ def register_remote_api_routes(app: Any) -> None:
                             "created_at": r.created_at.isoformat() if r.created_at else None,
                             "used_for_auto_attribution": r.used_for_auto_attribution,
                             "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "manual_resolved_by_oauth_user_id": r.manual_resolved_by_oauth_user_id,
                             "payload": r.payload,
                             "audit_key": r.audit_key,
                             "docker_subcommand": r.docker_subcommand,
@@ -974,6 +1033,7 @@ def register_remote_api_routes(app: Any) -> None:
                             "created_at": r.created_at.isoformat() if r.created_at else None,
                             "used_for_auto_attribution": r.used_for_auto_attribution,
                             "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "manual_resolved_by_oauth_user_id": r.manual_resolved_by_oauth_user_id,
                             "payload": r.payload,
                             "docker_event_type": r.docker_event_type,
                             "docker_action": r.docker_action,
@@ -985,14 +1045,11 @@ def register_remote_api_routes(app: Any) -> None:
             elif entity_type == "image":
                 if not image_id:
                     return jsonify(msg="image_id (or entity_id) required"), 400
-                q_audit = (
-                    db.query(DockerUsageAuditEvent)
-                    .filter(DockerUsageAuditEvent.image_id == image_id, unresolved_filter)
-                )
-                q_docker = (
-                    db.query(DockerUsageDockerEvent)
-                    .filter(DockerUsageDockerEvent.image_id == image_id, unresolved_docker_filter)
-                )
+                q_audit = db.query(DockerUsageAuditEvent).filter(DockerUsageAuditEvent.image_id == image_id)
+                q_docker = db.query(DockerUsageDockerEvent).filter(DockerUsageDockerEvent.image_id == image_id)
+                if not include_resolved:
+                    q_audit = q_audit.filter(DockerUsageAuditEvent.manual_resolved_at.is_(None))
+                    q_docker = q_docker.filter(DockerUsageDockerEvent.manual_resolved_at.is_(None))
                 if not include_used:
                     q_audit = q_audit.filter(DockerUsageAuditEvent.used_for_auto_attribution.is_(False))
                     q_docker = q_docker.filter(DockerUsageDockerEvent.used_for_auto_attribution.is_(False))
@@ -1007,6 +1064,7 @@ def register_remote_api_routes(app: Any) -> None:
                             "created_at": r.created_at.isoformat() if r.created_at else None,
                             "used_for_auto_attribution": r.used_for_auto_attribution,
                             "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "manual_resolved_by_oauth_user_id": r.manual_resolved_by_oauth_user_id,
                             "payload": r.payload,
                             "audit_key": r.audit_key,
                             "docker_subcommand": r.docker_subcommand,
@@ -1021,6 +1079,7 @@ def register_remote_api_routes(app: Any) -> None:
                             "created_at": r.created_at.isoformat() if r.created_at else None,
                             "used_for_auto_attribution": r.used_for_auto_attribution,
                             "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "manual_resolved_by_oauth_user_id": r.manual_resolved_by_oauth_user_id,
                             "payload": r.payload,
                             "docker_event_type": r.docker_event_type,
                             "docker_action": r.docker_action,
@@ -1032,14 +1091,15 @@ def register_remote_api_routes(app: Any) -> None:
             else:  # volume
                 if not volume_name:
                     return jsonify(msg="volume_name required"), 400
-                q_audit = (
-                    db.query(DockerUsageAuditEvent)
-                    .filter(DockerUsageAuditEvent.volume_name == volume_name, unresolved_filter)
+                q_audit = db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.volume_name == volume_name
                 )
-                q_docker = (
-                    db.query(DockerUsageDockerEvent)
-                    .filter(DockerUsageDockerEvent.volume_name == volume_name, unresolved_docker_filter)
+                q_docker = db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.volume_name == volume_name
                 )
+                if not include_resolved:
+                    q_audit = q_audit.filter(DockerUsageAuditEvent.manual_resolved_at.is_(None))
+                    q_docker = q_docker.filter(DockerUsageDockerEvent.manual_resolved_at.is_(None))
                 if not include_used:
                     q_audit = q_audit.filter(DockerUsageAuditEvent.used_for_auto_attribution.is_(False))
                     q_docker = q_docker.filter(DockerUsageDockerEvent.used_for_auto_attribution.is_(False))
@@ -1054,6 +1114,7 @@ def register_remote_api_routes(app: Any) -> None:
                             "created_at": r.created_at.isoformat() if r.created_at else None,
                             "used_for_auto_attribution": r.used_for_auto_attribution,
                             "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "manual_resolved_by_oauth_user_id": r.manual_resolved_by_oauth_user_id,
                             "payload": r.payload,
                             "audit_key": r.audit_key,
                             "docker_subcommand": r.docker_subcommand,
@@ -1068,6 +1129,7 @@ def register_remote_api_routes(app: Any) -> None:
                             "created_at": r.created_at.isoformat() if r.created_at else None,
                             "used_for_auto_attribution": r.used_for_auto_attribution,
                             "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "manual_resolved_by_oauth_user_id": r.manual_resolved_by_oauth_user_id,
                             "payload": r.payload,
                             "docker_event_type": r.docker_event_type,
                             "docker_action": r.docker_action,

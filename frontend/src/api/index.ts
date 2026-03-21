@@ -16,6 +16,8 @@ import {
   dockerUsageReviewQueueResponseSchema,
   dockerUsageReviewEventsResponseSchema,
   dockerUsageAttributeOkSchema,
+  dockerInspectResponseSchema,
+  dockerAttributionDetailSchema,
 } from './schemas'
 import type {
   Me,
@@ -36,6 +38,8 @@ import type {
   DockerUsageReviewQueueResponse,
   DockerUsageReviewEventsResponse,
   DockerUsageAttributeOk,
+  DockerInspectResponse,
+  DockerAttributionDetail,
 } from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
@@ -353,6 +357,37 @@ export async function fetchAdminNotificationDetail(id: number): Promise<Notifica
 
 export type DockerUsageEntityType = 'container' | 'image' | 'volume'
 
+export type DockerInspectKind = 'container' | 'image' | 'volume'
+
+export async function fetchDockerInspect(
+  hostId: string,
+  params: { kind: DockerInspectKind; id: string }
+): Promise<DockerInspectResponse> {
+  const search = new URLSearchParams({ kind: params.kind, id: params.id })
+  const { data } = await api.get<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/docker/inspect?${search}`,
+    { timeout: TIMEOUT_QUOTA }
+  )
+  return dockerInspectResponseSchema.parse(data)
+}
+
+export async function fetchDockerAttributionDetail(
+  hostId: string,
+  params: { entityType: DockerUsageEntityType; entityId: string }
+): Promise<DockerAttributionDetail> {
+  const search = new URLSearchParams({ entity_type: params.entityType })
+  if (params.entityType === 'volume') {
+    search.set('volume_name', params.entityId)
+  } else {
+    search.set('entity_id', params.entityId)
+  }
+  const { data } = await api.get<unknown>(
+    `quotas/${encodeURIComponent(hostId)}/docker/usage/attribution-detail?${search}`,
+    { timeout: TIMEOUT_DEFAULT }
+  )
+  return dockerAttributionDetailSchema.parse(data)
+}
+
 export async function fetchAdminDockerUsageReviewQueue(
   hostId: string,
   params: { entityType: DockerUsageEntityType; page?: number; pageSize?: number }
@@ -372,6 +407,7 @@ export async function fetchAdminDockerUsageEvents(
     entityType: DockerUsageEntityType
     entityId: string
     includeUsed?: boolean
+    includeResolved?: boolean
     volumeName?: string
   }
 ): Promise<DockerUsageReviewEventsResponse> {
@@ -382,6 +418,7 @@ export async function fetchAdminDockerUsageEvents(
     search.set('entity_id', params.entityId)
   }
   if (params.includeUsed) search.set('include_used', 'true')
+  if (params.includeResolved) search.set('include_resolved', 'true')
   const { data } = await api.get<unknown>(`admin/docker/usage/events?${search}`, {
     timeout: TIMEOUT_DEFAULT,
   })

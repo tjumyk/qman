@@ -32,6 +32,7 @@ import {
 import type { DockerUsageReviewQueueItem } from '../api/schemas'
 import { useI18n } from '../i18n'
 import { notifications } from '@mantine/notifications'
+import { DockerEventReviewCell, DockerEventAutoCell } from '../components/docker/DockerUsageEventStatusCells'
 
 function entityKey(item: DockerUsageReviewQueueItem): string {
   if (item.entity_type === 'container') return item.container_id
@@ -66,6 +67,7 @@ export function AdminDockerUsageReviewPage() {
   const [page, setPage] = useState(1)
   const [drawerItem, setDrawerItem] = useState<DockerUsageReviewQueueItem | null>(null)
   const [includeUsed, setIncludeUsed] = useState(false)
+  const [includeResolved, setIncludeResolved] = useState(false)
   const [assigneeValue, setAssigneeValue] = useState<string | null>(null)
   const [cascade, setCascade] = useState(true)
 
@@ -96,12 +98,20 @@ export function AdminDockerUsageReviewPage() {
     isLoading: eventsLoading,
     error: eventsError,
   } = useQuery({
-    queryKey: ['admin-docker-usage-events', hostId, drawerItem?.entity_type, drawerKey, includeUsed],
+    queryKey: [
+      'admin-docker-usage-events',
+      hostId,
+      drawerItem?.entity_type,
+      drawerKey,
+      includeUsed,
+      includeResolved,
+    ],
     queryFn: () =>
       fetchAdminDockerUsageEvents(hostId!, {
         entityType: drawerItem!.entity_type,
         entityId: drawerKey!,
         includeUsed,
+        includeResolved,
         volumeName: drawerItem!.entity_type === 'volume' ? drawerItem!.volume_name : undefined,
       }),
     enabled: !!hostId && !!drawerItem && !!drawerKey,
@@ -343,11 +353,18 @@ export function AdminDockerUsageReviewPage() {
               {t('dockerUsageReviewCurrentAttribution')}: {attributionSummary(drawerItem)}
             </Text>
 
-            <Switch
-              label={t('dockerUsageReviewIncludeUsed')}
-              checked={includeUsed}
-              onChange={(e) => setIncludeUsed(e.currentTarget.checked)}
-            />
+            <Group gap="xl">
+              <Switch
+                label={t('dockerUsageReviewIncludeUsed')}
+                checked={includeUsed}
+                onChange={(e) => setIncludeUsed(e.currentTarget.checked)}
+              />
+              <Switch
+                label={t('dockerEntityDetailIncludeResolved')}
+                checked={includeResolved}
+                onChange={(e) => setIncludeResolved(e.currentTarget.checked)}
+              />
+            </Group>
 
             {eventsError && (
               <Alert color="red" title={t('error')}>
@@ -369,6 +386,8 @@ export function AdminDockerUsageReviewPage() {
                     <Table.Tr>
                       <Table.Th>{t('dockerUsageReviewColSource')}</Table.Th>
                       <Table.Th>{t('dockerUsageReviewColWhen')}</Table.Th>
+                      <Table.Th>{t('dockerEventColReview')}</Table.Th>
+                      <Table.Th>{t('dockerEventColAuto')}</Table.Th>
                       <Table.Th>{t('dockerUsageReviewColPayload')}</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
@@ -383,6 +402,8 @@ export function AdminDockerUsageReviewPage() {
                             {ev.event_ts ?? ev.created_at ?? '—'}
                           </Text>
                         </Table.Td>
+                        <DockerEventReviewCell ev={ev} />
+                        <DockerEventAutoCell ev={ev} />
                         <Table.Td>
                           <Text size="xs" lineClamp={3} style={{ wordBreak: 'break-all' }}>
                             {ev.payload}
