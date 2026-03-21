@@ -197,7 +197,8 @@ def _disk_event_subject_and_lead(event_type: str) -> tuple[str, str]:
     if event_type == "disk_soft_grace_expired":
         return (
             "[Qman] Disk quota grace period expired",
-            "Your disk usage is over the soft limit and the grace period has expired.",
+            "Your disk usage is over the soft limit and the grace period has expired; "
+            "further writes may be blocked until usage drops below the soft limit.",
         )
     if event_type == "disk_hard_limit_reached":
         return (
@@ -213,6 +214,11 @@ def _disk_event_subject_and_lead(event_type: str) -> tuple[str, str]:
         "[Qman] Disk quota notification",
         "There is an update related to your disk quota.",
     )
+
+
+def _disk_quota_show_remediation_actions(event_type: str) -> bool:
+    """Whether the email section should include free-space / cleanup guidance."""
+    return event_type != "disk_back_to_ok"
 
 
 def _build_disk_quota_event_section(
@@ -352,15 +358,29 @@ def _build_disk_quota_event_section(
     # Close metrics list before starting a new section.
     section_parts.append("</ul>")
 
-    # Recommended actions (generic but useful).
-    section_parts.append(
-        "<p style=\"margin:8px 0 0 0;\">Recommended actions:</p>"
-        "<ul>"
-        "<li>Delete files you no longer need on this device.</li>"
-        "<li>Move large, non-critical data (e.g. temporary files, caches, old logs) to other storage.</li>"
-        "<li>Contact your administrator if you are unsure what can be safely removed.</li>"
-        "</ul>"
-    )
+    if grace_items:
+        section_parts.append(
+            "<p style=\"margin:8px 0 0 0;\">"
+            "If usage is still above the soft limit when grace expires, the system may block "
+            "further writes until usage drops below the soft limit."
+            "</p>"
+        )
+
+    if _disk_quota_show_remediation_actions(event_type):
+        section_parts.append(
+            "<p style=\"margin:8px 0 0 0;\">Recommended actions:</p>"
+            "<ul>"
+            "<li>Delete files you no longer need on this device.</li>"
+            "<li>Move large, non-critical data (e.g. temporary files, caches, old logs) to other storage.</li>"
+            "<li>Contact your administrator if you are unsure what can be safely removed.</li>"
+            "</ul>"
+        )
+    elif event_type == "disk_back_to_ok":
+        section_parts.append(
+            "<p style=\"margin:8px 0 0 0;\">"
+            "No action is required for this notification; your usage is back within limits."
+            "</p>"
+        )
 
     en_section_html = "".join(section_parts)
 
@@ -433,14 +453,29 @@ def _build_disk_quota_event_section(
 
     zh_parts.append("</ul>")
 
-    zh_parts.append(
-        "<p style=\"margin:8px 0 0 0;\">推荐操作：</p>"
-        "<ul>"
-        "<li>删除不再需要的文件。</li>"
-        "<li>将体积较大且不关键的数据（例如临时文件、缓存、旧日志）移动到其他存储位置。</li>"
-        "<li>如果不确定哪些数据可以安全删除，请联系管理员。</li>"
-        "</ul>"
-    )
+    if zh_grace_items:
+        zh_parts.append(
+            "<p style=\"margin:8px 0 0 0;\">"
+            "若在宽限期结束时使用量仍高于软限制，系统可能会阻止继续写入，"
+            "直到使用量降至软限制以下。"
+            "</p>"
+        )
+
+    if _disk_quota_show_remediation_actions(event_type):
+        zh_parts.append(
+            "<p style=\"margin:8px 0 0 0;\">推荐操作：</p>"
+            "<ul>"
+            "<li>删除不再需要的文件。</li>"
+            "<li>将体积较大且不关键的数据（例如临时文件、缓存、旧日志）移动到其他存储位置。</li>"
+            "<li>如果不确定哪些数据可以安全删除，请联系管理员。</li>"
+            "</ul>"
+        )
+    elif event_type == "disk_back_to_ok":
+        zh_parts.append(
+            "<p style=\"margin:8px 0 0 0;\">"
+            "当前无需针对本通知采取操作，您的使用量已回到限制范围内。"
+            "</p>"
+        )
 
     zh_section_html = "".join(zh_parts)
 
@@ -578,7 +613,10 @@ def _disk_event_zh_lead(event_type: str) -> str:
     if event_type == "disk_soft_grace_ending":
         return "您的磁盘使用量仍高于软限制，并且宽限期即将结束。"
     if event_type == "disk_soft_grace_expired":
-        return "您的磁盘使用量已超过软限制，且宽限期已经结束。"
+        return (
+            "您的磁盘使用量已超过软限制，且宽限期已经结束；"
+            "在使用量降到软限制以下之前，系统可能会阻止继续写入。"
+        )
     if event_type == "disk_hard_limit_reached":
         return "您的磁盘使用量已达到硬限制，写入操作很可能已经被阻止。"
     if event_type == "disk_back_to_ok":
