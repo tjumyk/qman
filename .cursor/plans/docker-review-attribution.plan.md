@@ -19,13 +19,13 @@ todos:
     status: completed
   - id: master-admin-proxy
     content: Add admin (oauth) master endpoints in `app/routes/api.py` that proxy to the slave endpoints and resolve `oauth_user_id` -> `{host_user_name, uid}`.
-    status: pending
+    status: completed
   - id: frontend-admin-ui
     content: Create `frontend/src/pages/AdminDockerUsageReviewPage.tsx`, wire it into `frontend/src/App.tsx` nav/routes, and add API client + zod schemas for queue/events/assign flows.
-    status: pending
+    status: completed
   - id: sanity-checks
     content: Run lint/type checks and add minimal backend smoke tests for effective-attribution resolution and manual override cascade.
-    status: pending
+    status: completed
 isProject: false
 ---
 
