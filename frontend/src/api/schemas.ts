@@ -282,3 +282,63 @@ export const notificationLogListResponseSchema = z.object({
   page_size: z.number(),
 })
 export type NotificationLogListResponse = z.infer<typeof notificationLogListResponseSchema>
+
+// Admin Docker usage review (master proxies to slave)
+export const dockerUsageReviewQueueItemSchema = z.discriminatedUnion('entity_type', [
+  z.object({
+    entity_type: z.literal('container'),
+    container_id: z.string(),
+    host_user_name: z.string().nullable().optional(),
+    uid: z.number().nullable().optional(),
+    created_at: z.string().nullable().optional(),
+    unresolved_events: z.number(),
+  }),
+  z.object({
+    entity_type: z.literal('image'),
+    image_id: z.string(),
+    puller_host_user_name: z.string().nullable().optional(),
+    puller_uid: z.number().nullable().optional(),
+    created_at: z.string().nullable().optional(),
+    unresolved_events: z.number(),
+  }),
+  z.object({
+    entity_type: z.literal('volume'),
+    volume_name: z.string(),
+    host_user_name: z.string().nullable().optional(),
+    uid: z.number().nullable().optional(),
+    first_seen_at: z.string().nullable().optional(),
+    unresolved_events: z.number(),
+  }),
+])
+export type DockerUsageReviewQueueItem = z.infer<typeof dockerUsageReviewQueueItemSchema>
+
+export const dockerUsageReviewQueueResponseSchema = z.object({
+  items: z.array(dockerUsageReviewQueueItemSchema),
+  total: z.number(),
+  page: z.number(),
+  page_size: z.number(),
+})
+export type DockerUsageReviewQueueResponse = z.infer<typeof dockerUsageReviewQueueResponseSchema>
+
+export const dockerUsageReviewEventSchema = z
+  .object({
+    id: z.number(),
+    source: z.enum(['audit', 'docker']),
+    event_ts: z.string().nullable().optional(),
+    created_at: z.string().nullable().optional(),
+    used_for_auto_attribution: z.boolean(),
+    manual_resolved_at: z.string().nullable().optional(),
+    payload: z.string(),
+  })
+  .passthrough()
+export type DockerUsageReviewEvent = z.infer<typeof dockerUsageReviewEventSchema>
+
+export const dockerUsageReviewEventsResponseSchema = z.object({
+  events: z.array(dockerUsageReviewEventSchema),
+})
+export type DockerUsageReviewEventsResponse = z.infer<typeof dockerUsageReviewEventsResponseSchema>
+
+export const dockerUsageAttributeOkSchema = z.object({
+  status: z.literal('ok'),
+})
+export type DockerUsageAttributeOk = z.infer<typeof dockerUsageAttributeOkSchema>

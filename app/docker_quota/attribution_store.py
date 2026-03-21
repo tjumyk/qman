@@ -5,10 +5,14 @@ from typing import Any
 from app.db import SessionLocal
 from app.models_db import (
     DockerContainerAttribution,
+    DockerContainerAttributionOverride,
     DockerImageAttribution,
+    DockerImageAttributionOverride,
     DockerLayerAttribution,
+    DockerLayerAttributionOverride,
     DockerUserQuotaLimit,
     DockerVolumeAttribution,
+    DockerVolumeAttributionOverride,
     DockerVolumeDiskUsage,
     DockerVolumeLastUsed,
 )
@@ -686,5 +690,628 @@ def reconcile_volume_last_used(volume_names_from_docker: set[str]) -> int:
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+# --- Manual attribution overrides (separate tables; higher priority) ---
+
+
+def get_container_attribution_override(container_id: str) -> dict[str, Any] | None:
+    """Return manual override for a container, or None if not set."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerContainerAttributionOverride)
+            .filter(DockerContainerAttributionOverride.container_id == container_id)
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "container_id": row.container_id,
+            "host_user_name": row.host_user_name,
+            "uid": row.uid,
+            "created_at": row.created_at,
+            "resolved_by_oauth_user_id": row.resolved_by_oauth_user_id,
+        }
+    finally:
+        db.close()
+
+
+def set_container_attribution_override(
+    container_id: str,
+    host_user_name: str,
+    uid: int | None,
+    resolved_by_oauth_user_id: int | None,
+    cascade: bool = False,
+) -> None:
+    """Upsert container manual attribution override.
+
+    If cascade=True, also writes overrides for the container's image + its layers
+    and for volumes mounted by this container.
+    """
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerContainerAttributionOverride)
+            .filter(DockerContainerAttributionOverride.container_id == container_id)
+            .first()
+        )
+        if row:
+            row.host_user_name = host_user_name
+            row.uid = uid
+            row.resolved_by_oauth_user_id = resolved_by_oauth_user_id
+        else:
+            db.add(
+                DockerContainerAttributionOverride(
+                    container_id=container_id,
+                    host_user_name=host_user_name,
+                    uid=uid,
+                    resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if not cascade:
+        return
+
+    # Resolve container -> (image_id, volume_names) from Docker.
+    image_id = _resolve_image_id_from_docker_container(container_id)
+    volume_names = _get_volume_names_for_container(container_id)
+
+    if image_id:
+        set_image_attribution_override(
+            image_id=image_id,
+            puller_host_user_name=host_user_name,
+            puller_uid=uid,
+            resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+            cascade=True,
+        )
+
+    for vol_name in volume_names:
+        set_volume_attribution_override(
+            volume_name=vol_name,
+            host_user_name=host_user_name,
+            uid=uid,
+            resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+        )
+
+
+def delete_container_attribution_override(
+    container_id: str,
+    cascade: bool = False,
+) -> None:
+    """Clear a container manual override (optionally cascade to image/layers/volumes)."""
+    db = SessionLocal()
+    try:
+        db.query(DockerContainerAttributionOverride).filter(
+            DockerContainerAttributionOverride.container_id == container_id
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if not cascade:
+        return
+
+    # Resolve container -> (image_id, volume_names) from Docker and clear related overrides.
+    image_id = _resolve_image_id_from_docker_container(container_id)
+    volume_names = _get_volume_names_for_container(container_id)
+
+    if image_id:
+        delete_image_attribution_override(image_id=image_id, cascade=True)
+    for vol_name in volume_names:
+        delete_volume_attribution_override(volume_name=vol_name)
+
+
+def get_image_attribution_override(image_id: str) -> dict[str, Any] | None:
+    """Return manual override for an image, or None if not set."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerImageAttributionOverride)
+            .filter(DockerImageAttributionOverride.image_id == image_id)
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "image_id": row.image_id,
+            "puller_host_user_name": row.puller_host_user_name,
+            "puller_uid": row.puller_uid,
+            "created_at": row.created_at,
+            "resolved_by_oauth_user_id": row.resolved_by_oauth_user_id,
+        }
+    finally:
+        db.close()
+
+
+def set_image_attribution_override(
+    image_id: str,
+    puller_host_user_name: str,
+    puller_uid: int | None,
+    resolved_by_oauth_user_id: int | None,
+    cascade: bool = False,
+) -> None:
+    """Upsert image manual attribution override (optionally cascade to all layers)."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerImageAttributionOverride)
+            .filter(DockerImageAttributionOverride.image_id == image_id)
+            .first()
+        )
+        if row:
+            row.puller_host_user_name = puller_host_user_name
+            row.puller_uid = puller_uid
+            row.resolved_by_oauth_user_id = resolved_by_oauth_user_id
+        else:
+            db.add(
+                DockerImageAttributionOverride(
+                    image_id=image_id,
+                    puller_host_user_name=puller_host_user_name,
+                    puller_uid=puller_uid,
+                    resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if not cascade:
+        return
+
+    layer_ids = get_layers_for_image(image_id)
+    for layer_id in layer_ids:
+        set_layer_attribution_override(
+            layer_id=layer_id,
+            first_puller_host_user_name=puller_host_user_name,
+            first_puller_uid=puller_uid,
+            resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+        )
+
+
+def delete_image_attribution_override(image_id: str, cascade: bool = False) -> None:
+    """Clear an image manual override (optionally cascade to layer overrides)."""
+    db = SessionLocal()
+    try:
+        db.query(DockerImageAttributionOverride).filter(
+            DockerImageAttributionOverride.image_id == image_id
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if not cascade:
+        return
+
+    layer_ids = get_layers_for_image(image_id)
+    for layer_id in layer_ids:
+        delete_layer_attribution_override(layer_id=layer_id)
+
+
+def get_layer_attribution_override(layer_id: str) -> dict[str, Any] | None:
+    """Return manual override for a layer, or None if not set."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerLayerAttributionOverride)
+            .filter(DockerLayerAttributionOverride.layer_id == layer_id)
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "layer_id": row.layer_id,
+            "first_puller_host_user_name": row.first_puller_host_user_name,
+            "first_puller_uid": row.first_puller_uid,
+            "created_at": row.created_at,
+            "resolved_by_oauth_user_id": row.resolved_by_oauth_user_id,
+        }
+    finally:
+        db.close()
+
+
+def set_layer_attribution_override(
+    layer_id: str,
+    first_puller_host_user_name: str,
+    first_puller_uid: int | None,
+    resolved_by_oauth_user_id: int | None,
+) -> None:
+    """Upsert a layer manual attribution override."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerLayerAttributionOverride)
+            .filter(DockerLayerAttributionOverride.layer_id == layer_id)
+            .first()
+        )
+        if row:
+            row.first_puller_host_user_name = first_puller_host_user_name
+            row.first_puller_uid = first_puller_uid
+            row.resolved_by_oauth_user_id = resolved_by_oauth_user_id
+        else:
+            db.add(
+                DockerLayerAttributionOverride(
+                    layer_id=layer_id,
+                    first_puller_host_user_name=first_puller_host_user_name,
+                    first_puller_uid=first_puller_uid,
+                    resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_layer_attribution_override(layer_id: str) -> None:
+    """Clear a layer manual override."""
+    db = SessionLocal()
+    try:
+        db.query(DockerLayerAttributionOverride).filter(
+            DockerLayerAttributionOverride.layer_id == layer_id
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def get_volume_attribution_override(volume_name: str) -> dict[str, Any] | None:
+    """Return manual override for a volume, or None if not set."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerVolumeAttributionOverride)
+            .filter(DockerVolumeAttributionOverride.volume_name == volume_name)
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "volume_name": row.volume_name,
+            "host_user_name": row.host_user_name,
+            "uid": row.uid,
+            "created_at": row.created_at,
+            "resolved_by_oauth_user_id": row.resolved_by_oauth_user_id,
+        }
+    finally:
+        db.close()
+
+
+def set_volume_attribution_override(
+    volume_name: str,
+    host_user_name: str,
+    uid: int | None,
+    resolved_by_oauth_user_id: int | None,
+) -> None:
+    """Upsert a volume manual attribution override."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DockerVolumeAttributionOverride)
+            .filter(DockerVolumeAttributionOverride.volume_name == volume_name)
+            .first()
+        )
+        if row:
+            row.host_user_name = host_user_name
+            row.uid = uid
+            row.resolved_by_oauth_user_id = resolved_by_oauth_user_id
+        else:
+            db.add(
+                DockerVolumeAttributionOverride(
+                    volume_name=volume_name,
+                    host_user_name=host_user_name,
+                    uid=uid,
+                    resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+                )
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_volume_attribution_override(volume_name: str) -> None:
+    """Clear a volume manual override."""
+    db = SessionLocal()
+    try:
+        db.query(DockerVolumeAttributionOverride).filter(
+            DockerVolumeAttributionOverride.volume_name == volume_name
+        ).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _resolve_image_id_from_docker_container(container_id: str) -> str | None:
+    """Resolve a container's image to full image ID (sha256:...)."""
+    try:
+        import docker
+
+        client = docker.from_env()
+        try:
+            container = client.containers.get(container_id)
+            attrs = container.attrs or {}
+            config = attrs.get("Config") or {}
+            image_ref = config.get("Image") or attrs.get("Image")
+            if not image_ref:
+                return None
+            if isinstance(image_ref, str) and image_ref.startswith("sha256:"):
+                return image_ref
+            try:
+                img = client.images.get(image_ref)
+                return img.id
+            except Exception:
+                return None
+        finally:
+            client.close()
+    except Exception:
+        return None
+
+
+def _get_volume_names_for_container(container_id: str) -> list[str]:
+    """Return list of Docker volume names mounted by a given container."""
+    try:
+        import docker
+
+        client = docker.from_env()
+        try:
+            container = client.containers.get(container_id)
+            attrs = container.attrs or {}
+            mounts = attrs.get("Mounts") or []
+            out: list[str] = []
+            for mount in mounts:
+                if mount.get("Type") != "volume":
+                    continue
+                name = mount.get("Name")
+                if name:
+                    out.append(name)
+            return out
+        finally:
+            client.close()
+    except Exception:
+        return []
+
+
+# --- Effective attribution (manual overrides win) ---
+
+
+def get_container_effective_attributions() -> list[dict[str, Any]]:
+    """Return effective container ownership, using manual overrides when present."""
+    db = SessionLocal()
+    try:
+        auto_rows = db.query(DockerContainerAttribution).all()
+        override_rows = db.query(DockerContainerAttributionOverride).all()
+        overrides = {r.container_id: r for r in override_rows}
+        auto_ids = {r.container_id for r in auto_rows}
+
+        out: list[dict[str, Any]] = []
+        for r in auto_rows:
+            o = overrides.get(r.container_id)
+            if o:
+                out.append(
+                    {
+                        "container_id": r.container_id,
+                        "host_user_name": o.host_user_name,
+                        "uid": o.uid,
+                        "image_id": r.image_id,
+                        "size_bytes": r.size_bytes,
+                        "created_at": o.created_at,
+                    }
+                )
+            else:
+                out.append(
+                    {
+                        "container_id": r.container_id,
+                        "host_user_name": r.host_user_name,
+                        "uid": r.uid,
+                        "image_id": r.image_id,
+                        "size_bytes": r.size_bytes,
+                        "created_at": r.created_at,
+                    }
+                )
+
+        for o in override_rows:
+            if o.container_id in auto_ids:
+                continue
+            out.append(
+                {
+                    "container_id": o.container_id,
+                    "host_user_name": o.host_user_name,
+                    "uid": o.uid,
+                    "image_id": None,
+                    "size_bytes": 0,
+                    "created_at": o.created_at,
+                }
+            )
+
+        return out
+    finally:
+        db.close()
+
+
+def get_image_effective_attributions() -> list[dict[str, Any]]:
+    """Return effective image ownership, using manual overrides when present."""
+    db = SessionLocal()
+    try:
+        auto_rows = db.query(DockerImageAttribution).all()
+        override_rows = db.query(DockerImageAttributionOverride).all()
+        overrides = {r.image_id: r for r in override_rows}
+        auto_ids = {r.image_id for r in auto_rows}
+
+        out: list[dict[str, Any]] = []
+        for r in auto_rows:
+            o = overrides.get(r.image_id)
+            if o:
+                out.append(
+                    {
+                        "image_id": r.image_id,
+                        "puller_host_user_name": o.puller_host_user_name,
+                        "puller_uid": o.puller_uid,
+                        "size_bytes": r.size_bytes,
+                        "created_at": o.created_at,
+                    }
+                )
+            else:
+                out.append(
+                    {
+                        "image_id": r.image_id,
+                        "puller_host_user_name": r.puller_host_user_name,
+                        "puller_uid": r.puller_uid,
+                        "size_bytes": r.size_bytes,
+                        "created_at": r.created_at,
+                    }
+                )
+
+        for o in override_rows:
+            if o.image_id in auto_ids:
+                continue
+            out.append(
+                {
+                    "image_id": o.image_id,
+                    "puller_host_user_name": o.puller_host_user_name,
+                    "puller_uid": o.puller_uid,
+                    "size_bytes": 0,
+                    "created_at": o.created_at,
+                }
+            )
+        return out
+    finally:
+        db.close()
+
+
+def get_layer_effective_attributions() -> list[dict[str, Any]]:
+    """Return effective layer ownership, using manual overrides when present."""
+    db = SessionLocal()
+    try:
+        auto_rows = db.query(DockerLayerAttribution).all()
+        override_rows = db.query(DockerLayerAttributionOverride).all()
+        overrides = {r.layer_id: r for r in override_rows}
+
+        auto_map = {r.layer_id: r for r in auto_rows}
+        out: list[dict[str, Any]] = []
+        seen_layer_ids: set[str] = set()
+
+        for layer_id, a in auto_map.items():
+            o = overrides.get(layer_id)
+            if o:
+                out.append(
+                    {
+                        "layer_id": layer_id,
+                        "first_puller_uid": o.first_puller_uid,
+                        "first_puller_host_user_name": o.first_puller_host_user_name,
+                        "size_bytes": a.size_bytes,
+                        "first_seen_at": o.created_at,
+                        "creation_method": a.creation_method,
+                    }
+                )
+            else:
+                out.append(
+                    {
+                        "layer_id": layer_id,
+                        "first_puller_uid": a.first_puller_uid,
+                        "first_puller_host_user_name": a.first_puller_host_user_name,
+                        "size_bytes": a.size_bytes,
+                        "first_seen_at": a.first_seen_at,
+                        "creation_method": a.creation_method,
+                    }
+                )
+            seen_layer_ids.add(layer_id)
+
+        # Override-only layers (no auto record): ownership known, size_bytes unknown.
+        for layer_id, o in overrides.items():
+            if layer_id in seen_layer_ids:
+                continue
+            out.append(
+                {
+                    "layer_id": layer_id,
+                    "first_puller_uid": o.first_puller_uid,
+                    "first_puller_host_user_name": o.first_puller_host_user_name,
+                    "size_bytes": 0,
+                    "first_seen_at": o.created_at,
+                    "creation_method": None,
+                }
+            )
+        return out
+    finally:
+        db.close()
+
+
+def get_volume_effective_attributions() -> list[dict[str, Any]]:
+    """Return effective volume ownership, using manual overrides when present."""
+    db = SessionLocal()
+    try:
+        auto_rows = db.query(DockerVolumeAttribution).all()
+        override_rows = db.query(DockerVolumeAttributionOverride).all()
+        overrides = {r.volume_name: r for r in override_rows}
+        auto_ids = {r.volume_name for r in auto_rows}
+
+        out: list[dict[str, Any]] = []
+        for r in auto_rows:
+            o = overrides.get(r.volume_name)
+            if o:
+                out.append(
+                    {
+                        "volume_name": r.volume_name,
+                        "host_user_name": o.host_user_name,
+                        "uid": o.uid,
+                        "size_bytes": r.size_bytes,
+                        "attribution_source": "manual_override",
+                        "first_seen_at": o.created_at,
+                    }
+                )
+            else:
+                out.append(
+                    {
+                        "volume_name": r.volume_name,
+                        "host_user_name": r.host_user_name,
+                        "uid": r.uid,
+                        "size_bytes": r.size_bytes,
+                        "attribution_source": r.attribution_source,
+                        "first_seen_at": r.first_seen_at,
+                    }
+                )
+
+        for o in override_rows:
+            if o.volume_name in auto_ids:
+                continue
+            out.append(
+                {
+                    "volume_name": o.volume_name,
+                    "host_user_name": o.host_user_name,
+                    "uid": o.uid,
+                    "size_bytes": 0,
+                    "attribution_source": "manual_override",
+                    "first_seen_at": o.created_at,
+                }
+            )
+
+        return out
     finally:
         db.close()

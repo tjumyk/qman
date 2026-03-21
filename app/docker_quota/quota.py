@@ -6,11 +6,13 @@ from typing import Any
 
 from app.docker_quota.attribution_store import (
     get_container_attributions,
+    get_container_effective_attributions,
     set_container_attribution,
     delete_container_attribution,
     get_image_attributions,
     delete_image_attribution,
     get_volume_attributions,
+    get_volume_effective_attributions,
     delete_volume_attribution,
     get_volume_disk_usage_all,
     get_user_quota_limit,
@@ -18,6 +20,7 @@ from app.docker_quota.attribution_store import (
     batch_set_user_quota_limits,
     get_all_user_quota_limits,
     get_layer_attributions,
+    get_layer_effective_attributions,
     delete_layer_attribution,
 )
 from app.docker_quota.docker_client import (
@@ -160,9 +163,9 @@ def _aggregate_usage_by_uid(
     volume_data = df.get("volumes") or {}
     
     attrib_start = time.time()
-    attributions = get_container_attributions()
-    layer_attributions = get_layer_attributions()
-    volume_attributions = get_volume_attributions()
+    attributions = get_container_effective_attributions()
+    layer_attributions = get_layer_effective_attributions()
+    volume_attributions = get_volume_effective_attributions()
     volume_disk_usage_list = get_volume_disk_usage_all()
     volume_disk_usage_by_name = {u["volume_name"]: u for u in volume_disk_usage_list}
     timings["get_attributions"] = time.time() - attrib_start

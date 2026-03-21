@@ -8,7 +8,7 @@ import requests
 
 from app.celery_app import celery_app
 from app.docker_quota.attribution_store import (
-    get_container_attributions,
+    get_container_effective_attributions,
     get_all_user_quota_limits,
     delete_container_attribution,
 )
@@ -65,7 +65,7 @@ def _containers_by_uid_with_created(
     cid_to_created: dict[str, float] = {}
     for c in containers_list:
         cid_to_created[c["id"]] = _parse_created_iso(c.get("created"))
-    attributions = get_container_attributions()
+    attributions = get_container_effective_attributions()
     uid_to_containers: dict[int, list[tuple[str, int, float]]] = {}
     for att in attributions:
         uid = att.get("uid")

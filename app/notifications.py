@@ -239,7 +239,7 @@ def _build_disk_quota_event_section(
     # For section heading, drop the "[Qman] " prefix if present, since it's already in the email subject.
     heading = subject[7:] if subject.startswith("[Qman] ") else subject
 
-    now_ts = int(datetime.utcnow().timestamp())
+    now_ts = int(datetime.now(timezone.utc).timestamp())
 
     def _format_ts(ts: Any) -> str | None:
         try:

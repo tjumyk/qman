@@ -34,6 +34,13 @@ function buildBreadcrumbItems(pathname: string, params: { hostId?: string; devic
     ]
   }
 
+  if (path === '/manage/docker-usage-review') {
+    return [
+      { path: '/manage', label: t('dashboard'), current: false },
+      { path: '/manage/docker-usage-review', label: t('dockerUsageReviewNav'), current: true },
+    ]
+  }
+
   const { hostId, deviceName } = params
   // Path from useLocation is encoded; params from useParams are decoded
   const pathSegments = path.split('/').filter(Boolean)

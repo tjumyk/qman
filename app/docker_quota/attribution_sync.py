@@ -1,5 +1,7 @@
 """Sync Docker attribution from audit logs and Docker events (container create, image pull)."""
 
+import hashlib
+import json
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -7,7 +9,15 @@ from typing import Any
 import pwd
 
 from app.db import SessionLocal
-from app.models_db import Setting
+from app.models_db import (
+    DockerContainerAttributionOverride,
+    DockerImageAttributionOverride,
+    DockerLayerAttributionOverride,
+    DockerUsageAuditEvent,
+    DockerUsageDockerEvent,
+    DockerVolumeAttributionOverride,
+    Setting,
+)
 from app.docker_quota.attribution_store import (
     get_container_attributions,
     get_image_attributions,
@@ -113,6 +123,56 @@ def _set_setting(key: str, value: str) -> None:
         db.close()
 
 
+def _json_dumps_stable(payload: Any) -> str:
+    """Deterministic JSON encoding for stable fingerprints."""
+    return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _payload_hash_short(payload_str: str, length: int = 10) -> str:
+    return hashlib.sha256(payload_str.encode("utf-8")).hexdigest()[:length]
+
+
+def _fingerprint(prefix: str, *parts: str) -> str:
+    base = "|".join([prefix, *parts])
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()
+
+
+def _audit_event_fingerprint(
+    event_ts_float: float | None,
+    audit_key: str | None,
+    docker_subcommand: str | None,
+    payload_str: str,
+) -> str:
+    ts_part = str(event_ts_float) if event_ts_float is not None else "none"
+    return _fingerprint(
+        "audit",
+        ts_part,
+        audit_key or "",
+        docker_subcommand or "",
+        _payload_hash_short(payload_str),
+    )
+
+
+def _docker_event_fingerprint(
+    event_ts_float: float | None,
+    docker_event_type: str | None,
+    docker_action: str | None,
+    actor_id: str | None,
+    volume_name: str | None,
+    payload_str: str,
+) -> str:
+    ts_part = str(event_ts_float) if event_ts_float is not None else "none"
+    return _fingerprint(
+        "docker",
+        ts_part,
+        docker_event_type or "",
+        docker_action or "",
+        actor_id or "",
+        volume_name or "",
+        _payload_hash_short(payload_str),
+    )
+
+
 def _audit_events_by_time_window(
     audit_events: list[dict[str, Any]],
 ) -> dict[int, int]:
@@ -154,16 +214,17 @@ def _parse_audit_timestamp(ev: dict[str, Any]) -> float | None:
 
 class AuditMatchResult:
     """Result of audit event matching for attribution."""
-    __slots__ = ("uid", "delta", "audit_ts", "subcommand", "proctitle")
+    __slots__ = ("uid", "delta", "audit_ts", "subcommand", "proctitle", "audit_fingerprint")
     
     def __init__(self, uid: int | None = None, delta: float = float("inf"), 
                  audit_ts: float | None = None, subcommand: str | None = None,
-                 proctitle: str | None = None):
+                 proctitle: str | None = None, audit_fingerprint: str | None = None):
         self.uid = uid
         self.delta = delta
         self.audit_ts = audit_ts
         self.subcommand = subcommand
         self.proctitle = proctitle
+        self.audit_fingerprint = audit_fingerprint
     
     @property
     def found(self) -> bool:
@@ -187,7 +248,7 @@ class AuditMatchResult:
 
 def _find_best_audit_match(
     ev_ts: float,
-    audit_by_ts: list[tuple[float, int, str | None, str | None]],
+    audit_by_ts: list[tuple[float, int, str | None, str | None, str]],
     required_subcommands: set[str] | None = None,
     use_asymmetric_window: bool = False,
 ) -> AuditMatchResult:
@@ -217,7 +278,7 @@ def _find_best_audit_match(
         lookback = TIME_WINDOW_SECONDS
         forward = TIME_WINDOW_SECONDS
     
-    for at, uid, subcommand, proctitle in audit_by_ts:
+    for at, uid, subcommand, proctitle, audit_fingerprint in audit_by_ts:
         # Check time window: audit_ts should be in [ev_ts - lookback, ev_ts + forward]
         if at < ev_ts - lookback:
             continue
@@ -245,6 +306,7 @@ def _find_best_audit_match(
             result.audit_ts = at
             result.subcommand = subcommand
             result.proctitle = proctitle
+            result.audit_fingerprint = audit_fingerprint
     
     return result
 
@@ -271,9 +333,14 @@ def sync_containers_from_audit() -> int:
     if not audit_events:
         logger.info("No audit events for container correlation (auditd may not be configured or no Docker activity in time window)")
     
+    db_events = SessionLocal()
+    audit_event_by_fp: dict[str, DockerUsageAuditEvent] = {}
+    pending_audit_events: list[DockerUsageAuditEvent] = []
+    seen_audit_fps: set[str] = set()
+    
     # Build list of (uid, timestamp) from audit for time matching
     # Try multiple UID sources: uid, auid (audit uid - who initiated), euid
-    audit_by_ts: list[tuple[float, int]] = []
+    audit_by_ts: list[tuple[float, int, str]] = []
     parse_failures = 0
     uid_missing = 0
     ts_missing = 0
@@ -281,6 +348,7 @@ def sync_containers_from_audit() -> int:
     for ev in audit_events:
         # Prefer auid (audit uid) over uid for attribution - it tracks who initiated the action
         uid = ev.get("auid") or ev.get("uid") or ev.get("euid")
+        host_user_name: str | None = None
         if uid is None:
             # Try to resolve uid from name if -i flag gave us names
             uid_name = ev.get("auid_name") or ev.get("uid_name")
@@ -291,7 +359,11 @@ def sync_containers_from_audit() -> int:
                     pass
         if uid is None:
             uid_missing += 1
-            continue
+        else:
+            try:
+                host_user_name = pwd.getpwuid(uid).pw_name
+            except KeyError:
+                host_user_name = f"user_{uid}"
         
         # Get timestamp - try multiple sources
         ts_float: float | None = None
@@ -312,16 +384,49 @@ def sync_containers_from_audit() -> int:
         
         if ts_float is None:
             ts_missing += 1
-            continue
 
         # Only use audit events that could have created a container (run/create)
         # so we don't attribute to someone who only ran e.g. "docker ps" or "docker container ls"
         subcommand = (ev.get("docker_subcommand") or "").lower()
-        if subcommand not in (ACTION_TO_SUBCOMMANDS.get("create") or set()):
-            continue
 
-        audit_by_ts.append((ts_float, uid))
+        payload_str = _json_dumps_stable(ev)
+        fp = _audit_event_fingerprint(ts_float, ev.get("key"), subcommand, payload_str)
+        if fp not in seen_audit_fps:
+            seen_audit_fps.add(fp)
+            pending_audit_events.append(
+                DockerUsageAuditEvent(
+                    event_ts=datetime.fromtimestamp(ts_float) if ts_float is not None else None,
+                    uid=uid,
+                    host_user_name=host_user_name,
+                    audit_key=ev.get("key"),
+                    docker_subcommand=subcommand or None,
+                    payload=payload_str,
+                    fingerprint=fp,
+                )
+            )
+
+        if (
+            uid is not None
+            and ts_float is not None
+            and subcommand in (ACTION_TO_SUBCOMMANDS.get("create") or set())
+        ):
+            audit_by_ts.append((ts_float, uid, fp))
     
+    # Persist all parsed audit events for this sync window (dedupe via fingerprint).
+    if pending_audit_events:
+        fps = [e.fingerprint for e in pending_audit_events]
+        existing = (
+            db_events.query(DockerUsageAuditEvent)
+            .filter(DockerUsageAuditEvent.fingerprint.in_(fps))
+            .all()
+        )
+        audit_event_by_fp = {r.fingerprint: r for r in existing}
+        for row in pending_audit_events:
+            if row.fingerprint not in audit_event_by_fp:
+                db_events.add(row)
+                audit_event_by_fp[row.fingerprint] = row
+        db_events.commit()
+
     audit_by_ts.sort(key=lambda x: x[0])
     
     if audit_events:
@@ -333,7 +438,7 @@ def sync_containers_from_audit() -> int:
             # Log time range of usable events
             oldest = datetime.fromtimestamp(audit_by_ts[0][0]).strftime("%Y-%m-%d %H:%M:%S")
             newest = datetime.fromtimestamp(audit_by_ts[-1][0]).strftime("%Y-%m-%d %H:%M:%S")
-            unique_uids = set(uid for _, uid in audit_by_ts)
+            unique_uids = set(uid for _, uid, _ in audit_by_ts)
             logger.info("Audit time range: %s to %s, unique_uids=%s", oldest, newest, list(unique_uids))
     set_count = 0
     containers_checked = 0
@@ -380,12 +485,14 @@ def sync_containers_from_audit() -> int:
         
         # Find audit event within TIME_WINDOW_SECONDS
         best_uid: int | None = None
+        best_fp: str | None = None
         best_delta = float("inf")
-        for at, uid in audit_by_ts:
+        for at, uid, fp in audit_by_ts:
             delta = abs(at - created_ts)
             if delta <= TIME_WINDOW_SECONDS and delta < best_delta:
                 best_delta = delta
                 best_uid = uid
+                best_fp = fp
         
         if best_uid is not None:
             try:
@@ -394,6 +501,12 @@ def sync_containers_from_audit() -> int:
                 name = f"user_{best_uid}"
             size_bytes = container_sizes.get(cid, 0)
             set_container_attribution(cid, name, best_uid, c.get("image"), size_bytes)
+            if best_fp and best_fp in audit_event_by_fp:
+                audit_row = audit_event_by_fp[best_fp]
+                audit_row.used_for_auto_attribution = True
+                audit_row.container_id = cid
+                audit_row.uid = best_uid
+                audit_row.host_user_name = name
             set_count += 1
             logger.info(
                 "Attributed container %s to uid=%s from audit (delta=%.1fs, created=%s)",
@@ -410,6 +523,31 @@ def sync_containers_from_audit() -> int:
                     TIME_WINDOW_SECONDS
                 )
     
+    db_events.commit()
+    db_events.close()
+
+    # Reconcile stale manual container overrides (containers no longer exist).
+    try:
+        override_db = SessionLocal()
+        try:
+            container_ids_in_docker = {c["id"] for c in containers}
+            removed = 0
+            rows = override_db.query(DockerContainerAttributionOverride).all()
+            for r in rows:
+                if r.container_id not in container_ids_in_docker:
+                    override_db.delete(r)
+                    removed += 1
+            if removed:
+                override_db.commit()
+                logger.info(
+                    "Reconciled Docker container attribution overrides: removed %d stale rows",
+                    removed,
+                )
+        finally:
+            override_db.close()
+    except Exception as e:
+        logger.warning("Failed to reconcile container overrides: %s", e)
+
     logger.info(
         "sync_containers_from_audit result: attributed=%d, checked_for_audit=%d (no_created_ts=%d, no_audit_match=%d)",
         set_count, containers_checked, containers_no_created_ts, containers_no_audit_match
@@ -450,8 +588,14 @@ def sync_from_docker_events() -> int:
     df = get_system_df()
     container_sizes = df.get("containers") or {}
     image_sizes = df.get("images") or {}
+
+    db_events = SessionLocal()
+    audit_event_by_fp: dict[str, DockerUsageAuditEvent] = {}
+    pending_audit_events: list[DockerUsageAuditEvent] = []
+    seen_audit_fps: set[str] = set()
+
     # Build audit_by_ts with (timestamp, uid, docker_subcommand) for command-filtered matching
-    audit_by_ts: list[tuple[float, int, str | None]] = []
+    audit_by_ts: list[tuple[float, int, str | None, str | None, str]] = []
     for ev in audit_events:
         # Get UID from auid (preferred) or uid; fall back to name resolution
         uid = ev.get("auid") or ev.get("uid") or ev.get("euid")
@@ -462,41 +606,149 @@ def sync_from_docker_events() -> int:
                 try:
                     uid = pwd.getpwnam(uid_name).pw_uid
                 except KeyError:
-                    continue
-        if uid is None:
-            continue
+                    pass
+        host_user_name: str | None = None
+        if uid is not None:
+            try:
+                host_user_name = pwd.getpwuid(uid).pw_name
+            except KeyError:
+                host_user_name = f"user_{uid}"
+
         ts_str = ev.get("timestamp")
-        if not ts_str:
-            continue
+        ts_float: float | None = None
+        if ts_str:
+            try:
+                s = str(ts_str).strip()
+                if s.replace(".", "", 1).isdigit():
+                    ts_float = float(s)
+                elif " " in s:
+                    dt = datetime.strptime(s, "%m/%d/%Y %H:%M:%S")
+                    ts_float = dt.timestamp()
+            except Exception:
+                ts_float = None
+
         # Get docker subcommand and proctitle for filtering and logging
-        docker_subcommand = ev.get("docker_subcommand")
+        docker_subcommand_raw = ev.get("docker_subcommand")
+        docker_subcommand = docker_subcommand_raw.lower() if docker_subcommand_raw else None
         proctitle = ev.get("proctitle")
-        try:
-            s = str(ts_str).strip()
-            if s.replace(".", "", 1).isdigit():
-                audit_by_ts.append((float(s), uid, docker_subcommand, proctitle))
-            elif " " in s:
-                dt = datetime.strptime(s, "%m/%d/%Y %H:%M:%S")
-                audit_by_ts.append((dt.timestamp(), uid, docker_subcommand, proctitle))
-        except Exception:
-            continue
+
+        payload_str = _json_dumps_stable(ev)
+        fp = _audit_event_fingerprint(ts_float, ev.get("key"), docker_subcommand, payload_str)
+        if fp not in seen_audit_fps:
+            seen_audit_fps.add(fp)
+            pending_audit_events.append(
+                DockerUsageAuditEvent(
+                    event_ts=datetime.fromtimestamp(ts_float) if ts_float is not None else None,
+                    uid=uid,
+                    host_user_name=host_user_name,
+                    audit_key=ev.get("key"),
+                    docker_subcommand=docker_subcommand,
+                    payload=payload_str,
+                    fingerprint=fp,
+                )
+            )
+
+        # Candidate for matching requires timestamp, uid, and docker subcommand.
+        if uid is not None and ts_float is not None and docker_subcommand is not None:
+            audit_by_ts.append((ts_float, uid, docker_subcommand, proctitle, fp))
     audit_by_ts.sort(key=lambda x: x[0])
+
+    # Persist all parsed audit events for this sync window (dedupe via fingerprint).
+    if pending_audit_events:
+        fps = [e.fingerprint for e in pending_audit_events]
+        existing = (
+            db_events.query(DockerUsageAuditEvent)
+            .filter(DockerUsageAuditEvent.fingerprint.in_(fps))
+            .all()
+        )
+        audit_event_by_fp = {r.fingerprint: r for r in existing}
+        for row in pending_audit_events:
+            if row.fingerprint not in audit_event_by_fp:
+                db_events.add(row)
+                audit_event_by_fp[row.fingerprint] = row
+        db_events.commit()
     
     # Log subcommand distribution for debugging
     subcommand_counts: dict[str, int] = {}
-    for _, _, subcmd, _ in audit_by_ts:
+    for _, _, subcmd, _, _ in audit_by_ts:
         key = subcmd or "(none)"
         subcommand_counts[key] = subcommand_counts.get(key, 0) + 1
     if subcommand_counts:
         logger.debug("Audit subcommand distribution: %s", subcommand_counts)
+
+    # Persist Docker events for admin review (dedupe via fingerprint).
+    docker_event_by_fp: dict[str, DockerUsageDockerEvent] = {}
+    pending_docker_events: list[DockerUsageDockerEvent] = []
+    seen_docker_fps: set[str] = set()
+    docker_event_fps_by_index: list[str] = []
+
+    for ev in events:
+        typ = (ev.get("type") or "").lower()
+        action = (ev.get("action") or "").lower()
+        actor_id = ev.get("id")
+
+        time_nano = ev.get("time_nano")
+        try:
+            ev_ts_float = int(time_nano) / 1e9 if time_nano else None
+        except (TypeError, ValueError):
+            ev_ts_float = None
+        if ev_ts_float is not None and ev_ts_float <= 0:
+            ev_ts_float = None
+
+        payload_str = _json_dumps_stable(ev)
+        fp = _docker_event_fingerprint(
+            ev_ts_float,
+            typ,
+            action,
+            actor_id,
+            None,
+            payload_str,
+        )
+        docker_event_fps_by_index.append(fp)
+
+        if fp in seen_docker_fps:
+            continue
+        seen_docker_fps.add(fp)
+
+        pending_docker_events.append(
+            DockerUsageDockerEvent(
+                event_ts=datetime.fromtimestamp(ev_ts_float) if ev_ts_float is not None else None,
+                container_id=actor_id if typ == "container" and action == "create" else None,
+                image_id=None,
+                image_ref=actor_id if typ == "image" else None,
+                volume_name=None,
+                uid=None,
+                host_user_name=None,
+                docker_event_type=typ,
+                docker_action=action,
+                docker_actor_id=actor_id,
+                payload=payload_str,
+                fingerprint=fp,
+            )
+        )
+
+    if pending_docker_events:
+        fps = [e.fingerprint for e in pending_docker_events]
+        existing = (
+            db_events.query(DockerUsageDockerEvent)
+            .filter(DockerUsageDockerEvent.fingerprint.in_(fps))
+            .all()
+        )
+        docker_event_by_fp = {r.fingerprint: r for r in existing}
+        for row in pending_docker_events:
+            if row.fingerprint not in docker_event_by_fp:
+                db_events.add(row)
+                docker_event_by_fp[row.fingerprint] = row
+        db_events.commit()
     attributions = {a["container_id"]: a for a in get_container_attributions()}
     image_attributions = {a["image_id"]: a for a in get_image_attributions()}
     set_count = 0
     cache_invalidated = False
-    for ev in events:
+    for ev_idx, ev in enumerate(events):
         typ = (ev.get("type") or "").lower()
         action = (ev.get("action") or "").lower()
         eid = ev.get("id")
+        docker_fp = docker_event_fps_by_index[ev_idx]
         if not eid:
             continue
         
@@ -542,6 +794,19 @@ def sync_from_docker_events() -> int:
                     name = f"user_{match.uid}"
                 size_bytes = container_sizes.get(eid, 0)
                 set_container_attribution(eid, name, match.uid, None, size_bytes)
+                docker_row = docker_event_by_fp.get(docker_fp)
+                if docker_row:
+                    docker_row.used_for_auto_attribution = True
+                    docker_row.container_id = eid
+                    docker_row.uid = match.uid
+                    docker_row.host_user_name = name
+                if match.audit_fingerprint:
+                    audit_row = audit_event_by_fp.get(match.audit_fingerprint)
+                    if audit_row:
+                        audit_row.used_for_auto_attribution = True
+                        audit_row.container_id = eid
+                        audit_row.uid = match.uid
+                        audit_row.host_user_name = name
                 set_count += 1
                 attributions[eid] = {}
                 ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
@@ -558,11 +823,48 @@ def sync_from_docker_events() -> int:
                     container = client.containers.get(eid)
                     mounts = container.attrs.get("Mounts") or []
                     ev_dt = datetime.fromtimestamp(ev_ts, tz=timezone.utc)
+                    volume_names: list[str] = []
                     for mount in mounts:
                         if mount.get("Type") == "volume":
                             vol_name = mount.get("Name")
                             if vol_name:
+                                volume_names.append(vol_name)
                                 set_volume_last_mounted_at(vol_name, ev_dt)
+                    # Record persisted docker events for each mounted volume so the
+                    # admin review queue can list volume-associated events.
+                    if volume_names:
+                        payload_str = _json_dumps_stable(ev)
+                        ev_ts_float = ev_ts if ev_ts and ev_ts > 0 else None
+                        volume_fps = [
+                            _docker_event_fingerprint(ev_ts_float, typ, action, eid, vn, payload_str)
+                            for vn in volume_names
+                        ]
+                        existing = (
+                            db_events.query(DockerUsageDockerEvent)
+                            .filter(DockerUsageDockerEvent.fingerprint.in_(volume_fps))
+                            .all()
+                        )
+                        existing_fps = {r.fingerprint for r in existing}
+                        for vn in volume_names:
+                            fp = _docker_event_fingerprint(ev_ts_float, typ, action, eid, vn, payload_str)
+                            if fp in existing_fps:
+                                continue
+                            db_events.add(
+                                DockerUsageDockerEvent(
+                                    event_ts=datetime.fromtimestamp(ev_ts_float) if ev_ts_float is not None else None,
+                                    container_id=eid,
+                                    image_id=None,
+                                    image_ref=None,
+                                    volume_name=vn,
+                                    uid=None,
+                                    host_user_name=None,
+                                    docker_event_type=typ,
+                                    docker_action=action,
+                                    docker_actor_id=eid,
+                                    payload=payload_str,
+                                    fingerprint=fp,
+                                )
+                            )
                 finally:
                     client.close()
             except Exception as e:
@@ -584,6 +886,12 @@ def sync_from_docker_events() -> int:
                         set_image_attribution(committed_image_id, creator_name, creator_uid, size_bytes)
                         attribute_image_layers(committed_image_id, creator_name, creator_uid, "commit")
                         image_attributions[committed_image_id] = {}
+                        docker_row = docker_event_by_fp.get(docker_fp)
+                        if docker_row:
+                            docker_row.used_for_auto_attribution = True
+                            docker_row.image_id = committed_image_id
+                            docker_row.uid = creator_uid
+                            docker_row.host_user_name = creator_name
                         logger.info("Attributed committed image %s to uid=%s (from container %s)", committed_image_id[:12], creator_uid, eid[:12])
                 else:
                     # Try audit correlation - filter to "docker commit" commands
@@ -602,6 +910,19 @@ def sync_from_docker_events() -> int:
                         set_image_attribution(committed_image_id, name, match.uid, size_bytes)
                         attribute_image_layers(committed_image_id, name, match.uid, "commit")
                         image_attributions[committed_image_id] = {}
+                        docker_row = docker_event_by_fp.get(docker_fp)
+                        if docker_row:
+                            docker_row.used_for_auto_attribution = True
+                            docker_row.image_id = committed_image_id
+                            docker_row.uid = match.uid
+                            docker_row.host_user_name = name
+                        if match.audit_fingerprint:
+                            audit_row = audit_event_by_fp.get(match.audit_fingerprint)
+                            if audit_row:
+                                audit_row.used_for_auto_attribution = True
+                                audit_row.image_id = committed_image_id
+                                audit_row.uid = match.uid
+                                audit_row.host_user_name = name
                         ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
                         logger.info(
                             "Attributed committed image %s to %s (uid=%s): docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
@@ -642,6 +963,19 @@ def sync_from_docker_events() -> int:
                     set_image_attribution(eid, name, match.uid, size_bytes)
                     attribute_image_layers(eid, name, match.uid, "pull")
                     image_attributions[eid] = {}
+                    docker_row = docker_event_by_fp.get(docker_fp)
+                    if docker_row:
+                        docker_row.used_for_auto_attribution = True
+                        docker_row.image_id = eid
+                        docker_row.uid = match.uid
+                        docker_row.host_user_name = name
+                    if match.audit_fingerprint:
+                        audit_row = audit_event_by_fp.get(match.audit_fingerprint)
+                        if audit_row:
+                            audit_row.used_for_auto_attribution = True
+                            audit_row.image_id = eid
+                            audit_row.uid = match.uid
+                            audit_row.host_user_name = name
                     ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
                     logger.info(
                         "Attributed image %s to %s (uid=%s) via pull: docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
@@ -667,6 +1001,19 @@ def sync_from_docker_events() -> int:
                         set_image_attribution(eid, name, match.uid, size_bytes)
                         attribute_image_layers(eid, name, match.uid, "build")
                         image_attributions[eid] = {}
+                        docker_row = docker_event_by_fp.get(docker_fp)
+                        if docker_row:
+                            docker_row.used_for_auto_attribution = True
+                            docker_row.image_id = eid
+                            docker_row.uid = match.uid
+                            docker_row.host_user_name = name
+                        if match.audit_fingerprint:
+                            audit_row = audit_event_by_fp.get(match.audit_fingerprint)
+                            if audit_row:
+                                audit_row.used_for_auto_attribution = True
+                                audit_row.image_id = eid
+                                audit_row.uid = match.uid
+                                audit_row.host_user_name = name
                         ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
                         logger.info(
                             "Attributed image %s to %s (uid=%s) via build/tag: docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
@@ -690,11 +1037,26 @@ def sync_from_docker_events() -> int:
                         set_image_attribution(eid, name, match.uid, size_bytes)
                         attribute_image_layers(eid, name, match.uid, action)
                         image_attributions[eid] = {}
+                        docker_row = docker_event_by_fp.get(docker_fp)
+                        if docker_row:
+                            docker_row.used_for_auto_attribution = True
+                            docker_row.image_id = eid
+                            docker_row.uid = match.uid
+                            docker_row.host_user_name = name
+                        if match.audit_fingerprint:
+                            audit_row = audit_event_by_fp.get(match.audit_fingerprint)
+                            if audit_row:
+                                audit_row.used_for_auto_attribution = True
+                                audit_row.image_id = eid
+                                audit_row.uid = match.uid
+                                audit_row.host_user_name = name
                         ev_time_str = datetime.fromtimestamp(ev_ts).strftime("%Y-%m-%d %H:%M:%S")
                         logger.info(
                             "Attributed image %s to %s (uid=%s) via %s: docker_event=%s, audit_cmd=%s at %s, delta=%.1fs",
                             eid[:12], name, match.uid, action, ev_time_str, match.command_str(), match.audit_time_str(), match.delta
                         )
+    db_events.commit()
+    db_events.close()
     _set_setting(SETTING_LAST_EVENTS_TS, str(now_ts))
     return set_count
 
@@ -764,6 +1126,35 @@ def sync_existing_images() -> int:
     if removed_layers > 0:
         logger.info("Reconciled layer attributions: removed %d layers that no longer exist (took %.2fs)", 
                    removed_layers, reconcile_time)
+
+    # Reconcile stale manual image/layer overrides.
+    try:
+        override_db = SessionLocal()
+        try:
+            removed_image_overrides = 0
+            for row in override_db.query(DockerImageAttributionOverride).all():
+                if row.image_id not in image_ids_in_docker:
+                    override_db.delete(row)
+                    removed_image_overrides += 1
+
+            removed_layer_overrides = 0
+            for row in override_db.query(DockerLayerAttributionOverride).all():
+                if row.layer_id not in all_layers_in_docker:
+                    override_db.delete(row)
+                    removed_layer_overrides += 1
+
+            if removed_image_overrides > 0 or removed_layer_overrides > 0:
+                override_db.commit()
+                logger.info(
+                    "Reconciled Docker manual overrides (images/layers): removed %d images, %d layers",
+                    removed_image_overrides,
+                    removed_layer_overrides,
+                )
+        finally:
+            override_db.close()
+    except Exception as e:
+        logger.warning("Failed to reconcile image/layer overrides: %s", e)
+
     total_time = time.time() - start_time
     logger.debug("sync_existing_images: total=%.2fs (attributed=%d images, removed=%d images, removed=%d layers)", 
                 total_time, count, removed_images, removed_layers)
@@ -862,6 +1253,28 @@ def sync_volume_attributions() -> dict[str, int]:
             "Reconciled volume data: removed %d attributions, %d disk_usage, %d last_used (took %.2fs)",
             removed_volumes, removed_disk_usage, removed_last_used, reconcile_time
         )
+
+    # Reconcile stale manual volume overrides (volumes no longer exist in Docker).
+    try:
+        override_db = SessionLocal()
+        try:
+            removed_volume_overrides = 0
+            for row in override_db.query(DockerVolumeAttributionOverride).all():
+                if row.volume_name not in volume_names_in_docker:
+                    override_db.delete(row)
+                    removed_volume_overrides += 1
+
+            if removed_volume_overrides > 0:
+                override_db.commit()
+                logger.info(
+                    "Reconciled Docker manual volume overrides: removed %d stale rows",
+                    removed_volume_overrides,
+                )
+        finally:
+            override_db.close()
+    except Exception as e:
+        logger.warning("Failed to reconcile volume overrides: %s", e)
+
     counts["removed"] = removed_volumes
     
     elapsed = time.time() - start_time

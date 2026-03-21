@@ -13,6 +13,9 @@ import {
   deviceDefaultQuotaSchema,
   notificationLogListResponseSchema,
   notificationDetailSchema,
+  dockerUsageReviewQueueResponseSchema,
+  dockerUsageReviewEventsResponseSchema,
+  dockerUsageAttributeOkSchema,
 } from './schemas'
 import type {
   Me,
@@ -30,6 +33,9 @@ import type {
   SetDeviceDefaultQuotaBody,
   NotificationLogListResponse,
   NotificationDetail,
+  DockerUsageReviewQueueResponse,
+  DockerUsageReviewEventsResponse,
+  DockerUsageAttributeOk,
 } from './schemas'
 
 const meMappingsResponseSchema = meMappingSchema.array()
@@ -343,4 +349,88 @@ export async function fetchAdminNotifications(
 export async function fetchAdminNotificationDetail(id: number): Promise<NotificationDetail> {
   const { data } = await api.get<unknown>(`admin/notifications/${id}`)
   return notificationDetailSchema.parse(data)
+}
+
+export type DockerUsageEntityType = 'container' | 'image' | 'volume'
+
+export async function fetchAdminDockerUsageReviewQueue(
+  hostId: string,
+  params: { entityType: DockerUsageEntityType; page?: number; pageSize?: number }
+): Promise<DockerUsageReviewQueueResponse> {
+  const search = new URLSearchParams({ host_id: hostId, entity_type: params.entityType })
+  if (params.page && params.page > 1) search.set('page', String(params.page))
+  if (params.pageSize) search.set('page_size', String(params.pageSize))
+  const { data } = await api.get<unknown>(`admin/docker/usage/review-queue?${search}`, {
+    timeout: TIMEOUT_DEFAULT,
+  })
+  return dockerUsageReviewQueueResponseSchema.parse(data)
+}
+
+export async function fetchAdminDockerUsageEvents(
+  hostId: string,
+  params: {
+    entityType: DockerUsageEntityType
+    entityId: string
+    includeUsed?: boolean
+    volumeName?: string
+  }
+): Promise<DockerUsageReviewEventsResponse> {
+  const search = new URLSearchParams({ host_id: hostId, entity_type: params.entityType })
+  if (params.entityType === 'volume') {
+    search.set('volume_name', params.volumeName ?? params.entityId)
+  } else {
+    search.set('entity_id', params.entityId)
+  }
+  if (params.includeUsed) search.set('include_used', 'true')
+  const { data } = await api.get<unknown>(`admin/docker/usage/events?${search}`, {
+    timeout: TIMEOUT_DEFAULT,
+  })
+  return dockerUsageReviewEventsResponseSchema.parse(data)
+}
+
+export type PostAdminDockerUsageAttributeBody = {
+  entity_type: DockerUsageEntityType
+  oauth_user_id: number
+  host_user_name: string
+  cascade?: boolean
+  container_id?: string
+  image_id?: string
+  volume_name?: string
+}
+
+export async function postAdminDockerUsageAttribute(
+  hostId: string,
+  body: PostAdminDockerUsageAttributeBody
+): Promise<DockerUsageAttributeOk> {
+  const { data } = await api.post<unknown>(
+    `admin/docker/usage/attribute?host_id=${encodeURIComponent(hostId)}`,
+    body,
+    { timeout: TIMEOUT_DEFAULT }
+  )
+  return dockerUsageAttributeOkSchema.parse(data)
+}
+
+export async function deleteAdminDockerUsageAttribute(
+  hostId: string,
+  params: {
+    entityType: DockerUsageEntityType
+    entityId: string
+    cascade?: boolean
+    volumeName?: string
+  }
+): Promise<DockerUsageAttributeOk> {
+  const search = new URLSearchParams({
+    host_id: hostId,
+    entity_type: params.entityType,
+  })
+  if (params.entityType === 'volume') {
+    search.set('volume_name', params.volumeName ?? params.entityId)
+  } else {
+    search.set('entity_id', params.entityId)
+  }
+  if (params.cascade) search.set('cascade', 'true')
+  const { data } = await api.delete<unknown>(`admin/docker/usage/attribute?${search}`, {
+    timeout: TIMEOUT_DEFAULT,
+  })
+  return dockerUsageAttributeOkSchema.parse(data)
 }

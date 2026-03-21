@@ -17,7 +17,7 @@ import {
   useMantineColorScheme,
 } from '@mantine/core'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
-import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink, IconBell } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconUser, IconGauge, IconChartBar, IconServer, IconLink, IconBell, IconBrandDocker } from '@tabler/icons-react'
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useLocation, Outlet } from 'react-router-dom'
@@ -31,6 +31,7 @@ import { HostDetailPage } from './pages/HostDetailPage'
 import { DeviceUserListPage } from './pages/DeviceUserListPage'
 import { AdminMappingsPage } from './pages/AdminMappingsPage'
 import { AdminNotificationsPage } from './pages/AdminNotificationsPage'
+import { AdminDockerUsageReviewPage } from './pages/AdminDockerUsageReviewPage'
 import { PageBreadcrumbs } from './components/PageBreadcrumbs'
 
 function AppShellWithNav() {
@@ -222,6 +223,12 @@ function AppShellWithNav() {
                 active={location.pathname === '/manage/notifications'}
                 onClick={() => navTo('/manage/notifications')}
               />
+              <NavLink
+                leftSection={<IconBrandDocker size={18} />}
+                label={t('dockerUsageReviewNav')}
+                active={location.pathname === '/manage/docker-usage-review'}
+                onClick={() => navTo('/manage/docker-usage-review')}
+              />
             </>
           )}
         </AppShell.Section>
@@ -263,6 +270,7 @@ function App() {
           <Route path="manage/hosts/:hostId/devices/:deviceName" element={<DeviceUserListPage />} />
           <Route path="manage/mappings" element={<AdminMappingsPage />} />
           <Route path="manage/notifications" element={<AdminNotificationsPage />} />
+          <Route path="manage/docker-usage-review" element={<AdminDockerUsageReviewPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

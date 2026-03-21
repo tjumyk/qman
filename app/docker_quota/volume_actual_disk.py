@@ -157,15 +157,11 @@ def collect_volume_actual_disk() -> dict[str, int]:
         scan_finished = disk_usage.get("scan_finished_at")
         if scan_finished is None:
             return False
-        # Compare timestamps (last_mounted_at <= scan_finished_at)
-        if hasattr(last_mounted, "timestamp"):
-            lm_ts = last_mounted.timestamp()
-        else:
-            lm_ts = last_mounted
-        if hasattr(scan_finished, "timestamp"):
-            sf_ts = scan_finished.timestamp()
-        else:
-            sf_ts = scan_finished
+        # Compare as naive UTC wall times from DB (avoid naive .timestamp() = local interpretation).
+        if isinstance(last_mounted, datetime) and isinstance(scan_finished, datetime):
+            return last_mounted <= scan_finished
+        lm_ts = last_mounted.timestamp() if hasattr(last_mounted, "timestamp") else last_mounted
+        sf_ts = scan_finished.timestamp() if hasattr(scan_finished, "timestamp") else scan_finished
         return lm_ts <= sf_ts
 
     to_scan: list[tuple[str, str]] = []

@@ -1084,3 +1084,177 @@ def register_api_routes(app: Any) -> None:
             db.close()
         result.sort(key=lambda x: (x["host_id"], x["host_user_name"]))
         return jsonify(result)
+
+    def _assignee_host_user_name(
+        host_id: str, assignee_oauth_user_id: int, host_user_name_hint: str | None
+    ) -> tuple[str | None, tuple[Any, int] | None]:
+        """Resolve assignee OAuth user to host_user_name for a host; return (name, None) or (None, (jsonify, status))."""
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(OAuthHostUserMapping)
+                .filter(
+                    OAuthHostUserMapping.oauth_user_id == assignee_oauth_user_id,
+                    OAuthHostUserMapping.host_id == host_id,
+                )
+                .all()
+            )
+            if not rows:
+                return None, (jsonify(msg="no OAuth–host user mapping for assignee on this host"), 404)
+            if host_user_name_hint:
+                chosen = next((r for r in rows if r.host_user_name == host_user_name_hint), None)
+                if not chosen:
+                    return None, (jsonify(msg="host_user_name not mapped for this OAuth user on this host"), 404)
+                return chosen.host_user_name, None
+            if len(rows) > 1:
+                return None, (
+                    jsonify(
+                        msg="ambiguous mapping: pass host_user_name to choose host account",
+                        options=[r.host_user_name for r in rows],
+                    ),
+                    400,
+                )
+            return rows[0].host_user_name, None
+        finally:
+            db.close()
+
+    def _slave_resolve_uid(slave: dict[str, Any], host_user_name: str) -> tuple[int | None, tuple[Any, int] | None]:
+        """Resolve host_user_name to uid on slave; return (uid, None) or (None, error_response)."""
+        try:
+            url = f"{slave['url']}/remote-api/users/resolve?username={urllib.parse.quote(host_user_name)}"
+            resp = requests.get(url, auth=make_auth(slave), timeout=_REMOTE_API_TIMEOUT_USER_RESOLVE)
+            if resp.status_code == 404:
+                return None, (jsonify(msg=resp.json().get("msg", "user not found")), 404)
+            if resp.status_code // 100 != 2:
+                return None, (
+                    jsonify(msg=resp.json().get("msg", "resolve failed")),
+                    resp.status_code,
+                )
+            data = resp.json()
+            uid_raw = data.get("uid")
+            if uid_raw is None:
+                return None, (jsonify(msg="slave resolve response missing uid"), 502)
+            return int(uid_raw), None
+        except (OSError, requests.exceptions.RequestException) as e:
+            return None, (jsonify(msg=str(e)), 502)
+
+    @app.route("/api/admin/docker/usage/review-queue")
+    @oauth.requires_admin
+    def admin_docker_usage_review_queue() -> tuple[Any, int] | Any:
+        host_id = (request.args.get("host_id") or "").strip()
+        if not host_id:
+            return jsonify(msg="host_id query parameter required"), 400
+        slave = _slave_by_id(host_id)
+        if not slave:
+            return jsonify(msg="host not found"), 404
+        forward = {k: v for k, v in request.args.items() if k != "host_id"}
+        try:
+            resp = requests.get(
+                f"{slave['url']}/remote-api/docker/usage/review-queue",
+                auth=make_auth(slave),
+                params=forward,
+                timeout=_REMOTE_API_TIMEOUT_DEFAULT,
+            )
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/api/admin/docker/usage/events")
+    @oauth.requires_admin
+    def admin_docker_usage_events() -> tuple[Any, int] | Any:
+        host_id = (request.args.get("host_id") or "").strip()
+        if not host_id:
+            return jsonify(msg="host_id query parameter required"), 400
+        slave = _slave_by_id(host_id)
+        if not slave:
+            return jsonify(msg="host not found"), 404
+        forward = {k: v for k, v in request.args.items() if k != "host_id"}
+        try:
+            resp = requests.get(
+                f"{slave['url']}/remote-api/docker/usage/events",
+                auth=make_auth(slave),
+                params=forward,
+                timeout=_REMOTE_API_TIMEOUT_DEFAULT,
+            )
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/api/admin/docker/usage/attribute", methods=["POST"])
+    @oauth.requires_admin
+    def admin_docker_usage_set_attribute() -> tuple[Any, int] | Any:
+        host_id = (request.args.get("host_id") or "").strip()
+        if not host_id:
+            return jsonify(msg="host_id query parameter required"), 400
+        slave = _slave_by_id(host_id)
+        if not slave:
+            return jsonify(msg="host not found"), 404
+
+        body = request.get_json(silent=True) or {}
+        assignee_oauth = body.get("oauth_user_id")
+        if assignee_oauth is None:
+            return jsonify(msg="oauth_user_id required in body"), 400
+        try:
+            assignee_oauth_user_id = int(assignee_oauth)
+        except (TypeError, ValueError):
+            return jsonify(msg="oauth_user_id must be an integer"), 400
+
+        host_user_name_hint = body.get("host_user_name")
+        if host_user_name_hint is not None:
+            host_user_name_hint = str(host_user_name_hint).strip() or None
+
+        host_user_name, err = _assignee_host_user_name(host_id, assignee_oauth_user_id, host_user_name_hint)
+        if err:
+            return err[0], err[1]
+
+        uid, err2 = _slave_resolve_uid(slave, host_user_name)
+        if err2:
+            return err2[0], err2[1]
+
+        admin_oauth_uid = oauth.get_uid()
+        try:
+            manual_resolver = int(admin_oauth_uid) if admin_oauth_uid is not None else None
+        except (TypeError, ValueError):
+            manual_resolver = None
+
+        slave_body = {
+            "entity_type": body.get("entity_type"),
+            "host_user_name": host_user_name,
+            "uid": uid,
+            "cascade": body.get("cascade"),
+            "manual_resolver": manual_resolver,
+            "container_id": body.get("container_id"),
+            "image_id": body.get("image_id"),
+            "volume_name": body.get("volume_name"),
+        }
+        try:
+            resp = requests.post(
+                f"{slave['url']}/remote-api/docker/usage/attribute",
+                auth=make_auth(slave),
+                json=slave_body,
+                timeout=_REMOTE_API_TIMEOUT_DEFAULT,
+            )
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            return jsonify(msg=str(e)), 502
+
+    @app.route("/api/admin/docker/usage/attribute", methods=["DELETE"])
+    @oauth.requires_admin
+    def admin_docker_usage_clear_attribute() -> tuple[Any, int] | Any:
+        host_id = (request.args.get("host_id") or "").strip()
+        if not host_id:
+            return jsonify(msg="host_id query parameter required"), 400
+        slave = _slave_by_id(host_id)
+        if not slave:
+            return jsonify(msg="host not found"), 404
+        forward = {k: v for k, v in request.args.items() if k != "host_id"}
+        try:
+            resp = requests.delete(
+                f"{slave['url']}/remote-api/docker/usage/attribute",
+                auth=make_auth(slave),
+                params=forward,
+                timeout=_REMOTE_API_TIMEOUT_DEFAULT,
+            )
+            return jsonify(resp.json()), resp.status_code
+        except (OSError, requests.exceptions.RequestException) as e:
+            return jsonify(msg=str(e)), 502

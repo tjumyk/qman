@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models (minimal schema for project rules)."""
 
 from datetime import datetime
-from sqlalchemy import DateTime, Integer, String, Text, ForeignKey
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -232,3 +232,123 @@ class NotificationEvent(Base):
 
     # Optional link to the email log row that included this event (if any).
     email_log_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("notification_email_log.id"), nullable=True)
+
+
+class DockerUsageAuditEvent(Base):
+    """Persisted auditd-derived Docker usage event for admin review."""
+
+    __tablename__ = "docker_usage_audit_event"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(16), default="audit", nullable=False)
+    # Timestamp of the underlying audit action (nullable when parsing didn't find it).
+    event_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Docker/audit identifiers for linking
+    container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)  # name:tag when resolved_id fails
+    volume_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Resolved user info (matching heuristics; nullable)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    host_user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Audit-specific metadata (optional but helps with review/debug and fingerprinting).
+    audit_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    docker_subcommand: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Raw parsed payload (stored as text for SQLite compatibility).
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Review status fields.
+    used_for_auto_attribution: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    manual_resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    manual_resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Unique fingerprint so repeated sync runs do not create duplicates.
+    fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+
+
+class DockerUsageDockerEvent(Base):
+    """Persisted Docker events-derived Docker usage event for admin review."""
+
+    __tablename__ = "docker_usage_docker_event"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(16), default="docker", nullable=False)
+    event_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Docker/audit identifiers for linking
+    container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    volume_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Resolved user info (matching heuristics; nullable)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    host_user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Docker event specifics (optional but helps with review/debug and fingerprinting).
+    docker_event_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    docker_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    docker_actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Raw parsed payload.
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+
+    used_for_auto_attribution: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    manual_resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    manual_resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+
+
+class DockerContainerAttributionOverride(Base):
+    """Admin override for container ownership attribution (higher priority than auto)."""
+
+    __tablename__ = "docker_container_attribution_override"
+
+    container_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class DockerImageAttributionOverride(Base):
+    """Admin override for image ownership attribution (higher priority than auto)."""
+
+    __tablename__ = "docker_image_attribution_override"
+
+    image_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    puller_host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    puller_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class DockerLayerAttributionOverride(Base):
+    """Admin override for layer ownership attribution (higher priority than auto)."""
+
+    __tablename__ = "docker_layer_attribution_override"
+
+    layer_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    first_puller_host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_puller_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class DockerVolumeAttributionOverride(Base):
+    """Admin override for volume ownership attribution (higher priority than auto)."""
+
+    __tablename__ = "docker_volume_attribution_override"
+
+    volume_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -421,7 +421,7 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
         from app.docker_quota.docker_client import get_container_details, get_system_df
-        from app.docker_quota.attribution_store import get_container_attributions
+        from app.docker_quota.attribution_store import get_container_effective_attributions
         
         # Get container details from Docker API
         containers = get_container_details()
@@ -432,7 +432,7 @@ def register_remote_api_routes(app: Any) -> None:
         container_sizes = df.get("containers", {})
         
         # Get attributions from database
-        attributions = {a["container_id"]: a for a in get_container_attributions()}
+        attributions = {a["container_id"]: a for a in get_container_effective_attributions()}
         
         # Merge data
         result_containers = []
@@ -493,17 +493,17 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
         from app.docker_quota.docker_client import get_image_details, get_image_layers_with_sizes
-        from app.docker_quota.attribution_store import get_layer_attributions, get_image_attributions
+        from app.docker_quota.attribution_store import get_layer_effective_attributions, get_image_effective_attributions
         
         # Get image details from Docker API
         images = get_image_details()
         
         # Get layer attributions from database (indexed by layer_id for lookup)
-        layer_attributions_list = get_layer_attributions()
+        layer_attributions_list = get_layer_effective_attributions()
         layer_attributions_map = {la["layer_id"]: la for la in layer_attributions_list}
         
         # Get image attributions from database (indexed by image_id for lookup)
-        image_attributions_list = get_image_attributions()
+        image_attributions_list = get_image_effective_attributions()
         image_attributions_map = {ia["image_id"]: ia for ia in image_attributions_list}
         
         # Build images response and collect ALL unique layers from Docker
@@ -602,14 +602,14 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
         from app.docker_quota.docker_client import get_system_df
-        from app.docker_quota.attribution_store import get_volume_attributions, get_volume_disk_usage_all, get_volume_last_used_all
+        from app.docker_quota.attribution_store import get_volume_effective_attributions, get_volume_disk_usage_all, get_volume_last_used_all
         
         # Get volume data from Docker API
         df = get_system_df(include_volumes=True)
         volumes_data = df.get("volumes", {})
         
         # Get attributions, disk usage, and last mounted from database
-        attributions = {a["volume_name"]: a for a in get_volume_attributions()}
+        attributions = {a["volume_name"]: a for a in get_volume_effective_attributions()}
         disk_usage_list = get_volume_disk_usage_all()
         disk_usage_by_name = {u["volume_name"]: u for u in disk_usage_list}
         last_used_by_name = get_volume_last_used_all()
@@ -676,6 +676,699 @@ def register_remote_api_routes(app: Any) -> None:
             "attributed_bytes": attributed_bytes,
             "unattributed_bytes": unattributed_bytes,
         })
+
+    def _resolve_container_image_and_volumes(container_id: str) -> tuple[str | None, list[str]]:
+        """Resolve (image_id, volume_names) for a container using Docker inspect."""
+        try:
+            import docker
+
+            client = docker.from_env()
+            try:
+                container = client.containers.get(container_id)
+                attrs = container.attrs or {}
+                config = attrs.get("Config") or {}
+                image_ref = config.get("Image") or attrs.get("Image")
+                image_id: str | None = None
+                if isinstance(image_ref, str) and image_ref.startswith("sha256:"):
+                    image_id = image_ref
+                elif image_ref:
+                    try:
+                        img = client.images.get(image_ref)
+                        image_id = img.id
+                    except Exception:
+                        image_id = None
+
+                mounts = attrs.get("Mounts") or []
+                volume_names: list[str] = []
+                for mount in mounts:
+                    if mount.get("Type") != "volume":
+                        continue
+                    name = mount.get("Name")
+                    if name:
+                        volume_names.append(name)
+                return image_id, volume_names
+            finally:
+                client.close()
+        except Exception:
+            return None, []
+
+    def _parse_bool(v: Any) -> bool:
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        return s in ("1", "true", "yes", "y", "on")
+
+    @app.route("/remote-api/docker/usage/review-queue")
+    @requires_api_key
+    def remote_docker_usage_review_queue() -> Any:
+        """Admin queue for manual Docker attribution: list entities with unresolved events."""
+        from sqlalchemy import func
+
+        from app.db import SessionLocal
+        from app.models_db import DockerUsageAuditEvent, DockerUsageDockerEvent
+        from app.docker_quota.attribution_store import (
+            get_container_effective_attributions,
+            get_image_effective_attributions,
+            get_volume_effective_attributions,
+        )
+
+        entity_type = (request.args.get("entity_type") or "").strip().lower()
+        if entity_type not in {"container", "image", "volume"}:
+            return jsonify(msg="entity_type must be container|image|volume"), 400
+
+        page_raw = request.args.get("page") or request.args.get("cursor")
+        try:
+            page = int(page_raw or "1")
+        except ValueError:
+            page = 1
+        try:
+            page_size = int(request.args.get("page_size", "50"))
+        except ValueError:
+            page_size = 50
+        page = max(page, 1)
+        page_size = max(min(page_size, 200), 1)
+
+        db = SessionLocal()
+        try:
+            counts: dict[str, int] = {}
+
+            def _add_counts(rows: list[tuple[str, int]]) -> None:
+                for key, cnt in rows:
+                    if not key:
+                        continue
+                    counts[str(key)] = counts.get(str(key), 0) + int(cnt)
+
+            if entity_type == "container":
+                audit_rows = (
+                    db.query(
+                        DockerUsageAuditEvent.container_id,
+                        func.count(DockerUsageAuditEvent.id),
+                    )
+                    .filter(
+                        DockerUsageAuditEvent.container_id.isnot(None),
+                        DockerUsageAuditEvent.manual_resolved_at.is_(None),
+                    )
+                    .group_by(DockerUsageAuditEvent.container_id)
+                    .all()
+                )
+                docker_rows = (
+                    db.query(
+                        DockerUsageDockerEvent.container_id,
+                        func.count(DockerUsageDockerEvent.id),
+                    )
+                    .filter(
+                        DockerUsageDockerEvent.container_id.isnot(None),
+                        DockerUsageDockerEvent.manual_resolved_at.is_(None),
+                    )
+                    .group_by(DockerUsageDockerEvent.container_id)
+                    .all()
+                )
+                _add_counts(audit_rows)
+                _add_counts(docker_rows)
+
+                eff = get_container_effective_attributions()
+                eff_map = {a["container_id"]: a for a in eff}
+
+            elif entity_type == "image":
+                audit_rows = (
+                    db.query(
+                        DockerUsageAuditEvent.image_id,
+                        func.count(DockerUsageAuditEvent.id),
+                    )
+                    .filter(
+                        DockerUsageAuditEvent.image_id.isnot(None),
+                        DockerUsageAuditEvent.manual_resolved_at.is_(None),
+                    )
+                    .group_by(DockerUsageAuditEvent.image_id)
+                    .all()
+                )
+                docker_rows = (
+                    db.query(
+                        DockerUsageDockerEvent.image_id,
+                        func.count(DockerUsageDockerEvent.id),
+                    )
+                    .filter(
+                        DockerUsageDockerEvent.image_id.isnot(None),
+                        DockerUsageDockerEvent.manual_resolved_at.is_(None),
+                    )
+                    .group_by(DockerUsageDockerEvent.image_id)
+                    .all()
+                )
+                _add_counts(audit_rows)
+                _add_counts(docker_rows)
+
+                eff = get_image_effective_attributions()
+                eff_map = {a["image_id"]: a for a in eff}
+
+            else:  # volume
+                audit_rows = (
+                    db.query(
+                        DockerUsageAuditEvent.volume_name,
+                        func.count(DockerUsageAuditEvent.id),
+                    )
+                    .filter(
+                        DockerUsageAuditEvent.volume_name.isnot(None),
+                        DockerUsageAuditEvent.manual_resolved_at.is_(None),
+                    )
+                    .group_by(DockerUsageAuditEvent.volume_name)
+                    .all()
+                )
+                docker_rows = (
+                    db.query(
+                        DockerUsageDockerEvent.volume_name,
+                        func.count(DockerUsageDockerEvent.id),
+                    )
+                    .filter(
+                        DockerUsageDockerEvent.volume_name.isnot(None),
+                        DockerUsageDockerEvent.manual_resolved_at.is_(None),
+                    )
+                    .group_by(DockerUsageDockerEvent.volume_name)
+                    .all()
+                )
+                _add_counts(audit_rows)
+                _add_counts(docker_rows)
+
+                eff = get_volume_effective_attributions()
+                eff_map = {a["volume_name"]: a for a in eff}
+
+            entities_sorted = sorted(counts.keys(), key=lambda k: (-counts[k], k))
+            total = len(entities_sorted)
+            start = (page - 1) * page_size
+            end = start + page_size
+            page_keys = entities_sorted[start:end]
+
+            items: list[dict[str, Any]] = []
+            for key in page_keys:
+                unresolved = counts.get(key, 0)
+                if entity_type == "container":
+                    att = eff_map.get(key) or {}
+                    items.append(
+                        {
+                            "entity_type": "container",
+                            "container_id": key,
+                            "host_user_name": att.get("host_user_name"),
+                            "uid": att.get("uid"),
+                            "created_at": att.get("created_at").isoformat() if att.get("created_at") else None,
+                            "unresolved_events": unresolved,
+                        }
+                    )
+                elif entity_type == "image":
+                    att = eff_map.get(key) or {}
+                    items.append(
+                        {
+                            "entity_type": "image",
+                            "image_id": key,
+                            "puller_host_user_name": att.get("puller_host_user_name"),
+                            "puller_uid": att.get("puller_uid"),
+                            "created_at": att.get("created_at").isoformat() if att.get("created_at") else None,
+                            "unresolved_events": unresolved,
+                        }
+                    )
+                else:
+                    att = eff_map.get(key) or {}
+                    items.append(
+                        {
+                            "entity_type": "volume",
+                            "volume_name": key,
+                            "host_user_name": att.get("host_user_name"),
+                            "uid": att.get("uid"),
+                            "first_seen_at": att.get("first_seen_at").isoformat() if att.get("first_seen_at") else None,
+                            "unresolved_events": unresolved,
+                        }
+                    )
+
+            return jsonify({"items": items, "total": total, "page": page, "page_size": page_size})
+        finally:
+            db.close()
+
+    @app.route("/remote-api/docker/usage/events")
+    @requires_api_key
+    def remote_docker_usage_events() -> Any:
+        """Admin endpoint: list audit+docker events linked to a container/image/volume."""
+        from datetime import datetime, timezone
+
+        from app.db import SessionLocal
+        from app.models_db import DockerUsageAuditEvent, DockerUsageDockerEvent
+
+        def _iso_to_epoch_for_sort(iso: str) -> float:
+            """DB datetimes are stored as naive UTC; isoformat() has no offset — treat naive as UTC."""
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+
+        entity_type = (request.args.get("entity_type") or "").strip().lower()
+        if entity_type not in {"container", "image", "volume"}:
+            return jsonify(msg="entity_type must be container|image|volume"), 400
+
+        include_used = _parse_bool(request.args.get("include_used"))
+
+        container_id = request.args.get("container_id") or request.args.get("entity_id")
+        image_id = request.args.get("image_id") or request.args.get("entity_id")
+        volume_name = request.args.get("volume_name")
+
+        db = SessionLocal()
+        try:
+            unresolved_filter = DockerUsageAuditEvent.manual_resolved_at.is_(None)
+            unresolved_docker_filter = DockerUsageDockerEvent.manual_resolved_at.is_(None)
+
+            events: list[dict[str, Any]] = []
+
+            if entity_type == "container":
+                if not container_id:
+                    return jsonify(msg="container_id (or entity_id) required"), 400
+                q_audit = (
+                    db.query(DockerUsageAuditEvent)
+                    .filter(DockerUsageAuditEvent.container_id == container_id, unresolved_filter)
+                )
+                q_docker = (
+                    db.query(DockerUsageDockerEvent)
+                    .filter(DockerUsageDockerEvent.container_id == container_id, unresolved_docker_filter)
+                )
+                if not include_used:
+                    q_audit = q_audit.filter(DockerUsageAuditEvent.used_for_auto_attribution.is_(False))
+                    q_docker = q_docker.filter(DockerUsageDockerEvent.used_for_auto_attribution.is_(False))
+                audit_rows = q_audit.all()
+                docker_rows = q_docker.all()
+
+                for r in audit_rows:
+                    events.append(
+                        {
+                            "id": r.id,
+                            "source": "audit",
+                            "event_ts": r.event_ts.isoformat() if r.event_ts else None,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                            "used_for_auto_attribution": r.used_for_auto_attribution,
+                            "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "payload": r.payload,
+                            "audit_key": r.audit_key,
+                            "docker_subcommand": r.docker_subcommand,
+                        }
+                    )
+                for r in docker_rows:
+                    events.append(
+                        {
+                            "id": r.id,
+                            "source": "docker",
+                            "event_ts": r.event_ts.isoformat() if r.event_ts else None,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                            "used_for_auto_attribution": r.used_for_auto_attribution,
+                            "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "payload": r.payload,
+                            "docker_event_type": r.docker_event_type,
+                            "docker_action": r.docker_action,
+                            "docker_actor_id": r.docker_actor_id,
+                            "volume_name": r.volume_name,
+                        }
+                    )
+
+            elif entity_type == "image":
+                if not image_id:
+                    return jsonify(msg="image_id (or entity_id) required"), 400
+                q_audit = (
+                    db.query(DockerUsageAuditEvent)
+                    .filter(DockerUsageAuditEvent.image_id == image_id, unresolved_filter)
+                )
+                q_docker = (
+                    db.query(DockerUsageDockerEvent)
+                    .filter(DockerUsageDockerEvent.image_id == image_id, unresolved_docker_filter)
+                )
+                if not include_used:
+                    q_audit = q_audit.filter(DockerUsageAuditEvent.used_for_auto_attribution.is_(False))
+                    q_docker = q_docker.filter(DockerUsageDockerEvent.used_for_auto_attribution.is_(False))
+                audit_rows = q_audit.all()
+                docker_rows = q_docker.all()
+                for r in audit_rows:
+                    events.append(
+                        {
+                            "id": r.id,
+                            "source": "audit",
+                            "event_ts": r.event_ts.isoformat() if r.event_ts else None,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                            "used_for_auto_attribution": r.used_for_auto_attribution,
+                            "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "payload": r.payload,
+                            "audit_key": r.audit_key,
+                            "docker_subcommand": r.docker_subcommand,
+                        }
+                    )
+                for r in docker_rows:
+                    events.append(
+                        {
+                            "id": r.id,
+                            "source": "docker",
+                            "event_ts": r.event_ts.isoformat() if r.event_ts else None,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                            "used_for_auto_attribution": r.used_for_auto_attribution,
+                            "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "payload": r.payload,
+                            "docker_event_type": r.docker_event_type,
+                            "docker_action": r.docker_action,
+                            "docker_actor_id": r.docker_actor_id,
+                            "image_ref": r.image_ref,
+                        }
+                    )
+
+            else:  # volume
+                if not volume_name:
+                    return jsonify(msg="volume_name required"), 400
+                q_audit = (
+                    db.query(DockerUsageAuditEvent)
+                    .filter(DockerUsageAuditEvent.volume_name == volume_name, unresolved_filter)
+                )
+                q_docker = (
+                    db.query(DockerUsageDockerEvent)
+                    .filter(DockerUsageDockerEvent.volume_name == volume_name, unresolved_docker_filter)
+                )
+                if not include_used:
+                    q_audit = q_audit.filter(DockerUsageAuditEvent.used_for_auto_attribution.is_(False))
+                    q_docker = q_docker.filter(DockerUsageDockerEvent.used_for_auto_attribution.is_(False))
+                audit_rows = q_audit.all()
+                docker_rows = q_docker.all()
+                for r in audit_rows:
+                    events.append(
+                        {
+                            "id": r.id,
+                            "source": "audit",
+                            "event_ts": r.event_ts.isoformat() if r.event_ts else None,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                            "used_for_auto_attribution": r.used_for_auto_attribution,
+                            "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "payload": r.payload,
+                            "audit_key": r.audit_key,
+                            "docker_subcommand": r.docker_subcommand,
+                        }
+                    )
+                for r in docker_rows:
+                    events.append(
+                        {
+                            "id": r.id,
+                            "source": "docker",
+                            "event_ts": r.event_ts.isoformat() if r.event_ts else None,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                            "used_for_auto_attribution": r.used_for_auto_attribution,
+                            "manual_resolved_at": r.manual_resolved_at.isoformat() if r.manual_resolved_at else None,
+                            "payload": r.payload,
+                            "docker_event_type": r.docker_event_type,
+                            "docker_action": r.docker_action,
+                            "docker_actor_id": r.docker_actor_id,
+                        }
+                    )
+
+            # Sort by event_ts (fallback: created_at)
+            def _sort_key(d: dict[str, Any]) -> tuple[float, float]:
+                ts = d.get("event_ts")
+                created = d.get("created_at")
+                if ts:
+                    try:
+                        return (_iso_to_epoch_for_sort(ts), 0.0)
+                    except Exception:
+                        pass
+                if created:
+                    try:
+                        return (_iso_to_epoch_for_sort(created), 0.1)
+                    except Exception:
+                        pass
+                return (float("inf"), 1.0)
+
+            events.sort(key=_sort_key)
+            return jsonify({"events": events})
+        finally:
+            db.close()
+
+    @app.route("/remote-api/docker/usage/attribute", methods=["POST"])
+    @requires_api_key
+    def remote_docker_usage_set_attribute() -> Any:
+        """Admin endpoint: set manual attribution override with optional cascade."""
+        from datetime import datetime
+
+        from app.db import SessionLocal
+        from app.models_db import DockerUsageAuditEvent, DockerUsageDockerEvent
+        from app.docker_quota.attribution_store import (
+            set_container_attribution_override,
+            set_image_attribution_override,
+            set_volume_attribution_override,
+        )
+
+        body = request.get_json(silent=True) or {}
+        entity_type = (body.get("entity_type") or "").strip().lower()
+        if entity_type not in {"container", "image", "volume"}:
+            return jsonify(msg="entity_type must be container|image|volume"), 400
+
+        cascade = _parse_bool(body.get("cascade"))
+        manual_resolver = body.get("manual_resolver")
+        if manual_resolver is not None:
+            try:
+                manual_resolver = int(manual_resolver)
+            except (TypeError, ValueError):
+                manual_resolver = None
+
+        host_user_name = body.get("host_user_name")
+        uid = body.get("uid")
+        if uid is not None:
+            try:
+                uid = int(uid)
+            except (TypeError, ValueError):
+                uid = None
+
+        now = datetime.utcnow()
+
+        container_id = body.get("container_id")
+        image_id = body.get("image_id")
+        volume_name = body.get("volume_name")
+
+        if entity_type == "container" and not container_id:
+            return jsonify(msg="container_id required"), 400
+        if entity_type == "image" and not image_id:
+            return jsonify(msg="image_id required"), 400
+        if entity_type == "volume" and not volume_name:
+            return jsonify(msg="volume_name required"), 400
+        if not host_user_name:
+            return jsonify(msg="host_user_name required"), 400
+
+        affected_containers: list[str] = []
+        affected_images: list[str] = []
+        affected_volumes: list[str] = []
+
+        if entity_type == "container":
+            affected_containers = [str(container_id)]
+            if cascade:
+                resolved_image_id, resolved_volume_names = _resolve_container_image_and_volumes(str(container_id))
+                if resolved_image_id:
+                    affected_images = [resolved_image_id]
+                affected_volumes = [str(v) for v in resolved_volume_names]
+            set_container_attribution_override(
+                container_id=str(container_id),
+                host_user_name=str(host_user_name),
+                uid=uid,
+                resolved_by_oauth_user_id=manual_resolver,
+                cascade=cascade,
+            )
+        elif entity_type == "image":
+            affected_images = [str(image_id)]
+            set_image_attribution_override(
+                image_id=str(image_id),
+                puller_host_user_name=str(host_user_name),
+                puller_uid=uid,
+                resolved_by_oauth_user_id=manual_resolver,
+                cascade=cascade,
+            )
+        else:
+            affected_volumes = [str(volume_name)]
+            set_volume_attribution_override(
+                volume_name=str(volume_name),
+                host_user_name=str(host_user_name),
+                uid=uid,
+                resolved_by_oauth_user_id=manual_resolver,
+            )
+
+        db = SessionLocal()
+        try:
+            if affected_containers:
+                db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.container_id.in_(affected_containers)
+                ).update(
+                    {
+                        DockerUsageAuditEvent.manual_resolved_at: now,
+                        DockerUsageAuditEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+                db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.container_id.in_(affected_containers)
+                ).update(
+                    {
+                        DockerUsageDockerEvent.manual_resolved_at: now,
+                        DockerUsageDockerEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+
+            if affected_images:
+                db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.image_id.in_(affected_images)
+                ).update(
+                    {
+                        DockerUsageAuditEvent.manual_resolved_at: now,
+                        DockerUsageAuditEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+                db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.image_id.in_(affected_images)
+                ).update(
+                    {
+                        DockerUsageDockerEvent.manual_resolved_at: now,
+                        DockerUsageDockerEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+
+            if affected_volumes:
+                db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.volume_name.in_(affected_volumes)
+                ).update(
+                    {
+                        DockerUsageAuditEvent.manual_resolved_at: now,
+                        DockerUsageAuditEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+                db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.volume_name.in_(affected_volumes)
+                ).update(
+                    {
+                        DockerUsageDockerEvent.manual_resolved_at: now,
+                        DockerUsageDockerEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+
+            db.commit()
+        finally:
+            db.close()
+
+        return jsonify({"status": "ok"})
+
+    @app.route("/remote-api/docker/usage/attribute", methods=["DELETE"])
+    @requires_api_key
+    def remote_docker_usage_clear_attribute() -> Any:
+        """Admin endpoint: clear manual attribution override (optionally cascade)."""
+        from app.db import SessionLocal
+        from app.models_db import DockerUsageAuditEvent, DockerUsageDockerEvent
+        from app.docker_quota.attribution_store import (
+            delete_container_attribution_override,
+            delete_image_attribution_override,
+            delete_volume_attribution_override,
+        )
+
+        entity_type = (request.args.get("entity_type") or "").strip().lower()
+        if entity_type not in {"container", "image", "volume"}:
+            return jsonify(msg="entity_type must be container|image|volume"), 400
+
+        cascade = _parse_bool(request.args.get("cascade"))
+        manual_resolved_at = None
+        manual_resolver = None
+
+        affected_containers: list[str] = []
+        affected_images: list[str] = []
+        affected_volumes: list[str] = []
+
+        if entity_type == "container":
+            container_id = request.args.get("entity_id") or request.args.get("container_id")
+            if not container_id:
+                return jsonify(msg="container_id (or entity_id) required"), 400
+            affected_containers = [str(container_id)]
+            if cascade:
+                resolved_image_id, resolved_volume_names = _resolve_container_image_and_volumes(str(container_id))
+                if resolved_image_id:
+                    affected_images = [resolved_image_id]
+                affected_volumes = [str(v) for v in resolved_volume_names]
+            delete_container_attribution_override(container_id=str(container_id), cascade=cascade)
+        elif entity_type == "image":
+            image_id = request.args.get("entity_id") or request.args.get("image_id")
+            if not image_id:
+                return jsonify(msg="image_id (or entity_id) required"), 400
+            affected_images = [str(image_id)]
+            if cascade:
+                # Clearing an image override with cascade also clears its layer overrides; for
+                # review events we only need to clear the image-associated rows.
+                affected_containers = []
+            delete_image_attribution_override(image_id=str(image_id), cascade=cascade)
+        else:
+            volume_name = request.args.get("volume_name")
+            if not volume_name:
+                return jsonify(msg="volume_name required"), 400
+            affected_volumes = [str(volume_name)]
+            delete_volume_attribution_override(volume_name=str(volume_name))
+
+        db = SessionLocal()
+        try:
+            if affected_containers:
+                db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.container_id.in_(affected_containers)
+                ).update(
+                    {
+                        DockerUsageAuditEvent.manual_resolved_at: manual_resolved_at,
+                        DockerUsageAuditEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+                db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.container_id.in_(affected_containers)
+                ).update(
+                    {
+                        DockerUsageDockerEvent.manual_resolved_at: manual_resolved_at,
+                        DockerUsageDockerEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+
+            if affected_images:
+                db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.image_id.in_(affected_images)
+                ).update(
+                    {
+                        DockerUsageAuditEvent.manual_resolved_at: manual_resolved_at,
+                        DockerUsageAuditEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+                db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.image_id.in_(affected_images)
+                ).update(
+                    {
+                        DockerUsageDockerEvent.manual_resolved_at: manual_resolved_at,
+                        DockerUsageDockerEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+
+            if affected_volumes:
+                db.query(DockerUsageAuditEvent).filter(
+                    DockerUsageAuditEvent.volume_name.in_(affected_volumes)
+                ).update(
+                    {
+                        DockerUsageAuditEvent.manual_resolved_at: manual_resolved_at,
+                        DockerUsageAuditEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+                db.query(DockerUsageDockerEvent).filter(
+                    DockerUsageDockerEvent.volume_name.in_(affected_volumes)
+                ).update(
+                    {
+                        DockerUsageDockerEvent.manual_resolved_at: manual_resolved_at,
+                        DockerUsageDockerEvent.manual_resolved_by_oauth_user_id: manual_resolver,
+                    },
+                    synchronize_session=False,
+                )
+
+            db.commit()
+        finally:
+            db.close()
+
+        return jsonify({"status": "ok"})
 
     @app.route("/remote-api/quotas/defaults")
     @requires_api_key
