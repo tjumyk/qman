@@ -1359,7 +1359,8 @@ def get_layer_effective_attributions() -> list[dict[str, Any]]:
                 )
             seen_layer_ids.add(layer_id)
 
-        # Override-only layers (no auto record): ownership known, size_bytes unknown.
+        # Override-only layers (no auto record): ownership from override; size_bytes unknown here
+        # (quota aggregation fills sizes from Docker via collect_layer_id_to_size_from_all_images).
         for layer_id, o in overrides.items():
             if layer_id in seen_layer_ids:
                 continue

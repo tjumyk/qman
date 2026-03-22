@@ -477,6 +477,25 @@ def remove_container(container_id: str, force: bool = True) -> bool:
         return False
 
 
+def _image_layers_with_sizes_api(api: Any, image_id: str) -> list[tuple[str, int]]:
+    """Layer list for one image using an existing low-level Docker API client (``client.api``).
+
+    Returns [(layer_id, size_bytes), ...] oldest-first. Raises on Docker API errors.
+    """
+    inspect = api.inspect_image(image_id)
+    rootfs = inspect.get("RootFS", {})
+    layer_ids = rootfs.get("Layers", [])
+    if not layer_ids:
+        return []
+    history = api.history(image_id)
+    history_sizes = [h.get("Size", 0) for h in reversed(history)]
+    result: list[tuple[str, int]] = []
+    for i, layer_id in enumerate(layer_ids):
+        size = history_sizes[i] if i < len(history_sizes) else 0
+        result.append((layer_id, size))
+    return result
+
+
 def get_image_layers_with_sizes(image_id: str) -> list[tuple[str, int]]:
     """Get layers and their sizes for an image. Returns [(layer_id, size_bytes), ...] in order (oldest first).
     Uses Docker API's inspect_image for layer IDs and history() for layer sizes.
@@ -485,48 +504,82 @@ def get_image_layers_with_sizes(image_id: str) -> list[tuple[str, int]]:
     start_time = time.time()
     try:
         import docker
+
         client_start = time.time()
         client = docker.from_env()
         client_init_time = time.time() - client_start
-        
-        # Get layer IDs (oldest first)
-        inspect_start = time.time()
-        inspect = client.api.inspect_image(image_id)
-        inspect_time = time.time() - inspect_start
-        
-        rootfs = inspect.get("RootFS", {})
-        layer_ids = rootfs.get("Layers", [])
-        if not layer_ids:
-            elapsed = time.time() - start_time
-            logger.debug("Docker get_image_layers_with_sizes %s: total=%.2fs (no layers)", image_id[:12], elapsed)
-            return []
-        
-        # Get layer sizes from history (newest first, so reverse)
-        history_start = time.time()
-        history = client.api.history(image_id)
-        history_time = time.time() - history_start
-        
-        # history returns list of dicts with 'Size' field (incremental size added by each layer)
-        # Match layers: RootFS.Layers[0] (oldest) -> history[-1] (oldest), RootFS.Layers[-1] (newest) -> history[0] (newest)
-        parse_start = time.time()
-        history_sizes = [h.get("Size", 0) for h in reversed(history)]  # Reverse to oldest first
-        # Match layer_ids with sizes (pad if mismatch)
-        result: list[tuple[str, int]] = []
-        for i, layer_id in enumerate(layer_ids):
-            size = history_sizes[i] if i < len(history_sizes) else 0
-            result.append((layer_id, size))
-        parse_time = time.time() - parse_start
-        
-        total_time = time.time() - start_time
-        logger.debug(
-            "Docker get_image_layers_with_sizes %s: total=%.2fs (client_init=%.2fs, inspect=%.2fs, history=%.2fs, parse=%.2fs, layers=%d)",
-            image_id[:12], total_time, client_init_time, inspect_time, history_time, parse_time, len(result)
-        )
-        return result
+        try:
+            api_start = time.time()
+            result = _image_layers_with_sizes_api(client.api, image_id)
+            api_elapsed = time.time() - api_start
+            if not result:
+                elapsed = time.time() - start_time
+                logger.debug("Docker get_image_layers_with_sizes %s: total=%.2fs (no layers)", image_id[:12], elapsed)
+                return []
+            total_time = time.time() - start_time
+            logger.debug(
+                "Docker get_image_layers_with_sizes %s: total=%.2fs (client_init=%.2fs, api=%.2fs, layers=%d)",
+                image_id[:12],
+                total_time,
+                client_init_time,
+                api_elapsed,
+                len(result),
+            )
+            return result
+        finally:
+            client.close()
     except Exception as e:
         elapsed = time.time() - start_time
         logger.warning("Docker get image layers failed for %s: %s (took %.2fs)", image_id[:12], e, elapsed)
         return []
+
+
+def collect_layer_id_to_size_from_all_images(use_cache: bool = True) -> dict[str, int]:
+    """Map layer_id -> incremental size_bytes for every layer referenced by a local image.
+
+    Used when attribution rows have no stored size (e.g. ``docker_layer_attribution_override`` only,
+    with no matching ``docker_layer_attribution`` auto row).
+
+    Cost: O(images) Docker API calls (inspect + history per image), but **one** TCP/client for the
+    whole scan—cheaper than calling ``get_image_layers_with_sizes`` in a loop (which opened a client each time).
+    """
+    start = time.time()
+    out: dict[str, int] = {}
+    images = list_images(use_cache=use_cache)
+    if not images:
+        return out
+    try:
+        import docker
+
+        client = docker.from_env()
+        try:
+            api = client.api
+            for img in images:
+                iid = img.get("id")
+                if not iid:
+                    continue
+                try:
+                    for layer_id, sz in _image_layers_with_sizes_api(api, iid):
+                        if layer_id not in out:
+                            out[layer_id] = sz
+                except Exception as e:
+                    logger.debug(
+                        "collect_layer_id_to_size_from_all_images: skip image %s: %s",
+                        iid[:12],
+                        e,
+                    )
+        finally:
+            client.close()
+    except Exception as e:
+        logger.warning("collect_layer_id_to_size_from_all_images failed: %s", e)
+    elapsed = time.time() - start
+    logger.info(
+        "Docker collect_layer_id_to_size_from_all_images: %d unique layers from %d images in %.2fs",
+        len(out),
+        len(images),
+        elapsed,
+    )
+    return out
 
 
 def get_container_details() -> list[dict[str, Any]]:

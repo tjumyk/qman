@@ -24,6 +24,7 @@ from app.docker_quota.attribution_store import (
     delete_layer_attribution,
 )
 from app.docker_quota.docker_client import (
+    collect_layer_id_to_size_from_all_images,
     get_docker_data_root,
     list_containers,
     list_images,
@@ -220,8 +221,17 @@ def _aggregate_usage_by_uid(
     total_image_used = sum(image_sizes.values())  # All Docker images
     layer_by_uid: dict[int, int] = {}
     attributed_layer_used = 0
+    layer_size_by_id: dict[str, int] = {}
+    if any(
+        (la.get("size_bytes") or 0) == 0 and la.get("layer_id")
+        for la in layer_attributions
+    ):
+        layer_size_by_id = collect_layer_id_to_size_from_all_images(use_cache=use_cache)
     for layer_att in layer_attributions:
-        layer_size = layer_att.get("size_bytes", 0)
+        lid = layer_att.get("layer_id") or ""
+        layer_size = int(layer_att.get("size_bytes") or 0)
+        if layer_size == 0 and lid:
+            layer_size = layer_size_by_id.get(lid, 0)
         attributed_layer_used += layer_size
         uid = resolve_uid_for_docker_attribution(
             layer_att.get("first_puller_uid"),
