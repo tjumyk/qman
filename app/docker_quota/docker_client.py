@@ -1,10 +1,9 @@
 """Docker API/CLI client for listing containers, images, and disk usage (slave).
 
-Note on timeouts: Docker API requests can take ~1 minute to complete. The collect_events_since()
-function has a configurable timeout (default 90s). Other Docker SDK calls (list_containers,
-get_system_df, etc.) use the SDK's default timeout (no timeout by default, waits indefinitely).
-If you need explicit timeouts for all Docker operations, configure the Docker client with
-timeout parameters when creating it.
+Note on timeouts: docker-py's default HTTP read timeout is 60 seconds for all API calls.
+Heavy endpoints such as ``system/df`` can exceed that on busy hosts; ``get_system_df()`` uses
+a longer timeout (default 180s, overridable via ``DOCKER_SYSTEM_DF_TIMEOUT``).
+The collect_events_since() function has a separate configurable wall-clock limit (default 90s).
 
 Note on caching: list_containers() and list_images() use Redis cache with 10-minute TTL.
 Cache is invalidated when Docker events indicate container/image changes. This significantly
@@ -16,6 +15,7 @@ is unavailable, in-process threading locks are used as fallback. Cacheable opera
 locking: the first caller does the work and fills the cache; waiters then see a cache hit.
 """
 
+import os
 import threading
 import time
 from typing import Any
@@ -29,6 +29,20 @@ logger = get_logger(__name__)
 _lock_list_containers = threading.Lock()
 _lock_list_images = threading.Lock()
 _lock_system_df = threading.Lock()
+
+# ``GET /system/df`` can run longer than docker-py's default 60s read timeout on large daemons.
+_DEFAULT_SYSTEM_DF_TIMEOUT_SEC = 180
+
+
+def _system_df_api_timeout_seconds() -> int:
+    """Seconds for Docker client timeout during system df only (env DOCKER_SYSTEM_DF_TIMEOUT)."""
+    raw = os.environ.get("DOCKER_SYSTEM_DF_TIMEOUT", str(_DEFAULT_SYSTEM_DF_TIMEOUT_SEC))
+    try:
+        n = int(raw, 10)
+    except ValueError:
+        return _DEFAULT_SYSTEM_DF_TIMEOUT_SEC
+    return max(60, min(n, 3600))
+
 
 def get_docker_data_root(base_url: str = "unix://var/run/docker.sock") -> str:
     """Return Docker data root (e.g. /var/lib/docker). Uses 'docker info' or default."""
@@ -274,12 +288,16 @@ def get_system_df(
         try:
             import docker
             client_start = time.time()
-            client = docker.from_env()
+            df_timeout = _system_df_api_timeout_seconds()
+            client = docker.from_env(timeout=df_timeout)
             client_init_time = time.time() - client_start
 
             # Single df() call returns containers (with SizeRw), images (with Size), and volumes
             df_start = time.time()
-            df_result = client.api.df()
+            try:
+                df_result = client.api.df()
+            finally:
+                client.close()
             df_time = time.time() - df_start
 
             # Extract container sizes from df result
