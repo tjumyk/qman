@@ -522,6 +522,8 @@ def init_mock_host() -> None:
     _mock_hosts["host3"] = {"devices": host3_devices, "users": host3_users, "groups": host3_groups}
 
     # Fourth host: Docker quota enabled (with some block devices too).
+    # Local My usage / Docker breakdown bar: MOCK_QUOTA=1, MOCK_HOST_ID=host4, USE_DOCKER_QUOTA=1
+    # Map OAuth user → host user alice|bob|charlie on this host.
     host4_users = {1000: "alice", 1001: "bob", 1002: "charlie"}
     host4_groups = {1000: "users"}
     host4_devices = {
@@ -565,9 +567,10 @@ def init_mock_host() -> None:
             "fstype": "docker",
             "opts": ["docker"],
             # total = sum of user quota limits + unattributed = (10+15+5)*1024*1024 + 2*1024*1024 = 32 GiB
-            # used = attributed = 8 GiB (containers) + 12 GiB (image layers) = 20 GiB
+            # used = attributed = 7 GiB (container rw) + 8 GiB (image layers) + 5 GiB (volumes) = 20 GiB
             # unattributed = 2 GiB
             # free = 32 - 20 - 2 = 10 GiB
+            # Per-user docker_* bytes match block_current (My usage multi-segment bar).
             "usage": {
                 "free": 10 * 1024**3,
                 "total": 32 * 1024**3,
@@ -584,8 +587,11 @@ def init_mock_host() -> None:
                     # block_hard_limit in 1K blocks: 10 GiB = 10 * 1024 * 1024 = 10,485,760
                     "block_hard_limit": 10_485_760,
                     "block_soft_limit": 10_485_760,
-                    # block_current in bytes: containers (2 GiB) + image layers (3 GiB) = 5 GiB
+                    # block_current = sum of docker_* (5 GiB); leaves ~5 GiB “remaining quota” in UI
                     "block_current": 5 * 1024**3,
+                    "docker_container_bytes": 2 * 1024**3,
+                    "docker_image_layer_bytes": 2 * 1024**3,
+                    "docker_volume_bytes": 1 * 1024**3,
                     "inode_hard_limit": 0,
                     "inode_soft_limit": 0,
                     "inode_current": 0,
@@ -596,8 +602,10 @@ def init_mock_host() -> None:
                     # 15 GiB quota
                     "block_hard_limit": 15_728_640,
                     "block_soft_limit": 15_728_640,
-                    # containers (3 GiB) + image layers (6 GiB) = 9 GiB
                     "block_current": 9 * 1024**3,
+                    "docker_container_bytes": 3 * 1024**3,
+                    "docker_image_layer_bytes": 4 * 1024**3,
+                    "docker_volume_bytes": 2 * 1024**3,
                     "inode_hard_limit": 0,
                     "inode_soft_limit": 0,
                     "inode_current": 0,
@@ -605,11 +613,13 @@ def init_mock_host() -> None:
                     "inode_time_limit": 0,
                 },
                 1002: {
-                    # 5 GiB quota
+                    # 5 GiB quota — over limit (6 GiB attributed)
                     "block_hard_limit": 5_242_880,
                     "block_soft_limit": 5_242_880,
-                    # containers (3 GiB) + image layers (3 GiB) = 6 GiB (over quota!)
                     "block_current": 6 * 1024**3,
+                    "docker_container_bytes": 2 * 1024**3,
+                    "docker_image_layer_bytes": 2 * 1024**3,
+                    "docker_volume_bytes": 2 * 1024**3,
                     "inode_hard_limit": 0,
                     "inode_soft_limit": 0,
                     "inode_current": 0,
