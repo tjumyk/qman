@@ -153,6 +153,11 @@ def _audit_event_fingerprint(
     )
 
 
+def _should_omit_docker_exec_event_for_persist(typ: str, action_lower: str) -> bool:
+    """Skip persisting ``docker exec`` lifecycle events (admin review table only; not used for attribution)."""
+    return typ == "container" and action_lower.startswith("exec_")
+
+
 def _docker_event_fingerprint(
     event_ts_float: float | None,
     docker_event_type: str | None,
@@ -788,6 +793,9 @@ def sync_from_docker_events(
         if fp in seen_docker_fps:
             continue
         seen_docker_fps.add(fp)
+
+        if _should_omit_docker_exec_event_for_persist(typ, action):
+            continue
 
         cid, img_id, img_ref, vol_name = _docker_usage_event_entity_fields(typ, actor_id, ev)
         pending_docker_events.append(
