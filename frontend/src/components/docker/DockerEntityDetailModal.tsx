@@ -40,6 +40,8 @@ export type DockerEntityDetailModalProps = {
   hostId: string
   entityType: DockerUsageEntityType
   entityId: string
+  /** Parent list queries to refresh (e.g. docker-containers for ContainersTab). Modal always refreshes its own detail/events. */
+  onAttributionChanged?: () => void | Promise<void>
 }
 
 export function DockerEntityDetailModal({
@@ -48,6 +50,7 @@ export function DockerEntityDetailModal({
   hostId,
   entityType,
   entityId,
+  onAttributionChanged,
 }: DockerEntityDetailModalProps) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -156,6 +159,7 @@ export function DockerEntityDetailModal({
       ],
     })
     await queryClient.invalidateQueries({ queryKey: ['admin-docker-usage-review'] })
+    await onAttributionChanged?.()
   }
 
   const assignMutation = useMutation({
