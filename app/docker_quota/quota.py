@@ -222,16 +222,16 @@ def _aggregate_usage_by_uid(
     layer_by_uid: dict[int, int] = {}
     attributed_layer_used = 0
     layer_size_by_id: dict[str, int] = {}
-    if any(
-        (la.get("size_bytes") or 0) == 0 and la.get("layer_id")
-        for la in layer_attributions
-    ):
+    # NULL/None from effective attribution = unknown (needs Docker map); 0 = known zero (no scan).
+    if any(la.get("size_bytes") is None and la.get("layer_id") for la in layer_attributions):
         layer_size_by_id = collect_layer_id_to_size_from_all_images(use_cache=use_cache)
     for layer_att in layer_attributions:
         lid = layer_att.get("layer_id") or ""
-        layer_size = int(layer_att.get("size_bytes") or 0)
-        if layer_size == 0 and lid:
-            layer_size = layer_size_by_id.get(lid, 0)
+        raw_sz = layer_att.get("size_bytes")
+        if raw_sz is None:
+            layer_size = int(layer_size_by_id.get(lid, 0))
+        else:
+            layer_size = int(raw_sz)
         attributed_layer_used += layer_size
         uid = resolve_uid_for_docker_attribution(
             layer_att.get("first_puller_uid"),

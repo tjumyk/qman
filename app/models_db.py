@@ -82,7 +82,8 @@ class DockerLayerAttribution(Base):
     layer_id: Mapped[str] = mapped_column(String(64), primary_key=True)  # e.g. sha256:abc123...
     first_puller_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)  # uid of first creator
     first_puller_host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, default=0)  # incremental size from history
+    # Incremental size from Docker history at first attribution; 0 is a valid Docker value (not a NULL/unknown sentinel).
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     creation_method: Mapped[str | None] = mapped_column(String(32), nullable=True)  # 'pull', 'build', 'commit', 'import', 'load'
 
@@ -338,7 +339,7 @@ class DockerLayerAttributionOverride(Base):
     layer_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     first_puller_host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
     first_puller_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Incremental layer size at assignment time; NULL = legacy row before column existed.
+    # Incremental layer size: NULL = unknown (quota may scan Docker), 0 = known zero-sized layer.
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

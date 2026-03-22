@@ -582,11 +582,15 @@ def collect_layer_id_to_size_from_all_images(use_cache: bool = True) -> dict[str
     return out
 
 
-def get_layer_size_bytes_from_docker(layer_id: str, use_cache: bool = True) -> int:
-    """Return Docker-reported incremental size for ``layer_id``, or 0 if not found locally."""
+def get_layer_size_bytes_from_docker(layer_id: str, use_cache: bool = True) -> int | None:
+    """Return Docker-reported incremental size for ``layer_id`` if it appears in any local image.
+
+    Returns ``0`` when the layer is present and Docker reports zero incremental size.
+    Returns ``None`` when there are no images, the layer is not referenced locally, or lookup fails.
+    """
     images = list_images(use_cache=use_cache)
     if not images:
-        return 0
+        return None
     try:
         import docker
 
@@ -603,12 +607,12 @@ def get_layer_size_bytes_from_docker(layer_id: str, use_cache: bool = True) -> i
                             return int(sz)
                 except Exception:
                     continue
-            return 0
+            return None
         finally:
             client.close()
     except Exception as e:
         logger.warning("get_layer_size_bytes_from_docker failed for %s: %s", layer_id[:20], e)
-        return 0
+        return None
 
 
 def get_container_details() -> list[dict[str, Any]]:

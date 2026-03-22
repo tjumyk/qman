@@ -167,7 +167,10 @@ def create_app(config_path: str | None = None) -> Flask:
             from app.docker_quota.attribution_store import backfill_null_layer_override_sizes
 
             n = backfill_null_layer_override_sizes()
-            click.echo(f"Updated {n} docker_layer_attribution_override row(s) with size_bytes.")
+            click.echo(
+                f"Resolved size_bytes for {n} docker_layer_attribution_override row(s). "
+                "Rows left NULL were not found in local images (see app logs for skipped count)."
+            )
 
     from auth_connect import oauth
     oauth.init_app(app, config_file=os.path.join(_PROJECT_ROOT, "oauth.config.json"))

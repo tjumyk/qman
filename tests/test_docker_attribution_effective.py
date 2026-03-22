@@ -10,8 +10,13 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models_db  # noqa: F401  # register models on Base.metadata
 from app.db import Base
-from app.models_db import DockerContainerAttribution, DockerContainerAttributionOverride
+from app.models_db import (
+    DockerContainerAttribution,
+    DockerContainerAttributionOverride,
+    DockerLayerAttributionOverride,
+)
 import app.docker_quota.attribution_store as attr_store
+from app.docker_quota.quota import _aggregate_usage_by_uid
 
 
 def _memory_session_factory():
@@ -80,6 +85,96 @@ class TestEffectiveDockerAttribution(unittest.TestCase):
         self.assertEqual(o2["first_puller_uid"], 5)
         self.assertEqual(o1["size_bytes"], 10)
         self.assertEqual(o2["size_bytes"], 20)
+
+    def test_layer_effective_override_only_null_size_is_none(self) -> None:
+        db = self._session_factory()
+        db.add(
+            DockerLayerAttributionOverride(
+                layer_id="L0",
+                first_puller_host_user_name="u",
+                first_puller_uid=3,
+                size_bytes=None,
+                resolved_by_oauth_user_id=1,
+            )
+        )
+        db.commit()
+        db.close()
+
+        eff = attr_store.get_layer_effective_attributions()
+        row = next(r for r in eff if r["layer_id"] == "L0")
+        self.assertIsNone(row["size_bytes"])
+
+    def test_layer_effective_override_only_zero_size_is_zero(self) -> None:
+        db = self._session_factory()
+        db.add(
+            DockerLayerAttributionOverride(
+                layer_id="Lz",
+                first_puller_host_user_name="u",
+                first_puller_uid=3,
+                size_bytes=0,
+                resolved_by_oauth_user_id=1,
+            )
+        )
+        db.commit()
+        db.close()
+
+        eff = attr_store.get_layer_effective_attributions()
+        row = next(r for r in eff if r["layer_id"] == "Lz")
+        self.assertEqual(row["size_bytes"], 0)
+
+    def test_aggregate_does_not_scan_images_when_layer_size_known_zero(self) -> None:
+        layer_row = {
+            "layer_id": "Lz",
+            "first_puller_uid": 10,
+            "first_puller_host_user_name": "u10",
+            "size_bytes": 0,
+            "first_seen_at": None,
+            "creation_method": None,
+        }
+
+        def _fail_collect(*_a: object, **_k: object) -> dict[str, int]:
+            raise AssertionError("collect_layer_id_to_size_from_all_images should not run")
+
+        with (
+            patch("app.docker_quota.quota.get_container_effective_attributions", return_value=[]),
+            patch("app.docker_quota.quota.get_layer_effective_attributions", return_value=[layer_row]),
+            patch("app.docker_quota.quota.get_volume_effective_attributions", return_value=[]),
+            patch("app.docker_quota.quota.get_volume_disk_usage_all", return_value=[]),
+            patch("app.docker_quota.quota.get_system_df", return_value={"containers": {}, "images": {}, "volumes": {}}),
+            patch(
+                "app.docker_quota.quota.collect_layer_id_to_size_from_all_images",
+                side_effect=_fail_collect,
+            ),
+        ):
+            usage_by_uid, _total, _unattributed, _bd = _aggregate_usage_by_uid(
+                "/var/lib/docker", None, container_ids=[], use_cache=False
+            )
+        self.assertEqual(usage_by_uid.get(10, 0), 0)
+
+    def test_aggregate_scans_when_layer_size_unknown(self) -> None:
+        layer_row = {
+            "layer_id": "Lu",
+            "first_puller_uid": 11,
+            "first_puller_host_user_name": "u11",
+            "size_bytes": None,
+            "first_seen_at": None,
+            "creation_method": None,
+        }
+        with (
+            patch("app.docker_quota.quota.get_container_effective_attributions", return_value=[]),
+            patch("app.docker_quota.quota.get_layer_effective_attributions", return_value=[layer_row]),
+            patch("app.docker_quota.quota.get_volume_effective_attributions", return_value=[]),
+            patch("app.docker_quota.quota.get_volume_disk_usage_all", return_value=[]),
+            patch("app.docker_quota.quota.get_system_df", return_value={"containers": {}, "images": {}, "volumes": {}}),
+            patch(
+                "app.docker_quota.quota.collect_layer_id_to_size_from_all_images",
+                return_value={"Lu": 42},
+            ),
+        ):
+            usage_by_uid, _total, _unattributed, _bd = _aggregate_usage_by_uid(
+                "/var/lib/docker", None, container_ids=[], use_cache=False
+            )
+        self.assertEqual(usage_by_uid.get(11), 42)
 
 
 if __name__ == "__main__":

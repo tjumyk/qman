@@ -943,11 +943,16 @@ def set_layer_attribution_override(
 ) -> None:
     """Upsert a layer manual attribution override.
 
-    If ``size_bytes`` is None, size is resolved from Docker (single-layer scan).
-    Pass an explicit int (including 0) to skip that lookup.
+    DB column ``size_bytes``: NULL = unknown (quota may scan Docker); 0 = known zero-sized layer.
+
+    If argument ``size_bytes`` is None, resolve from Docker: persist int (including 0) when found.
+    New rows get ``NULL`` when the layer is not present in any local image. Existing rows keep
+    their current ``size_bytes`` when resolution fails (avoids wiping a known size on transient
+    Docker errors during image cascade).
+    Pass an explicit int (including 0) to skip Docker lookup.
     """
     if size_bytes is not None:
-        resolved_size = int(size_bytes)
+        resolved_size: int | None = int(size_bytes)
     else:
         from app.docker_quota.docker_client import get_layer_size_bytes_from_docker
 
@@ -964,7 +969,8 @@ def set_layer_attribution_override(
             row.first_puller_host_user_name = first_puller_host_user_name
             row.first_puller_uid = first_puller_uid
             row.resolved_by_oauth_user_id = resolved_by_oauth_user_id
-            row.size_bytes = resolved_size
+            if resolved_size is not None:
+                row.size_bytes = resolved_size
         else:
             db.add(
                 DockerLayerAttributionOverride(
@@ -1002,7 +1008,10 @@ def backfill_null_layer_override_sizes() -> int:
     """Set ``size_bytes`` on layer overrides where it is NULL (legacy rows).
 
     Uses one ``collect_layer_id_to_size_from_all_images`` pass when possible, then
-    per-layer lookup for any still missing. Returns number of rows updated.
+    per-layer lookup for any still missing. Rows stay NULL when the layer cannot be
+    resolved locally (unknown), so ``0`` is never written for ``not found``.
+
+    Returns the number of rows updated to a concrete size (including known zero).
     """
     from app.docker_quota.docker_client import (
         collect_layer_id_to_size_from_all_images,
@@ -1020,14 +1029,22 @@ def backfill_null_layer_override_sizes() -> int:
             return 0
         sizes = collect_layer_id_to_size_from_all_images(use_cache=True)
         n = 0
+        skipped = 0
         for row in rows:
             sz = sizes.get(row.layer_id)
             if sz is None:
                 sz = get_layer_size_bytes_from_docker(row.layer_id)
+            if sz is None:
+                skipped += 1
+                continue
             row.size_bytes = int(sz)
             n += 1
         db.commit()
-        logger.info("backfill_null_layer_override_sizes: updated %d override row(s)", n)
+        logger.info(
+            "backfill_null_layer_override_sizes: updated %d override row(s); %d still unknown (NULL)",
+            n,
+            skipped,
+        )
         return n
     except Exception:
         db.rollback()
@@ -1381,7 +1398,11 @@ def get_image_effective_attributions() -> list[dict[str, Any]]:
 
 
 def get_layer_effective_attributions() -> list[dict[str, Any]]:
-    """Return effective layer ownership, using manual overrides when present."""
+    """Return effective layer ownership, using manual overrides when present.
+
+    Each item ``size_bytes``: int when known (including 0); None when unknown (override NULL,
+    override-only) so quota can resolve via Docker without treating 0 as unknown.
+    """
     db = SessionLocal()
     try:
         auto_rows = db.query(DockerLayerAttribution).all()
@@ -1395,12 +1416,18 @@ def get_layer_effective_attributions() -> list[dict[str, Any]]:
         for layer_id, a in auto_map.items():
             o = overrides.get(layer_id)
             if o:
+                # Override wins for ownership; size: explicit override (incl. 0) wins, else auto.
+                # None + None → unknown (quota may scan); never coerce NULL auto to 0.
+                if o.size_bytes is not None:
+                    merged_sz: int | None = int(o.size_bytes)
+                else:
+                    merged_sz = None if a.size_bytes is None else int(a.size_bytes)
                 out.append(
                     {
                         "layer_id": layer_id,
                         "first_puller_uid": o.first_puller_uid,
                         "first_puller_host_user_name": o.first_puller_host_user_name,
-                        "size_bytes": a.size_bytes,
+                        "size_bytes": merged_sz,
                         "first_seen_at": o.created_at,
                         "creation_method": a.creation_method,
                     }
@@ -1418,19 +1445,16 @@ def get_layer_effective_attributions() -> list[dict[str, Any]]:
                 )
             seen_layer_ids.add(layer_id)
 
-        # Override-only layers (no auto record): size from override.size_bytes (set at assign time);
-        # legacy NULL -> 0 (quota may still fill via collect_layer_id_to_size_from_all_images).
+        # Override-only: pass through override.size_bytes (None = unknown, 0 = known zero).
         for layer_id, o in overrides.items():
             if layer_id in seen_layer_ids:
                 continue
-            ov_sz = o.size_bytes
-            eff_sz = int(ov_sz) if ov_sz is not None else 0
             out.append(
                 {
                     "layer_id": layer_id,
                     "first_puller_uid": o.first_puller_uid,
                     "first_puller_host_user_name": o.first_puller_host_user_name,
-                    "size_bytes": eff_sz,
+                    "size_bytes": o.size_bytes,
                     "first_seen_at": o.created_at,
                     "creation_method": None,
                 }
