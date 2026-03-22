@@ -19,7 +19,7 @@ import {
   Box,
 } from '@mantine/core'
 import { CodeHighlight } from '@mantine/code-highlight'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   fetchDockerInspect,
   fetchDockerAttributionDetail,
@@ -33,6 +33,29 @@ import {
 import { useI18n } from '../../i18n'
 import { DockerEventReviewCell, DockerEventAutoCell } from './DockerUsageEventStatusCells'
 import { notifications } from '@mantine/notifications'
+
+/** Modal passes this as scrollAreaComponent: constrain height without one shared body scrollbar so columns can scroll independently. */
+function ModalColumnScrollHost({
+  children,
+  style,
+}: {
+  children?: ReactNode
+  style?: CSSProperties
+}) {
+  return (
+    <Box
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        overflow: 'hidden',
+        ...style,
+      }}
+    >
+      {children}
+    </Box>
+  )
+}
 
 export type DockerEntityDetailModalProps = {
   opened: boolean
@@ -227,9 +250,17 @@ export function DockerEntityDetailModal({
       size="95%"
       styles={{
         content: { maxWidth: 'min(95vw, 1400px)' },
-        body: { paddingTop: 'var(--mantine-spacing-md)' },
+        header: { flexShrink: 0 },
+        body: {
+          paddingTop: 'var(--mantine-spacing-md)',
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        },
       }}
-      scrollAreaComponent={ScrollArea.Autosize}
+      scrollAreaComponent={ModalColumnScrollHost}
     >
       <Box
         style={{
@@ -237,11 +268,23 @@ export function DockerEntityDetailModal({
           gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1fr)',
           gap: 'var(--mantine-spacing-md)',
           alignItems: 'stretch',
-          minHeight: 560,
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
         }}
       >
-        <Paper withBorder p="md" style={{ minHeight: 560, display: 'flex', flexDirection: 'column' }}>
-          <Title order={6} mb="sm">
+        <Paper
+          withBorder
+          p="md"
+          style={{
+            minHeight: 0,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <Title order={6} mb="sm" style={{ flexShrink: 0 }}>
             {t('dockerEntityDetailTabInspect')}
           </Title>
           {inspectQ.isLoading && (
@@ -276,169 +319,179 @@ export function DockerEntityDetailModal({
           )}
         </Paper>
 
-        <Stack gap="md" style={{ minHeight: 560 }}>
-          <Paper withBorder p="md">
+        <Box
+          style={{
+            minHeight: 0,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <ScrollArea flex={1} style={{ minHeight: 0 }} type="auto" offsetScrollbars>
             <Stack gap="md">
-              <Title order={6}>{t('dockerEntityDetailTabAttribution')}</Title>
-              {attrQ.isLoading && (
-                <Group>
-                  <Loader size="sm" />
-                  <Text size="sm" c="dimmed">
-                    {t('loading')}
-                  </Text>
-                </Group>
-              )}
-              {attrQ.error && (
-                <Alert color="red" title={t('error')}>
-                  {getErrorMessage(attrQ.error, t('dockerEntityDetailAttributionFailed'))}
-                </Alert>
-              )}
-              {attrQ.data && (
-                <>
-                  <div>
-                    <Title order={6} mb="xs">
-                      {t('dockerEntityDetailAutoAttribution')}
-                    </Title>
-                    {attrQ.data.auto == null ? (
+              <Paper withBorder p="md">
+                <Stack gap="md">
+                  <Title order={6}>{t('dockerEntityDetailTabAttribution')}</Title>
+                  {attrQ.isLoading && (
+                    <Group>
+                      <Loader size="sm" />
                       <Text size="sm" c="dimmed">
-                        {t('dockerEntityDetailNoAuto')}
+                        {t('loading')}
                       </Text>
-                    ) : (
-                      <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                        {JSON.stringify(attrQ.data.auto, null, 2)}
-                      </Code>
-                    )}
-                  </div>
-                  <div>
-                    <Title order={6} mb="xs">
-                      {t('dockerEntityDetailManualOverride')}
-                    </Title>
-                    {attrQ.data.override == null ? (
-                      <Text size="sm" c="dimmed">
-                        {t('dockerEntityDetailNoOverride')}
-                      </Text>
-                    ) : (
-                      <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                        {JSON.stringify(attrQ.data.override, null, 2)}
-                      </Code>
-                    )}
-                  </div>
-                  <Stack gap="sm">
-                    <Select
-                      label={t('dockerUsageReviewAssignee')}
-                      placeholder={t('dockerUsageReviewAssigneePlaceholder')}
-                      data={mappingOptions}
-                      value={assigneeValue}
-                      onChange={setAssigneeValue}
-                      searchable
-                      clearable
-                      disabled={mappingOptions.length === 0}
-                    />
-                    {mappingOptions.length === 0 && (
-                      <Text size="xs" c="dimmed">
-                        {t('dockerUsageReviewNoMappings')}
-                      </Text>
-                    )}
-                    {entityType !== 'volume' && (
-                      <Checkbox
-                        label={t('dockerUsageReviewCascade')}
-                        checked={cascade}
-                        onChange={(e) => setCascade(e.currentTarget.checked)}
-                      />
-                    )}
-                    <Group gap="sm">
-                      <Button
-                        size="xs"
-                        onClick={() => assignMutation.mutate()}
-                        loading={assignMutation.isPending}
-                        disabled={!assigneeValue}
-                      >
-                        {t('dockerUsageReviewAssign')}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="light"
-                        color="gray"
-                        onClick={() => clearMutation.mutate()}
-                        loading={clearMutation.isPending}
-                        disabled={attrQ.data.override == null}
-                      >
-                        {t('dockerUsageReviewClear')}
-                      </Button>
                     </Group>
-                  </Stack>
-                </>
-              )}
-            </Stack>
-          </Paper>
+                  )}
+                  {attrQ.error && (
+                    <Alert color="red" title={t('error')}>
+                      {getErrorMessage(attrQ.error, t('dockerEntityDetailAttributionFailed'))}
+                    </Alert>
+                  )}
+                  {attrQ.data && (
+                    <>
+                      <div>
+                        <Title order={6} mb="xs">
+                          {t('dockerEntityDetailAutoAttribution')}
+                        </Title>
+                        {attrQ.data.auto == null ? (
+                          <Text size="sm" c="dimmed">
+                            {t('dockerEntityDetailNoAuto')}
+                          </Text>
+                        ) : (
+                          <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {JSON.stringify(attrQ.data.auto, null, 2)}
+                          </Code>
+                        )}
+                      </div>
+                      <div>
+                        <Title order={6} mb="xs">
+                          {t('dockerEntityDetailManualOverride')}
+                        </Title>
+                        {attrQ.data.override == null ? (
+                          <Text size="sm" c="dimmed">
+                            {t('dockerEntityDetailNoOverride')}
+                          </Text>
+                        ) : (
+                          <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {JSON.stringify(attrQ.data.override, null, 2)}
+                          </Code>
+                        )}
+                      </div>
+                      <Stack gap="sm">
+                        <Select
+                          label={t('dockerUsageReviewAssignee')}
+                          placeholder={t('dockerUsageReviewAssigneePlaceholder')}
+                          data={mappingOptions}
+                          value={assigneeValue}
+                          onChange={setAssigneeValue}
+                          searchable
+                          clearable
+                          disabled={mappingOptions.length === 0}
+                        />
+                        {mappingOptions.length === 0 && (
+                          <Text size="xs" c="dimmed">
+                            {t('dockerUsageReviewNoMappings')}
+                          </Text>
+                        )}
+                        {entityType !== 'volume' && (
+                          <Checkbox
+                            label={t('dockerUsageReviewCascade')}
+                            checked={cascade}
+                            onChange={(e) => setCascade(e.currentTarget.checked)}
+                          />
+                        )}
+                        <Group gap="sm">
+                          <Button
+                            size="xs"
+                            onClick={() => assignMutation.mutate()}
+                            loading={assignMutation.isPending}
+                            disabled={!assigneeValue}
+                          >
+                            {t('dockerUsageReviewAssign')}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="light"
+                            color="gray"
+                            onClick={() => clearMutation.mutate()}
+                            loading={clearMutation.isPending}
+                            disabled={attrQ.data.override == null}
+                          >
+                            {t('dockerUsageReviewClear')}
+                          </Button>
+                        </Group>
+                      </Stack>
+                    </>
+                  )}
+                </Stack>
+              </Paper>
 
-          <Paper withBorder p="md" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <Title order={6} mb="sm">
-              {t('dockerEntityDetailTabEvents')}
-            </Title>
-            <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
-              <Switch
-                label={t('dockerEntityDetailIncludeUsed')}
-                checked={includeUsed}
-                onChange={(e) => setIncludeUsed(e.currentTarget.checked)}
-              />
-              <Switch
-                label={t('dockerEntityDetailIncludeResolved')}
-                checked={includeResolved}
-                onChange={(e) => setIncludeResolved(e.currentTarget.checked)}
-              />
-              {eventsQ.isLoading && (
-                <Group>
-                  <Loader size="sm" />
-                  <Text size="sm" c="dimmed">
-                    {t('loading')}
-                  </Text>
-                </Group>
-              )}
-              {eventsQ.error && (
-                <Alert color="red" title={t('error')}>
-                  {getErrorMessage(eventsQ.error, t('dockerEntityDetailEventsFailed'))}
-                </Alert>
-              )}
-              {eventsQ.data && (
-                <ScrollArea flex={1} style={{ minHeight: 240 }} type="auto">
-                  <Table striped fz="xs">
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>{t('dockerUsageReviewColSource')}</Table.Th>
-                        <Table.Th>{t('dockerUsageReviewColWhen')}</Table.Th>
-                        <Table.Th>{t('dockerEventColReview')}</Table.Th>
-                        <Table.Th>{t('dockerEventColAuto')}</Table.Th>
-                        <Table.Th>{t('dockerUsageReviewColPayload')}</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {eventsQ.data.events.map((ev) => (
-                        <Table.Tr key={`${ev.source}-${ev.id}`}>
-                          <Table.Td>
-                            <Badge size="xs">{ev.source}</Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Text size="xs" lineClamp={2}>
-                              {ev.event_ts ?? ev.created_at ?? '—'}
-                            </Text>
-                          </Table.Td>
-                          <DockerEventReviewCell ev={ev} />
-                          <DockerEventAutoCell ev={ev} />
-                          <Table.Td>
-                            <Text size="xs" lineClamp={3} style={{ wordBreak: 'break-all' }}>
-                              {ev.payload}
-                            </Text>
-                          </Table.Td>
+              <Paper withBorder p="md">
+                <Title order={6} mb="sm">
+                  {t('dockerEntityDetailTabEvents')}
+                </Title>
+                <Stack gap="sm">
+                  <Switch
+                    label={t('dockerEntityDetailIncludeUsed')}
+                    checked={includeUsed}
+                    onChange={(e) => setIncludeUsed(e.currentTarget.checked)}
+                  />
+                  <Switch
+                    label={t('dockerEntityDetailIncludeResolved')}
+                    checked={includeResolved}
+                    onChange={(e) => setIncludeResolved(e.currentTarget.checked)}
+                  />
+                  {eventsQ.isLoading && (
+                    <Group>
+                      <Loader size="sm" />
+                      <Text size="sm" c="dimmed">
+                        {t('loading')}
+                      </Text>
+                    </Group>
+                  )}
+                  {eventsQ.error && (
+                    <Alert color="red" title={t('error')}>
+                      {getErrorMessage(eventsQ.error, t('dockerEntityDetailEventsFailed'))}
+                    </Alert>
+                  )}
+                  {eventsQ.data && (
+                    <Table striped fz="xs">
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>{t('dockerUsageReviewColSource')}</Table.Th>
+                          <Table.Th>{t('dockerUsageReviewColWhen')}</Table.Th>
+                          <Table.Th>{t('dockerEventColReview')}</Table.Th>
+                          <Table.Th>{t('dockerEventColAuto')}</Table.Th>
+                          <Table.Th>{t('dockerUsageReviewColPayload')}</Table.Th>
                         </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </ScrollArea>
-              )}
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {eventsQ.data.events.map((ev) => (
+                          <Table.Tr key={`${ev.source}-${ev.id}`}>
+                            <Table.Td>
+                              <Badge size="xs">{ev.source}</Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="xs" lineClamp={2}>
+                                {ev.event_ts ?? ev.created_at ?? '—'}
+                              </Text>
+                            </Table.Td>
+                            <DockerEventReviewCell ev={ev} />
+                            <DockerEventAutoCell ev={ev} />
+                            <Table.Td>
+                              <Text size="xs" lineClamp={3} style={{ wordBreak: 'break-all' }}>
+                                {ev.payload}
+                              </Text>
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  )}
+                </Stack>
+              </Paper>
             </Stack>
-          </Paper>
-        </Stack>
+          </ScrollArea>
+        </Box>
       </Box>
     </Modal>
   )
