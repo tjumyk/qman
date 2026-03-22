@@ -564,27 +564,76 @@ def sync_containers_from_audit() -> int:
     return set_count
 
 
-def sync_from_docker_events() -> int:
-    """Collect Docker events since last run; correlate container create and image events (pull/build/commit/import/load/tag) with audit; update attribution. Returns count of container attributions set."""
+def sync_from_docker_events(
+    *,
+    full_history: bool = False,
+    docker_max_seconds: float | None = None,
+    docker_max_events: int | None = None,
+    audit_timeout: float | None = None,
+) -> int:
+    """Collect Docker events since last run (or full history); correlate with audit; update attribution.
+
+    When ``full_history`` is True (one-shot backfill): Docker events from epoch to now (bounded by
+    ``docker_max_seconds`` / ``docker_max_events``) and audit via ``ausearch`` with no ``-ts`` limit
+    (bounded by ``audit_timeout``). Heavy — intended for manual CLI / maintenance.
+    """
     now_ts = time.time()
-    last_s = _get_setting(SETTING_LAST_EVENTS_TS)
-    since_ts = now_ts - (24 * 3600)
-    if last_s:
-        try:
-            since_ts = float(last_s)
-        except ValueError:
-            pass
-    events = collect_events_since(since_ts, max_seconds=90.0, max_events=MAX_DOCKER_EVENTS)
-    audit_events = parse_audit_logs(keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK)
-    
+    if full_history:
+        until_ts = int(now_ts)
+        d_sec = docker_max_seconds if docker_max_seconds is not None else 7200.0
+        d_evt = docker_max_events if docker_max_events is not None else 200_000
+        events = collect_events_since(
+            0, until_ts=until_ts, max_seconds=d_sec, max_events=d_evt
+        )
+        a_timeout = audit_timeout if audit_timeout is not None else 600.0
+        audit_events = parse_audit_logs(
+            keys=DEFAULT_AUDIT_KEYS, since=None, timeout=a_timeout
+        )
+        since_ts = 0.0
+    else:
+        last_s = _get_setting(SETTING_LAST_EVENTS_TS)
+        since_ts = now_ts - (24 * 3600)
+        if last_s:
+            try:
+                since_ts = float(last_s)
+            except ValueError:
+                pass
+        events = collect_events_since(
+            int(since_ts), max_seconds=90.0, max_events=MAX_DOCKER_EVENTS
+        )
+        a_timeout = audit_timeout if audit_timeout is not None else 60.0
+        audit_events = parse_audit_logs(
+            keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK, timeout=a_timeout
+        )
+
     # Log event counts by type for diagnosis
     container_events = sum(1 for e in events if (e.get("type") or "").lower() == "container")
     image_events = sum(1 for e in events if (e.get("type") or "").lower() == "image")
-    since_dt = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    logger.info(
-        "sync_from_docker_events: docker_events=%d (container=%d, image=%d) since %s, audit_events=%d",
-        len(events), container_events, image_events, since_dt, len(audit_events)
-    )
+    if full_history:
+        until_str = datetime.fromtimestamp(
+            int(now_ts), tz=timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S UTC")
+        logger.info(
+            "sync_from_docker_events (full_history): docker_events=%d (container=%d, image=%d) "
+            "until %s, audit_events=%d",
+            len(events),
+            container_events,
+            image_events,
+            until_str,
+            len(audit_events),
+        )
+    else:
+        since_dt = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+        logger.info(
+            "sync_from_docker_events: docker_events=%d (container=%d, image=%d) since %s, audit_events=%d",
+            len(events),
+            container_events,
+            image_events,
+            since_dt,
+            len(audit_events),
+        )
     df = get_system_df()
     container_sizes = df.get("containers") or {}
     image_sizes = df.get("images") or {}

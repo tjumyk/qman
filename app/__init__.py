@@ -113,6 +113,50 @@ def create_app(config_path: str | None = None) -> Flask:
             result = celery_app.send_task("app.tasks.docker_quota_tasks.sync_volume_actual_disk")
             print(f"Sent sync_volume_actual_disk task to queue (id={result.id})")
 
+    if config.USE_DOCKER_QUOTA:
+        import click
+
+        @app.cli.command("docker-quota-sync-events-full")
+        @click.option(
+            "--docker-max-seconds",
+            type=float,
+            default=7200.0,
+            show_default=True,
+            help="Wall-clock cap while streaming the Docker events API",
+        )
+        @click.option(
+            "--docker-max-events",
+            type=int,
+            default=200_000,
+            show_default=True,
+            help="Stop after collecting this many Docker events",
+        )
+        @click.option(
+            "--audit-timeout",
+            type=float,
+            default=600.0,
+            show_default=True,
+            help="Subprocess timeout (seconds) for ausearch when scanning full audit history",
+        )
+        def docker_quota_sync_events_full_cmd(
+            docker_max_seconds: float,
+            docker_max_events: int,
+            audit_timeout: float,
+        ) -> None:
+            """Backfill docker + audit usage events into the DB (full history; heavy; run on slave)."""
+            from app.docker_quota.attribution_sync import sync_from_docker_events
+
+            n = sync_from_docker_events(
+                full_history=True,
+                docker_max_seconds=docker_max_seconds,
+                docker_max_events=docker_max_events,
+                audit_timeout=audit_timeout,
+            )
+            click.echo(
+                f"Full events sync finished: container attributions set this run={n}. "
+                "See application logs for docker/audit event counts."
+            )
+
     from auth_connect import oauth
     oauth.init_app(app, config_file=os.path.join(_PROJECT_ROOT, "oauth.config.json"))
 

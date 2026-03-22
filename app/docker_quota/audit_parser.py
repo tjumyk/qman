@@ -129,12 +129,14 @@ def parse_audit_logs(
     keys: tuple[str, ...] | None = None,
     audit_path: str | None = None,
     since: str | None = None,
+    timeout: float = 60.0,
 ) -> list[dict[str, Any]]:
     """Parse audit logs for given keys (e.g. docker-socket, docker-client). Returns list of {uid, pid, timestamp, msg, type, key}.
 
     Uses 'ausearch -k key1 -k key2 ...' when available; otherwise returns empty list.
     If since is set: use -ts with that value. For relative times (e.g. '60m', '1h') we convert to
     absolute start date/time because ausearch does not accept '60m'; only keywords like 'recent' (10 min).
+    If since is None, no -ts is passed (full log search; can be slow — use a larger timeout).
     """
     keys = keys or DEFAULT_AUDIT_KEYS
     # Note: -i (interpret) converts numeric UIDs to names which can cause parsing issues.
@@ -161,7 +163,7 @@ def parse_audit_logs(
             cmd,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=timeout,
             env=env,
         )
         # ausearch exit codes: 0=matches found, 1=no matches (not an error), 2+=error
@@ -189,7 +191,7 @@ def parse_audit_logs(
         logger.info("ausearch not available (not installed); audit attribution disabled")
         return []
     except subprocess.TimeoutExpired:
-        logger.warning("ausearch timed out after 60s (cmd: %s)", cmd_str)
+        logger.warning("ausearch timed out after %.0fs (cmd: %s)", timeout, cmd_str)
         return []
     except Exception as e:
         logger.warning("audit parse failed: %s (cmd: %s)", e, cmd_str)
