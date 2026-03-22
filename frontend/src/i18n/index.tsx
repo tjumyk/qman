@@ -21,7 +21,7 @@ function getDefaultLocale(): Locale {
 
 const translations: Record<Locale, Record<string, string>> = {
   en: {
-    appTitle: 'DQMS',
+    appTitle: 'Qman',
     appDescription: 'Disk Quota Management System',
     loading: 'Loading...',
     notSignedIn: 'Not signed in',
@@ -343,7 +343,7 @@ const translations: Record<Locale, Record<string, string>> = {
     dockerEntityDetailDetails: 'Details',
   },
   'zh-Hans': {
-    appTitle: 'DQMS',
+    appTitle: 'Qman',
     appDescription: '磁盘配额管理系统',
     loading: '加载中…',
     notSignedIn: '未登录',
