@@ -128,7 +128,7 @@ export function AdminNotificationsPage() {
         </Alert>
       ) : (
         <Card withBorder padding="xs">
-          <ScrollArea.Autosize mah={500}>
+          <ScrollArea.Autosize mah="70vh">
             <Table striped highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
