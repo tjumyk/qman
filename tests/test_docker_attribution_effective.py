@@ -57,7 +57,13 @@ class TestEffectiveDockerAttribution(unittest.TestCase):
         self.assertEqual(row["uid"], 99)
 
     def test_image_cascade_writes_layer_overrides(self) -> None:
-        with patch.object(attr_store, "get_layers_for_image", return_value=["L1", "L2"]):
+        with (
+            patch.object(attr_store, "get_layers_for_image", return_value=["L1", "L2"]),
+            patch(
+                "app.docker_quota.docker_client.collect_layer_id_to_size_from_all_images",
+                return_value={"L1": 10, "L2": 20},
+            ),
+        ):
             attr_store.set_image_attribution_override(
                 image_id="img1",
                 puller_host_user_name="u",
@@ -72,6 +78,8 @@ class TestEffectiveDockerAttribution(unittest.TestCase):
         assert o1 is not None and o2 is not None
         self.assertEqual(o1["first_puller_host_user_name"], "u")
         self.assertEqual(o2["first_puller_uid"], 5)
+        self.assertEqual(o1["size_bytes"], 10)
+        self.assertEqual(o2["size_bytes"], 20)
 
 
 if __name__ == "__main__":

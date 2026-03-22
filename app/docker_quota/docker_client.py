@@ -582,6 +582,35 @@ def collect_layer_id_to_size_from_all_images(use_cache: bool = True) -> dict[str
     return out
 
 
+def get_layer_size_bytes_from_docker(layer_id: str, use_cache: bool = True) -> int:
+    """Return Docker-reported incremental size for ``layer_id``, or 0 if not found locally."""
+    images = list_images(use_cache=use_cache)
+    if not images:
+        return 0
+    try:
+        import docker
+
+        client = docker.from_env()
+        try:
+            api = client.api
+            for img in images:
+                iid = img.get("id")
+                if not iid:
+                    continue
+                try:
+                    for lid, sz in _image_layers_with_sizes_api(api, iid):
+                        if lid == layer_id:
+                            return int(sz)
+                except Exception:
+                    continue
+            return 0
+        finally:
+            client.close()
+    except Exception as e:
+        logger.warning("get_layer_size_bytes_from_docker failed for %s: %s", layer_id[:20], e)
+        return 0
+
+
 def get_container_details() -> list[dict[str, Any]]:
     """Get detailed container info for display. Returns list of {id, name, image, status, created, labels}.
 

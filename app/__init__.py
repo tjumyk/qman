@@ -161,6 +161,14 @@ def create_app(config_path: str | None = None) -> Flask:
                 "See application logs for docker/audit event counts."
             )
 
+        @app.cli.command("docker-quota-backfill-layer-override-sizes")
+        def docker_quota_backfill_layer_override_sizes_cmd() -> None:
+            """Fill size_bytes on layer manual overrides where NULL (run on Docker slave; scans local images)."""
+            from app.docker_quota.attribution_store import backfill_null_layer_override_sizes
+
+            n = backfill_null_layer_override_sizes()
+            click.echo(f"Updated {n} docker_layer_attribution_override row(s) with size_bytes.")
+
     from auth_connect import oauth
     oauth.init_app(app, config_file=os.path.join(_PROJECT_ROOT, "oauth.config.json"))
 

@@ -338,6 +338,8 @@ class DockerLayerAttributionOverride(Base):
     layer_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     first_puller_host_user_name: Mapped[str] = mapped_column(String(255), nullable=False)
     first_puller_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Incremental layer size at assignment time; NULL = legacy row before column existed.
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     resolved_by_oauth_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

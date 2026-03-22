@@ -873,13 +873,19 @@ def set_image_attribution_override(
     if not cascade:
         return
 
+    from app.docker_quota.docker_client import collect_layer_id_to_size_from_all_images
+
     layer_ids = get_layers_for_image(image_id)
+    layer_sizes: dict[str, int] = {}
+    if layer_ids:
+        layer_sizes = collect_layer_id_to_size_from_all_images(use_cache=True)
     for layer_id in layer_ids:
         set_layer_attribution_override(
             layer_id=layer_id,
             first_puller_host_user_name=puller_host_user_name,
             first_puller_uid=puller_uid,
             resolved_by_oauth_user_id=resolved_by_oauth_user_id,
+            size_bytes=layer_sizes.get(layer_id),
         )
 
 
@@ -920,6 +926,7 @@ def get_layer_attribution_override(layer_id: str) -> dict[str, Any] | None:
             "layer_id": row.layer_id,
             "first_puller_host_user_name": row.first_puller_host_user_name,
             "first_puller_uid": row.first_puller_uid,
+            "size_bytes": row.size_bytes,
             "created_at": row.created_at,
             "resolved_by_oauth_user_id": row.resolved_by_oauth_user_id,
         }
@@ -932,8 +939,20 @@ def set_layer_attribution_override(
     first_puller_host_user_name: str,
     first_puller_uid: int | None,
     resolved_by_oauth_user_id: int | None,
+    size_bytes: int | None = None,
 ) -> None:
-    """Upsert a layer manual attribution override."""
+    """Upsert a layer manual attribution override.
+
+    If ``size_bytes`` is None, size is resolved from Docker (single-layer scan).
+    Pass an explicit int (including 0) to skip that lookup.
+    """
+    if size_bytes is not None:
+        resolved_size = int(size_bytes)
+    else:
+        from app.docker_quota.docker_client import get_layer_size_bytes_from_docker
+
+        resolved_size = get_layer_size_bytes_from_docker(layer_id)
+
     db = SessionLocal()
     try:
         row = (
@@ -945,12 +964,14 @@ def set_layer_attribution_override(
             row.first_puller_host_user_name = first_puller_host_user_name
             row.first_puller_uid = first_puller_uid
             row.resolved_by_oauth_user_id = resolved_by_oauth_user_id
+            row.size_bytes = resolved_size
         else:
             db.add(
                 DockerLayerAttributionOverride(
                     layer_id=layer_id,
                     first_puller_host_user_name=first_puller_host_user_name,
                     first_puller_uid=first_puller_uid,
+                    size_bytes=resolved_size,
                     resolved_by_oauth_user_id=resolved_by_oauth_user_id,
                 )
             )
@@ -970,6 +991,44 @@ def delete_layer_attribution_override(layer_id: str) -> None:
             DockerLayerAttributionOverride.layer_id == layer_id
         ).delete()
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def backfill_null_layer_override_sizes() -> int:
+    """Set ``size_bytes`` on layer overrides where it is NULL (legacy rows).
+
+    Uses one ``collect_layer_id_to_size_from_all_images`` pass when possible, then
+    per-layer lookup for any still missing. Returns number of rows updated.
+    """
+    from app.docker_quota.docker_client import (
+        collect_layer_id_to_size_from_all_images,
+        get_layer_size_bytes_from_docker,
+    )
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(DockerLayerAttributionOverride)
+            .filter(DockerLayerAttributionOverride.size_bytes.is_(None))
+            .all()
+        )
+        if not rows:
+            return 0
+        sizes = collect_layer_id_to_size_from_all_images(use_cache=True)
+        n = 0
+        for row in rows:
+            sz = sizes.get(row.layer_id)
+            if sz is None:
+                sz = get_layer_size_bytes_from_docker(row.layer_id)
+            row.size_bytes = int(sz)
+            n += 1
+        db.commit()
+        logger.info("backfill_null_layer_override_sizes: updated %d override row(s)", n)
+        return n
     except Exception:
         db.rollback()
         raise
@@ -1359,17 +1418,19 @@ def get_layer_effective_attributions() -> list[dict[str, Any]]:
                 )
             seen_layer_ids.add(layer_id)
 
-        # Override-only layers (no auto record): ownership from override; size_bytes unknown here
-        # (quota aggregation fills sizes from Docker via collect_layer_id_to_size_from_all_images).
+        # Override-only layers (no auto record): size from override.size_bytes (set at assign time);
+        # legacy NULL -> 0 (quota may still fill via collect_layer_id_to_size_from_all_images).
         for layer_id, o in overrides.items():
             if layer_id in seen_layer_ids:
                 continue
+            ov_sz = o.size_bytes
+            eff_sz = int(ov_sz) if ov_sz is not None else 0
             out.append(
                 {
                     "layer_id": layer_id,
                     "first_puller_uid": o.first_puller_uid,
                     "first_puller_host_user_name": o.first_puller_host_user_name,
-                    "size_bytes": 0,
+                    "size_bytes": eff_sz,
                     "first_seen_at": o.created_at,
                     "creation_method": None,
                 }
