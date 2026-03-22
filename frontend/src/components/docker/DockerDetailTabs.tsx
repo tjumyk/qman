@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Tabs, Stack } from '@mantine/core'
 import { IconUsers, IconBox, IconPhoto, IconDatabase } from '@tabler/icons-react'
 import { useI18n } from '../../i18n'
@@ -9,6 +10,13 @@ import { ImagesTab } from './ImagesTab'
 import { VolumesTab } from './VolumesTab'
 import type { DeviceQuota } from '../../api/schemas'
 
+const DOCKER_DETAIL_TABS = ['users', 'containers', 'images', 'volumes'] as const
+type DockerDetailTab = (typeof DOCKER_DETAIL_TABS)[number]
+
+function isDockerDetailTab(v: string | null): v is DockerDetailTab {
+  return v != null && (DOCKER_DETAIL_TABS as readonly string[]).includes(v)
+}
+
 interface DockerDetailTabsProps {
   hostId: string
   device: DeviceQuota
@@ -16,13 +24,48 @@ interface DockerDetailTabsProps {
 
 export function DockerDetailTabs({ hostId, device }: DockerDetailTabsProps) {
   const { t } = useI18n()
-  const [activeTab, setActiveTab] = useState<string | null>('users')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const activeTab = useMemo((): DockerDetailTab => {
+    const raw = searchParams.get('tab')
+    return isDockerDetailTab(raw) ? raw : 'users'
+  }, [searchParams])
+
+  useEffect(() => {
+    const raw = searchParams.get('tab')
+    if (raw != null && !isDockerDetailTab(raw)) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.delete('tab')
+          return next
+        },
+        { replace: true },
+      )
+    }
+  }, [searchParams, setSearchParams])
+
+  const handleTabChange = useCallback(
+    (value: string | null) => {
+      if (!isDockerDetailTab(value)) return
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (value === 'users') next.delete('tab')
+          else next.set('tab', value)
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
 
   return (
     <Stack gap="md">
       <DeviceInfo device={device} />
 
-      <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
+      <Tabs value={activeTab} onChange={handleTabChange} keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="users" leftSection={<IconUsers size={16} />}>
             {t('usersTab')}
