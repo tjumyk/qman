@@ -20,7 +20,10 @@ import { useI18n } from '../i18n'
 import { BlockSize } from '../components/BlockSize'
 import { INodeSize } from '../components/INodeSize'
 import { QuotaGraceDisplay } from '../components/QuotaGraceDisplay'
-import { DockerQuotaBreakdownBar } from '../components/DockerQuotaBreakdownBar'
+import {
+  DockerQuotaBreakdownBar,
+  DockerQuotaBreakdownLegend,
+} from '../components/DockerQuotaBreakdownBar'
 import { shouldRenderDockerQuotaBreakdownBar } from '../utils/dockerQuotaBreakdown'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
@@ -112,13 +115,19 @@ function QuotaCard({
             {device.fstype === 'docker' &&
             shouldRenderDockerQuotaBreakdownBar(quota) ? (
               <>
-                <DockerQuotaBreakdownBar quota={quota} />
-                <Text size="xs" c="dimmed" mt={2}>
-                  <BlockSize size={quota.block_current} />
-                  {blockLimit > 0 && (
-                    <> / <BlockSize size={blockLimit * 1024} /></>
-                  )}
+                <Text size="xs" fw={500} c="dimmed" mb={2}>
+                  {t('blockUsage')}
                 </Text>
+                <Stack gap={4}>
+                  <DockerQuotaBreakdownBar quota={quota} />
+                  <Text size="xs" c="dimmed">
+                    <BlockSize size={quota.block_current} />
+                    {blockLimit > 0 && (
+                      <> / <BlockSize size={blockLimit * 1024} /></>
+                    )}
+                  </Text>
+                  <DockerQuotaBreakdownLegend quota={quota} />
+                </Stack>
               </>
             ) : (
               <>

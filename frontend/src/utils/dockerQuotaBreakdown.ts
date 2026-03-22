@@ -24,11 +24,9 @@ export function shouldRenderDockerQuotaBreakdownBar(q: UserQuota): boolean {
   if (containerB + layerB + volumeB === 0 && used > 0) return false
   const maxBytes =
     blockLimitBytes > 0 ? Math.max(blockLimitBytes, used, 1) : Math.max(used, 1)
-  const remaining = blockLimitBytes > 0 ? Math.max(0, blockLimitBytes - used) : 0
   return (
     pct(maxBytes, containerB) > 0 ||
     pct(maxBytes, layerB) > 0 ||
-    pct(maxBytes, volumeB) > 0 ||
-    (blockLimitBytes > 0 && pct(maxBytes, remaining) > 0)
+    pct(maxBytes, volumeB) > 0
   )
 }
