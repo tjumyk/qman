@@ -51,7 +51,7 @@ const translations: Record<Locale, Record<string, string>> = {
     deviceNotFound: 'Device not found',
     hostNotFoundOrError: 'Host not found or error',
     loadingYourQuotas: 'Loading your quotas...',
-    loadingTakingLonger: 'This is taking longer than usual. Please wait a moment, gathering disk usage data from the server...',
+    loadingTakingLonger: 'Likely a cache miss. Collecting data from all hosts. Please wait, it usually takes about 30 seconds.',
     // Pages & sections
     hosts: 'Hosts',
     devices: 'Devices',
@@ -375,7 +375,7 @@ const translations: Record<Locale, Record<string, string>> = {
     deviceNotFound: '未找到设备',
     hostNotFoundOrError: '未找到主机或出错',
     loadingYourQuotas: '正在加载您的配额…',
-    loadingTakingLonger: '加载时间比平时长，请稍等片刻，正在从服务器收集磁盘使用数据…',
+    loadingTakingLonger: '缓存可能未命中，正在从所有主机收集信息。请稍等片刻，这一般在 30 秒内完成。',
     hosts: '主机',
     devices: '设备',
     devicesWithQuota: '设备（含配额）',
