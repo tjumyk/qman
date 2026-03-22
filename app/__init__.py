@@ -70,6 +70,10 @@ def create_app(config_path: str | None = None) -> Flask:
         app.config["DOCKER_QUOTA_ENFORCEMENT_ORDER"] = config.DOCKER_QUOTA_ENFORCEMENT_ORDER
     if config.DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED is not None:
         app.config["DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED"] = config.DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED
+    if config.DOCKER_QUOTA_CACHE_TTL_SECONDS is not None:
+        app.config["DOCKER_QUOTA_CACHE_TTL_SECONDS"] = config.DOCKER_QUOTA_CACHE_TTL_SECONDS
+    if config.DOCKER_QUOTA_DF_CACHE_TTL_SECONDS is not None:
+        app.config["DOCKER_QUOTA_DF_CACHE_TTL_SECONDS"] = config.DOCKER_QUOTA_DF_CACHE_TTL_SECONDS
     if config.SLAVE_HOST_ID is not None:
         app.config["SLAVE_HOST_ID"] = config.SLAVE_HOST_ID
     if config.MASTER_EVENT_CALLBACK_URL is not None:

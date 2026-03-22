@@ -343,9 +343,9 @@ def _find_best_audit_match(
 def sync_containers_from_audit() -> int:
     """Find containers without attribution; match Created time to audit events (docker-socket, docker-client); set attribution. Returns count set."""
     attributions = {a["container_id"]: a for a in get_container_attributions()}
-    # use_cache=False: background sync must see current Docker state for correct attribution
+    # Fresh container list and matching df (avoid pairing fresh IDs with stale cached df sizes).
     containers = list_containers(all_containers=True, use_cache=False)
-    df = get_system_df()
+    df = get_system_df(use_cache=False)
     container_sizes = df.get("containers") or {}
     audit_events = parse_audit_logs(keys=DEFAULT_AUDIT_KEYS, since=AUDIT_LOOKBACK)
     
@@ -663,7 +663,8 @@ def sync_from_docker_events(
             since_dt,
             len(audit_events),
         )
-    df = get_system_df()
+    # Reuse df snapshot from sync_containers_from_audit() in the same run (write-through + same cache key).
+    df = get_system_df(use_cache=True)
     container_sizes = df.get("containers") or {}
     image_sizes = df.get("images") or {}
 
@@ -1253,8 +1254,8 @@ def sync_volume_attributions() -> dict[str, int]:
     """
     start_time = time.time()
     
-    # Get volume data from Docker
-    df = get_system_df(include_volumes=True)
+    # Single df in this step; force live read so volume labels/sizes match current daemon for attribution.
+    df = get_system_df(include_volumes=True, use_cache=False)
     volumes = df.get("volumes") or {}
     if not volumes:
         logger.info("sync_volume_attributions: no volumes found")

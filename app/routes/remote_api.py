@@ -420,15 +420,13 @@ def register_remote_api_routes(app: Any) -> None:
         if not current_app.config.get("USE_DOCKER_QUOTA", False):
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
-        from app.docker_quota.docker_client import get_container_details, get_system_df
+        from app.docker_quota.docker_client import list_containers, get_system_df
         from app.docker_quota.attribution_store import get_container_effective_attributions
-        
-        # Get container details from Docker API
-        containers = get_container_details()
+
+        # Same source + cache path as quota aggregation: list and df snapshots stay aligned when both use cache.
+        containers = list_containers(all_containers=True, use_cache=True)
         container_ids = [c["id"] for c in containers]
-        
-        # Get container sizes
-        df = get_system_df(container_ids=container_ids)
+        df = get_system_df(container_ids=container_ids, use_cache=True)
         container_sizes = df.get("containers", {})
         
         # Get attributions from database
@@ -605,7 +603,7 @@ def register_remote_api_routes(app: Any) -> None:
         from app.docker_quota.attribution_store import get_volume_effective_attributions, get_volume_disk_usage_all, get_volume_last_used_all
         
         # Get volume data from Docker API
-        df = get_system_df(include_volumes=True)
+        df = get_system_df(include_volumes=True, use_cache=True)
         volumes_data = df.get("volumes", {})
         
         # Get attributions, disk usage, and last mounted from database

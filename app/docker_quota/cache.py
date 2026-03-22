@@ -1,12 +1,12 @@
-"""Redis-based caching for Docker container/image lists to reduce expensive API calls.
+"""Redis-based caching for Docker container/image lists and system df results.
 
-Given that we track Docker events (container create/remove) via sync_from_docker_events()
-every 120 seconds, we can cache container lists for longer periods (5-10 minutes) and
-invalidate the cache when events are detected. This significantly reduces Docker API load
-while maintaining data freshness through event-driven invalidation.
+Live Docker fetches use write-through: results are stored in Redis even when the caller
+passes use_cache=False (that flag only skips the read path). Callers that pass
+use_cache=True may then reuse the latest stored snapshot within TTL.
 
-Also provides Redis-based distributed locks for Docker API operations so that with
-multiple gunicorn workers only one worker hits the Docker API at a time per operation.
+Container/image/df caches are invalidated when Docker events are detected (and when
+enforcement removes a container). Distributed locks serialize heavy Docker API calls
+across gunicorn workers.
 """
 
 import json
@@ -28,7 +28,7 @@ _CACHE_KEY_LAST_INVALIDATION = "docker:cache:last_invalidation"
 # Default TTL: 5 minutes (300 seconds)
 # This is safe because:
 # - Sync task runs every 10 minutes (DOCKER_QUOTA_SYNC_INTERVAL_SECONDS) and can invalidate cache on changes
-# - Enforcement task runs every 5 minutes but uses use_cache=False for correctness
+# - Enforcement task starts with use_cache=False for a fresh snapshot, then may read cache until invalidation
 # - TTL ensures cache refreshes even if sync misses events
 # Can be overridden via DOCKER_QUOTA_CACHE_TTL_SECONDS config
 _DEFAULT_TTL_SECONDS = 300  # 5 minutes

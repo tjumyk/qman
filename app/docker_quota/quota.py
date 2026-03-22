@@ -149,7 +149,8 @@ def _aggregate_usage_by_uid(
     Args:
         container_ids: Deprecated/ignored. Previously used to optimize get_system_df(), but get_system_df()
                        now uses a single df() API call that returns all data efficiently.
-        use_cache: If True, use cached df() results (for frontend APIs). Default False for background tasks.
+        use_cache: If True, read df from Redis when valid; if False, force live df (still write-through).
+            Default False so background paths get a live read unless they opt into cache reuse.
     """
     start_time = time.time()
     timings: dict[str, float] = {}
@@ -465,7 +466,9 @@ def set_user_quota(uid: int, block_hard_limit: int, block_soft_limit: int) -> di
     set_user_quota_limit(uid, block_hard_limit)
     containers = list_containers(all_containers=True)
     container_ids = [c["id"] for c in containers]
-    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
+    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(
+        None, None, container_ids=container_ids, use_cache=True
+    )
     used = usage_by_uid.get(uid, 0)
     return _user_quota_dict_docker(uid, used, block_hard_limit)
 
@@ -487,11 +490,13 @@ def batch_set_user_quota(uid_limits: dict[int, int]) -> list[dict[str, Any]]:
     # Step 1: Set all limits in the database at once
     batch_set_user_quota_limits(uid_limits)
     
-    # Step 2: Calculate usage once for all users
+    # Step 2: Calculate usage once for all users (reuse df cache from collect in same batch request)
     containers = list_containers(all_containers=True)
     container_ids = [c["id"] for c in containers]
-    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids)
-    
+    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(
+        None, None, container_ids=container_ids, use_cache=True
+    )
+
     # Step 3: Build result for each uid
     results = []
     for uid, block_hard_limit in uid_limits.items():

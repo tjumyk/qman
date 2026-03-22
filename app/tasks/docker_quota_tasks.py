@@ -12,6 +12,7 @@ from app.docker_quota.attribution_store import (
     get_all_user_quota_limits,
     delete_container_attribution,
 )
+from app.docker_quota.cache import invalidate_container_cache, invalidate_system_df_cache
 from app.docker_quota.docker_client import (
     get_system_df,
     list_containers,
@@ -57,10 +58,10 @@ def _containers_by_uid_with_created(
     If containers_list is provided, use it and pass container_ids to get_system_df to avoid duplicate list_containers."""
     if containers_list is not None:
         container_ids = [c["id"] for c in containers_list]
-        df = get_system_df(container_ids=container_ids)
+        df = get_system_df(container_ids=container_ids, use_cache=True)
     else:
         containers_list = list_containers(all_containers=True, use_cache=False)
-        df = get_system_df()
+        df = get_system_df(use_cache=False)
     container_sizes = df.get("containers") or {}
     cid_to_created: dict[str, float] = {}
     for c in containers_list:
@@ -129,7 +130,7 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
         if limit_1k <= 0:
             continue
         # Refresh container list each uid in case previous uid removed containers
-        containers_list = list_containers(all_containers=True, use_cache=False)
+        containers_list = list_containers(all_containers=True, use_cache=True)
         container_ids = [c["id"] for c in containers_list]
         limit_bytes = limit_1k * 1024
         # Total usage includes containers + image layers
@@ -150,10 +151,9 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
             events[-1]["host_user_name"] = f"user_{uid}"
         removed: list[str] = []
         containers = uid_to_containers.get(uid, [])
+        # Usage is unchanged between removals; only re-aggregate after a successful remove (see below).
+        current_total_used = total_used
         for cid, size, _created in containers:
-            # Recompute total_used after each removal (includes image layers)
-            current_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids, use_cache=False)
-            current_total_used = current_usage_by_uid.get(uid, 0)
             if current_total_used <= limit_bytes:
                 break
             logger.info(
@@ -163,23 +163,27 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
             if stop_container(cid):
                 if remove_container(cid, force=True):
                     delete_container_attribution(cid)
+                    invalidate_container_cache()
+                    invalidate_system_df_cache()
                     # Recompute after removal; refresh container list
-                    containers_list = list_containers(all_containers=True, use_cache=False)
+                    containers_list = list_containers(all_containers=True, use_cache=True)
                     container_ids = [c["id"] for c in containers_list]
-                    updated_usage_by_uid, _, _ = _aggregate_usage_by_uid(None, None, container_ids=container_ids, use_cache=False)
-                    new_total_used = updated_usage_by_uid.get(uid, 0)
+                    updated_usage_by_uid, _, _ = _aggregate_usage_by_uid(
+                        None, None, container_ids=container_ids, use_cache=True
+                    )
+                    current_total_used = updated_usage_by_uid.get(uid, 0)
                     total_removed += 1
                     removed.append(cid)
                     events.append(
                         {
                             "host_user_name": events[-1]["host_user_name"],
                             "event_type": "docker_container_removed",
-                            "detail": {"container_id": cid[:12], "size_bytes": size, "new_usage": new_total_used},
+                            "detail": {"container_id": cid[:12], "size_bytes": size, "new_usage": current_total_used},
                         }
                     )
                     logger.info(
                         "Container %s removed due to quota; uid=%s new_usage=%s (includes image layers)",
-                        cid[:12], uid, new_total_used,
+                        cid[:12], uid, current_total_used,
                     )
         if removed:
             events[-1]["detail"]["removed_ids"] = removed

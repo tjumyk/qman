@@ -5,9 +5,10 @@ Heavy endpoints such as ``system/df`` can exceed that on busy hosts; ``get_syste
 a longer timeout (default 180s, overridable via ``DOCKER_SYSTEM_DF_TIMEOUT``).
 The collect_events_since() function has a separate configurable wall-clock limit (default 90s).
 
-Note on caching: list_containers() and list_images() use Redis cache with 10-minute TTL.
-Cache is invalidated when Docker events indicate container/image changes. This significantly
-reduces Docker API load while maintaining freshness through event-driven invalidation.
+Note on caching: container/image list entries and ``get_system_df`` results use Redis with default TTL 300s (5 minutes),
+overridable via ``DOCKER_QUOTA_CACHE_TTL_SECONDS`` and ``DOCKER_QUOTA_DF_CACHE_TTL_SECONDS`` respectively.
+Successful live fetches write through; ``use_cache`` only controls whether this call reads from cache first.
+Caches are invalidated on relevant Docker events (and after quota enforcement removes a container).
 
 Note on locking: Heavy operations (list_containers, list_images, get_system_df) use per-operation locks so that concurrent
 requests do not all hit the Docker API at once. Locks are Redis-based so they work across gunicorn workers; if Redis
@@ -60,18 +61,18 @@ def get_docker_data_root(base_url: str = "unix://var/run/docker.sock") -> str:
 
 
 def list_containers(all_containers: bool = True, use_cache: bool = True) -> list[dict[str, Any]]:
-    """List containers (running and stopped). Returns list of {id, name, image_id, created, labels}.
+    """List containers (running and stopped). Returns list of {id, short_id, name, image, status, created, labels}.
     
     Note: Avoids accessing c.image.id (which triggers expensive inspect_image API call). Instead uses
     image ID from container attributes (c.attrs) which is already loaded.
     
     Args:
         all_containers: If True, include stopped containers.
-        use_cache: If True, check Redis cache first (default True). Set False to force fresh fetch.
+        use_cache: If True, read from Redis cache when valid (default True). If False, skip the
+            read path and always contact Docker; the result is still written to Redis (write-through).
     
     Returns:
-        List of container dicts. Uses cache if available and not expired (10-minute TTL).
-        Cache is invalidated when Docker events indicate container changes.
+        List of container dicts. Live fetches populate the cache for other callers.
     """
     start_time = time.time()
     
@@ -125,23 +126,27 @@ def list_containers(all_containers: bool = True, use_cache: bool = True) -> list
                     image_id = attrs["Config"]["Image"]
                 # Labels are in Config.Labels, not directly in attrs.Labels
                 config_labels = (attrs.get("Config") or {}).get("Labels") or {}
+                state = attrs.get("State") or {}
+                status = state.get("Status") or c.status or "unknown"
                 result.append({
                     "id": c.id,
                     "short_id": c.short_id,
                     "name": (c.name or ""),
                     "image": image_id,
+                    "status": status,
                     "created": attrs.get("Created"),
                     "labels": config_labels,
                 })
             parse_time = time.time() - parse_start
             
-            # Cache the result
-            if use_cache:
-                try:
-                    set_cached_containers(result)
-                except Exception as e:
-                    logger.debug("Failed to cache containers list: %s", e)
-        
+            # Write-through: populate Redis for other callers even when use_cache=False on this call.
+            try:
+                from app.docker_quota.cache import set_cached_containers
+
+                set_cached_containers(result)
+            except Exception as e:
+                logger.debug("Failed to cache containers list: %s", e)
+
             total_time = time.time() - start_time
             logger.debug(
                 "Docker list_containers: total=%.2fs (client_init=%.2fs, list=%.2fs, parse=%.2fs, count=%d)",
@@ -158,11 +163,11 @@ def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
     """List images. Returns list of {id, short_id, size, created}.
     
     Args:
-        use_cache: If True, check Redis cache first (default True). Set False to force fresh fetch.
+        use_cache: If True, read from Redis cache when valid (default True). If False, skip the
+            read path and always contact Docker; the result is still written to Redis (write-through).
     
     Returns:
-        List of image dicts. Uses cache if available and not expired (10-minute TTL).
-        Cache is invalidated when Docker events indicate image changes.
+        List of image dicts. Live fetches populate the cache for other callers.
     """
     start_time = time.time()
     
@@ -204,11 +209,12 @@ def list_images(use_cache: bool = True) -> list[dict[str, Any]]:
                     }
                     for img in images
                 ]
-                if use_cache:
-                    try:
-                        set_cached_images(result)
-                    except Exception as e:
-                        logger.debug("Failed to cache images list: %s", e)
+                try:
+                    from app.docker_quota.cache import set_cached_images
+
+                    set_cached_images(result)
+                except Exception as e:
+                    logger.debug("Failed to cache images list: %s", e)
                 elapsed = time.time() - start_time
                 logger.debug("Docker list_images: total=%.2fs (count=%d)", elapsed, len(result))
                 return result
@@ -251,8 +257,9 @@ def get_system_df(
         image_sizes: Deprecated/ignored. Previously used to skip images.list().
                      Now all data comes from single df() call.
         include_volumes: If True, also include volume sizes in the result.
-        use_cache: If True, check Redis cache first (60s TTL). Use for frontend APIs only.
-                   Background tasks should use False (default) for accurate enforcement/sync.
+        use_cache: If True, read from Redis cache when valid. If False, skip the read path and
+            always call Docker; the parsed result is still written to Redis (write-through) so
+            other callers can hit the cache.
 
     Returns:
         dict with keys:
@@ -262,7 +269,7 @@ def get_system_df(
     """
     start_time = time.time()
     
-    # Check cache first if enabled (frontend APIs only)
+    # Read cache first only when use_cache=True (write-through still updates cache on live fetch)
     if use_cache:
         try:
             from app.docker_quota.cache import get_cached_system_df
@@ -355,15 +362,15 @@ def get_system_df(
             }
             if include_volumes:
                 result["volumes"] = volumes_dict
-            
-            # Cache result for frontend APIs (only if caching was requested)
-            if use_cache:
-                try:
-                    from app.docker_quota.cache import set_cached_system_df
-                    set_cached_system_df(result, include_volumes=include_volumes)
-                except Exception as cache_err:
-                    logger.debug("Failed to cache system_df result: %s", cache_err)
-            
+
+            # Write-through: always store fresh df parse so use_cache=True callers can reuse it.
+            try:
+                from app.docker_quota.cache import set_cached_system_df
+
+                set_cached_system_df(result, include_volumes=include_volumes)
+            except Exception as cache_err:
+                logger.debug("Failed to cache system_df result: %s", cache_err)
+
             return result
         except Exception as e:
             elapsed = time.time() - start_time
@@ -523,9 +530,9 @@ def get_image_layers_with_sizes(image_id: str) -> list[tuple[str, int]]:
 
 
 def get_container_details() -> list[dict[str, Any]]:
-    """Get detailed container info for display. Returns list of {id, name, image, status, created}.
-    
-    Fetches additional fields not included in list_containers() for UI display purposes.
+    """Get detailed container info for display. Returns list of {id, name, image, status, created, labels}.
+
+    Separate API path from list_containers(); use list_containers when aligning with get_system_df cache.
     """
     start_time = time.time()
     try:
