@@ -173,6 +173,35 @@ def _docker_event_fingerprint(
     )
 
 
+def _docker_usage_event_entity_fields(
+    typ: str,
+    actor_id: str | None,
+    ev: dict[str, Any],
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Derive (container_id, image_id, image_ref, volume_name) from a decoded Docker events entry.
+
+    Used when persisting ``DockerUsageDockerEvent`` so admin entity views match rows by FK,
+    not only ``docker_actor_id`` (previously only ``container``+``create`` set ``container_id``).
+    """
+    typ_l = (typ or "").lower()
+    aid = (actor_id or "").strip() or None
+
+    if typ_l == "container" and aid:
+        return (aid, None, None, None)
+
+    if typ_l == "image" and aid:
+        from_ref = ev.get("from")
+        ref: str | None = None
+        if isinstance(from_ref, str) and from_ref.strip():
+            ref = from_ref.strip()
+        return (None, aid, ref, None)
+
+    if typ_l == "volume" and aid:
+        return (None, None, None, aid)
+
+    return (None, None, None, None)
+
+
 def _audit_events_by_time_window(
     audit_events: list[dict[str, Any]],
 ) -> dict[int, int]:
@@ -759,13 +788,14 @@ def sync_from_docker_events(
             continue
         seen_docker_fps.add(fp)
 
+        cid, img_id, img_ref, vol_name = _docker_usage_event_entity_fields(typ, actor_id, ev)
         pending_docker_events.append(
             DockerUsageDockerEvent(
                 event_ts=datetime.fromtimestamp(ev_ts_float) if ev_ts_float is not None else None,
-                container_id=actor_id if typ == "container" and action == "create" else None,
-                image_id=None,
-                image_ref=actor_id if typ == "image" else None,
-                volume_name=None,
+                container_id=cid,
+                image_id=img_id,
+                image_ref=img_ref,
+                volume_name=vol_name,
                 uid=None,
                 host_user_name=None,
                 docker_event_type=typ,
