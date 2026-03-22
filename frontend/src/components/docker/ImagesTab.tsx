@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
   Stack,
   Text,
@@ -56,7 +56,6 @@ function getCreationMethodColor(method: string | null): string {
 }
 
 export function ImagesTab({ hostId }: ImagesTabProps) {
-  const queryClient = useQueryClient()
   const { t } = useI18n()
   const [imageSearch, setImageSearch] = useState('')
   const [layerSearch, setLayerSearch] = useState('')
@@ -325,9 +324,6 @@ export function ImagesTab({ hostId }: ImagesTabProps) {
                   hostId={hostId}
                   entityType={detailEntity.entityType}
                   entityId={detailEntity.entityId}
-                  onAttributionChanged={() =>
-                    queryClient.invalidateQueries({ queryKey: ['docker-images', hostId] })
-                  }
                 />
               )}
 

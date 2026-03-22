@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Stack, Text, Table, Loader, Alert, TextInput, Badge, Group, ActionIcon, Tooltip } from '@mantine/core'
 import { IconInfoCircle } from '@tabler/icons-react'
 import { fetchDockerContainers, type DockerUsageEntityType } from '../../api'
@@ -34,7 +34,6 @@ function getStatusColor(status: string): string {
 }
 
 export function ContainersTab({ hostId }: ContainersTabProps) {
-  const queryClient = useQueryClient()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
   const [sortField, setSortField] = useState<SortField>('name')
@@ -212,9 +211,6 @@ export function ContainersTab({ hostId }: ContainersTabProps) {
           hostId={hostId}
           entityType={detailEntity.entityType}
           entityId={detailEntity.entityId}
-          onAttributionChanged={() =>
-            queryClient.invalidateQueries({ queryKey: ['docker-containers', hostId] })
-          }
         />
       )}
 

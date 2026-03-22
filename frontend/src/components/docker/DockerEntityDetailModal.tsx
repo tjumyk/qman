@@ -63,8 +63,6 @@ export type DockerEntityDetailModalProps = {
   hostId: string
   entityType: DockerUsageEntityType
   entityId: string
-  /** Parent list queries to refresh (e.g. docker-containers for ContainersTab). Modal always refreshes its own detail/events. */
-  onAttributionChanged?: () => void | Promise<void>
 }
 
 export function DockerEntityDetailModal({
@@ -73,7 +71,6 @@ export function DockerEntityDetailModal({
   hostId,
   entityType,
   entityId,
-  onAttributionChanged,
 }: DockerEntityDetailModalProps) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -169,20 +166,43 @@ export function DockerEntityDetailModal({
       }))
   }, [hostId, mappings])
 
-  const invalidateAttributionQueries = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: ['docker-attribution-detail', hostId, entityType, entityId],
-    })
-    await queryClient.invalidateQueries({
-      queryKey: [
-        'admin-docker-usage-events',
-        hostId,
-        entityType,
-        entityId,
-      ],
-    })
+  /** cascade: same flag sent to the API (always false for volume). */
+  const invalidateAttributionQueries = async (opts: { cascade: boolean }) => {
+    const containerCascade = entityType === 'container' && opts.cascade
+
+    if (containerCascade) {
+      await queryClient.invalidateQueries({
+        queryKey: ['docker-attribution-detail', hostId],
+      })
+    } else {
+      await queryClient.invalidateQueries({
+        queryKey: ['docker-attribution-detail', hostId, entityType, entityId],
+      })
+    }
+
+    if (containerCascade) {
+      await queryClient.invalidateQueries({
+        queryKey: ['admin-docker-usage-events', hostId],
+      })
+    } else {
+      await queryClient.invalidateQueries({
+        queryKey: ['admin-docker-usage-events', hostId, entityType, entityId],
+      })
+    }
+
     await queryClient.invalidateQueries({ queryKey: ['admin-docker-usage-review'] })
-    await onAttributionChanged?.()
+    await queryClient.invalidateQueries({ queryKey: ['quotas'] })
+    await queryClient.invalidateQueries({ queryKey: ['me-quotas'] })
+
+    if (entityType === 'container') {
+      await queryClient.invalidateQueries({ queryKey: ['docker-containers', hostId] })
+    }
+    if (entityType === 'image' || containerCascade) {
+      await queryClient.invalidateQueries({ queryKey: ['docker-images', hostId] })
+    }
+    if (entityType === 'volume' || containerCascade) {
+      await queryClient.invalidateQueries({ queryKey: ['docker-volumes', hostId] })
+    }
   }
 
   const assignMutation = useMutation({
@@ -207,7 +227,9 @@ export function DockerEntityDetailModal({
     },
     onSuccess: async () => {
       notifications.show({ color: 'green', message: t('dockerUsageReviewAssigned') })
-      await invalidateAttributionQueries()
+      await invalidateAttributionQueries({
+        cascade: entityType === 'volume' ? false : cascade,
+      })
     },
     onError: (e: unknown) => {
       notifications.show({
@@ -227,7 +249,9 @@ export function DockerEntityDetailModal({
       }),
     onSuccess: async () => {
       notifications.show({ color: 'teal', message: t('dockerUsageReviewCleared') })
-      await invalidateAttributionQueries()
+      await invalidateAttributionQueries({
+        cascade: entityType === 'volume' ? false : cascade,
+      })
     },
     onError: (e: unknown) => {
       notifications.show({

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
   Stack,
   Text,
@@ -39,7 +39,6 @@ function getAttributionSourceColor(source: string | null): string {
 }
 
 export function VolumesTab({ hostId }: VolumesTabProps) {
-  const queryClient = useQueryClient()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
   const [sortField, setSortField] = useState<SortField>('volume_name')
@@ -239,9 +238,6 @@ export function VolumesTab({ hostId }: VolumesTabProps) {
           hostId={hostId}
           entityType={detailEntity.entityType}
           entityId={detailEntity.entityId}
-          onAttributionChanged={() =>
-            queryClient.invalidateQueries({ queryKey: ['docker-volumes', hostId] })
-          }
         />
       )}
 
