@@ -128,7 +128,7 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
 
     containers_list = list_containers(all_containers=True, use_cache=False)
     container_ids = [c["id"] for c in containers_list]
-    usage_by_uid, _total_used, _unattributed = _aggregate_usage_by_uid(
+    usage_by_uid, _total_used, _unattributed, _bd = _aggregate_usage_by_uid(
         None, None, container_ids=container_ids, use_cache=False
     )
     uid_to_containers = _containers_by_uid_with_created(order, containers_list=containers_list)

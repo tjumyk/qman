@@ -156,6 +156,10 @@ const translations: Record<Locale, Record<string, string>> = {
     host: 'Host',
     deviceTypeDocker: 'Docker',
     containerRemovedDueToQuota: 'Container removed due to quota',
+    dockerUsageContainerWorkLayer: 'Container work layer',
+    dockerUsageImageLayers: 'Image layers',
+    dockerUsageVolumes: 'Volumes',
+    dockerQuotaRemainingLabel: 'Remaining quota',
     // Docker detail tabs
     usersTab: 'Users',
     containersTab: 'Containers',
@@ -469,6 +473,10 @@ const translations: Record<Locale, Record<string, string>> = {
     host: '主机',
     deviceTypeDocker: 'Docker',
     containerRemovedDueToQuota: '因配额移除容器',
+    dockerUsageContainerWorkLayer: '容器可写层',
+    dockerUsageImageLayers: '镜像层',
+    dockerUsageVolumes: '数据卷',
+    dockerQuotaRemainingLabel: '剩余配额',
     unattributedUsageLabel: '未归属（无 qman.user）',
     // Docker detail tabs
     usersTab: '用户',

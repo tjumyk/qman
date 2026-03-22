@@ -39,6 +39,25 @@ describe('schemas', () => {
     expect(userQuotaSchema.parse(q)).toEqual(q)
   })
 
+  it('parses UserQuota with Docker breakdown', () => {
+    const q = {
+      block_hard_limit: 1000,
+      block_soft_limit: 1000,
+      block_current: 500,
+      inode_hard_limit: 0,
+      inode_soft_limit: 0,
+      inode_current: 0,
+      block_time_limit: 0,
+      inode_time_limit: 0,
+      uid: 1000,
+      name: 'user',
+      docker_container_bytes: 100,
+      docker_image_layer_bytes: 200,
+      docker_volume_bytes: 200,
+    }
+    expect(userQuotaSchema.parse(q)).toEqual(q)
+  })
+
   it('parses HostQuota with error', () => {
     expect(hostQuotaSchema.parse({ error: { msg: 'fail' } })).toEqual({
       error: { msg: 'fail' },

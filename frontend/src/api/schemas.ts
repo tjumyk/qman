@@ -36,6 +36,12 @@ export type Quota = z.infer<typeof quotaSchema>
 export const userQuotaSchema = quotaSchema.extend({
   name: z.string(),
   uid: z.number(),
+  /** Docker: attributed container writable layer bytes (df size). */
+  docker_container_bytes: z.number().optional(),
+  /** Docker: attributed image layer bytes. */
+  docker_image_layer_bytes: z.number().optional(),
+  /** Docker: attributed volume bytes. */
+  docker_volume_bytes: z.number().optional(),
 })
 export type UserQuota = z.infer<typeof userQuotaSchema>
 

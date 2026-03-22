@@ -39,13 +39,19 @@ def _user_quota_dict_docker(
     uid: int,
     used_bytes: int,
     block_hard_limit_1k: int,
+    *,
+    docker_breakdown: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Build UserQuota-shaped dict for Docker (inode/time = 0)."""
+    """Build UserQuota-shaped dict for Docker (inode/time = 0).
+
+    Optional docker_breakdown: container / image layer / volume bytes attributed to this uid
+    (for UI breakdown on My usage).
+    """
     try:
         name = pwd.getpwuid(uid).pw_name
     except KeyError:
         name = f"user_{uid}"
-    return {
+    out: dict[str, Any] = {
         "uid": uid,
         "name": name,
         "block_hard_limit": block_hard_limit_1k,
@@ -57,6 +63,11 @@ def _user_quota_dict_docker(
         "block_time_limit": 0,
         "inode_time_limit": 0,
     }
+    if docker_breakdown is not None:
+        out["docker_container_bytes"] = int(docker_breakdown.get("container_bytes", 0))
+        out["docker_image_layer_bytes"] = int(docker_breakdown.get("image_layer_bytes", 0))
+        out["docker_volume_bytes"] = int(docker_breakdown.get("volume_bytes", 0))
+    return out
 
 
 def _reconcile_attributions(
@@ -140,8 +151,11 @@ def _aggregate_usage_by_uid(
     reserved_bytes: int | None,
     container_ids: list[str] | None = None,
     use_cache: bool = False,
-) -> tuple[dict[int, int], int, int]:
-    """Aggregate Docker disk usage per uid. Returns (uid -> used_bytes, total_used, unattributed_bytes).
+) -> tuple[dict[int, int], int, int, dict[int, dict[str, int]]]:
+    """Aggregate Docker disk usage per uid.
+
+    Returns (uid -> used_bytes, total_used, unattributed_bytes, uid -> breakdown).
+    Breakdown keys: container_bytes, image_layer_bytes, volume_bytes (sum == used per uid).
     total_used = sum of all container sizes + sum of all image layer sizes + sum of all volume sizes; 
     usage_by_uid = container usage + image layer usage + volume usage (where user is attributed);
     unattributed = total_used - sum(usage_by_uid).
@@ -194,6 +208,7 @@ def _aggregate_usage_by_uid(
     # Container usage
     container_agg_start = time.time()
     usage_by_uid: dict[int, int] = {}
+    container_by_uid: dict[int, int] = {}
     total_container_used = 0
     for cid, size in container_sizes.items():
         total_container_used += size
@@ -203,9 +218,11 @@ def _aggregate_usage_by_uid(
         _name, uid = user
         if uid is not None:
             usage_by_uid[uid] = usage_by_uid.get(uid, 0) + size
+            container_by_uid[uid] = container_by_uid.get(uid, 0) + size
         elif _name in name_to_uid:
             u = name_to_uid[_name]
             usage_by_uid[u] = usage_by_uid.get(u, 0) + size
+            container_by_uid[u] = container_by_uid.get(u, 0) + size
     timings["container_aggregation"] = time.time() - container_agg_start
     
     # Image layer usage (first creator owns the layer)
@@ -213,6 +230,7 @@ def _aggregate_usage_by_uid(
     # attributed_layer_used = only layers with attribution (for user breakdown)
     layer_agg_start = time.time()
     total_image_used = sum(image_sizes.values())  # All Docker images
+    layer_by_uid: dict[int, int] = {}
     attributed_layer_used = 0
     for layer_att in layer_attributions:
         layer_size = layer_att.get("size_bytes", 0)
@@ -220,6 +238,7 @@ def _aggregate_usage_by_uid(
         uid = layer_att.get("first_puller_uid")
         if uid is not None:
             usage_by_uid[uid] = usage_by_uid.get(uid, 0) + layer_size
+            layer_by_uid[uid] = layer_by_uid.get(uid, 0) + layer_size
     timings["layer_aggregation"] = time.time() - layer_agg_start
     
     # Volume usage: effective size = actual_disk_bytes from scan if present, else Docker-reported size
@@ -227,6 +246,7 @@ def _aggregate_usage_by_uid(
     total_volume_used = 0
     attributed_volume_used = 0
     vol_att_by_name = {att["volume_name"]: att for att in volume_attributions}
+    volume_by_uid: dict[int, int] = {}
     for vol_name, vol_info in volume_data.items():
         reported_size = vol_info.get("size", 0)
         disk_usage = volume_disk_usage_by_name.get(vol_name)
@@ -239,12 +259,14 @@ def _aggregate_usage_by_uid(
             uid = vol_att.get("uid")
             if uid is not None:
                 usage_by_uid[uid] = usage_by_uid.get(uid, 0) + vol_size
+                volume_by_uid[uid] = volume_by_uid.get(uid, 0) + vol_size
             else:
                 # Try to resolve from host_user_name
                 host_name = vol_att.get("host_user_name")
                 if host_name and host_name in name_to_uid:
                     u = name_to_uid[host_name]
                     usage_by_uid[u] = usage_by_uid.get(u, 0) + vol_size
+                    volume_by_uid[u] = volume_by_uid.get(u, 0) + vol_size
     timings["volume_aggregation"] = time.time() - volume_agg_start
     
     # Total used = containers (all) + images (all from Docker) + volumes (all)
@@ -269,7 +291,20 @@ def _aggregate_usage_by_uid(
         len(volume_data), total_volume_used, attributed_volume_used,
         total_used, attributed_sum, unattributed_bytes, len(usage_by_uid)
     )
-    return usage_by_uid, total_used, unattributed_bytes
+    breakdown_uids = (
+        set(usage_by_uid.keys())
+        | set(container_by_uid.keys())
+        | set(layer_by_uid.keys())
+        | set(volume_by_uid.keys())
+    )
+    breakdown_by_uid: dict[int, dict[str, int]] = {}
+    for u in breakdown_uids:
+        breakdown_by_uid[u] = {
+            "container_bytes": container_by_uid.get(u, 0),
+            "image_layer_bytes": layer_by_uid.get(u, 0),
+            "volume_bytes": volume_by_uid.get(u, 0),
+        }
+    return usage_by_uid, total_used, unattributed_bytes, breakdown_by_uid
 
 
 def get_devices(
@@ -283,7 +318,9 @@ def get_devices(
     root = data_root or get_docker_data_root()
     containers = list_containers(all_containers=True)
     container_ids = [c["id"] for c in containers]
-    usage_by_uid, total_used, unattributed = _aggregate_usage_by_uid(root, reserved_bytes, container_ids=container_ids)
+    usage_by_uid, total_used, unattributed, _bd = _aggregate_usage_by_uid(
+        root, reserved_bytes, container_ids=container_ids
+    )
     attributed = sum(usage_by_uid.values())
     if reserved_bytes is not None and reserved_bytes > 0:
         total = reserved_bytes
@@ -356,7 +393,9 @@ def collect_remote_quotas(
     root = data_root or get_docker_data_root()
     container_ids = [c["id"] for c in containers]
     aggregate_start = time.time()
-    usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(root, reserved_bytes, container_ids=container_ids, use_cache=use_cache)
+    usage_by_uid, total_used, unattributed_bytes, breakdown_by_uid = _aggregate_usage_by_uid(
+        root, reserved_bytes, container_ids=container_ids, use_cache=use_cache
+    )
     timings["aggregate_usage"] = time.time() - aggregate_start
     
     build_quotas_start = time.time()
@@ -369,7 +408,11 @@ def collect_remote_quotas(
             continue
         used = usage_by_uid.get(uid, 0)
         limit_1k = limits.get(uid, 0)
-        user_quotas.append(_user_quota_dict_docker(uid, used, limit_1k))
+        user_quotas.append(
+            _user_quota_dict_docker(
+                uid, used, limit_1k, docker_breakdown=breakdown_by_uid.get(uid)
+            )
+        )
     timings["build_user_quotas"] = time.time() - build_quotas_start
     
     if reserved_bytes is not None and reserved_bytes > 0:
@@ -428,7 +471,7 @@ def collect_remote_quotas_for_uid(
     root = data_root or get_docker_data_root()
     containers = list_containers(all_containers=True)
     container_ids = [c["id"] for c in containers]
-    usage_by_uid, total_used, unattributed_bytes = _aggregate_usage_by_uid(
+    usage_by_uid, total_used, unattributed_bytes, breakdown_by_uid = _aggregate_usage_by_uid(
         root, reserved_bytes, container_ids=container_ids, use_cache=use_cache
     )
     attributed_total = sum(usage_by_uid.values())
@@ -446,7 +489,9 @@ def collect_remote_quotas_for_uid(
         total = max(sum_quotas_bytes + unattributed_bytes, 1)
         free = max(0, total - attributed_total - unattributed_bytes)
         percent = ((total - free) / total * 100.0) if total else 0.0
-    quota_dict = _user_quota_dict_docker(uid, used, limit_1k)
+    quota_dict = _user_quota_dict_docker(
+        uid, used, limit_1k, docker_breakdown=breakdown_by_uid.get(uid)
+    )
     device: dict[str, Any] = {
         "name": "docker",
         "mount_points": [root],
@@ -466,11 +511,13 @@ def set_user_quota(uid: int, block_hard_limit: int, block_soft_limit: int) -> di
     set_user_quota_limit(uid, block_hard_limit)
     containers = list_containers(all_containers=True)
     container_ids = [c["id"] for c in containers]
-    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(
+    usage_by_uid, _total, _unattributed, breakdown_by_uid = _aggregate_usage_by_uid(
         None, None, container_ids=container_ids, use_cache=True
     )
     used = usage_by_uid.get(uid, 0)
-    return _user_quota_dict_docker(uid, used, block_hard_limit)
+    return _user_quota_dict_docker(
+        uid, used, block_hard_limit, docker_breakdown=breakdown_by_uid.get(uid)
+    )
 
 
 def batch_set_user_quota(uid_limits: dict[int, int]) -> list[dict[str, Any]]:
@@ -493,7 +540,7 @@ def batch_set_user_quota(uid_limits: dict[int, int]) -> list[dict[str, Any]]:
     # Step 2: Calculate usage once for all users (reuse df cache from collect in same batch request)
     containers = list_containers(all_containers=True)
     container_ids = [c["id"] for c in containers]
-    usage_by_uid, _total, _unattributed = _aggregate_usage_by_uid(
+    usage_by_uid, _total, _unattributed, breakdown_by_uid = _aggregate_usage_by_uid(
         None, None, container_ids=container_ids, use_cache=True
     )
 
@@ -501,7 +548,11 @@ def batch_set_user_quota(uid_limits: dict[int, int]) -> list[dict[str, Any]]:
     results = []
     for uid, block_hard_limit in uid_limits.items():
         used = usage_by_uid.get(uid, 0)
-        results.append(_user_quota_dict_docker(uid, used, block_hard_limit))
+        results.append(
+            _user_quota_dict_docker(
+                uid, used, block_hard_limit, docker_breakdown=breakdown_by_uid.get(uid)
+            )
+        )
     
     elapsed = time.time() - start_time
     logger.info("Docker batch_set_user_quota: %d users in %.2fs", len(uid_limits), elapsed)
