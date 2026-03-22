@@ -29,7 +29,11 @@ from app.docker_quota.docker_client import (
     list_images,
     get_system_df,
 )
-from app.quota_common import should_include_uid
+from app.quota_common import (
+    build_name_to_uid_from_container_attributions,
+    resolve_uid_for_docker_attribution,
+    should_include_uid,
+)
 from app.utils import get_logger
 
 logger = get_logger(__name__)
@@ -189,20 +193,7 @@ def _aggregate_usage_by_uid(
     cid_to_user: dict[str, tuple[str, int | None]] = {}
     for att in attributions:
         cid_to_user[att["container_id"]] = (att["host_user_name"], att.get("uid"))
-    name_to_uid: dict[str, int] = {}
-    for att in attributions:
-        name = att["host_user_name"]
-        if name not in name_to_uid and att.get("uid") is not None:
-            name_to_uid[name] = att["uid"]
-    for att in attributions:
-        name = att["host_user_name"]
-        if name in name_to_uid:
-            continue
-        try:
-            entry = pwd.getpwnam(name)
-            name_to_uid[name] = entry.pw_uid
-        except KeyError:
-            pass
+    name_to_uid = build_name_to_uid_from_container_attributions(attributions)
     timings["build_maps"] = time.time() - build_map_start
     
     # Container usage
@@ -216,13 +207,10 @@ def _aggregate_usage_by_uid(
         if not user:
             continue
         _name, uid = user
-        if uid is not None:
-            usage_by_uid[uid] = usage_by_uid.get(uid, 0) + size
-            container_by_uid[uid] = container_by_uid.get(uid, 0) + size
-        elif _name in name_to_uid:
-            u = name_to_uid[_name]
-            usage_by_uid[u] = usage_by_uid.get(u, 0) + size
-            container_by_uid[u] = container_by_uid.get(u, 0) + size
+        uid_res = resolve_uid_for_docker_attribution(uid, _name, name_to_uid)
+        if uid_res is not None:
+            usage_by_uid[uid_res] = usage_by_uid.get(uid_res, 0) + size
+            container_by_uid[uid_res] = container_by_uid.get(uid_res, 0) + size
     timings["container_aggregation"] = time.time() - container_agg_start
     
     # Image layer usage (first creator owns the layer)
@@ -235,7 +223,11 @@ def _aggregate_usage_by_uid(
     for layer_att in layer_attributions:
         layer_size = layer_att.get("size_bytes", 0)
         attributed_layer_used += layer_size
-        uid = layer_att.get("first_puller_uid")
+        uid = resolve_uid_for_docker_attribution(
+            layer_att.get("first_puller_uid"),
+            layer_att.get("first_puller_host_user_name"),
+            name_to_uid,
+        )
         if uid is not None:
             usage_by_uid[uid] = usage_by_uid.get(uid, 0) + layer_size
             layer_by_uid[uid] = layer_by_uid.get(uid, 0) + layer_size
@@ -256,17 +248,14 @@ def _aggregate_usage_by_uid(
         vol_att = vol_att_by_name.get(vol_name)
         if vol_att:
             attributed_volume_used += vol_size
-            uid = vol_att.get("uid")
+            uid = resolve_uid_for_docker_attribution(
+                vol_att.get("uid"),
+                vol_att.get("host_user_name"),
+                name_to_uid,
+            )
             if uid is not None:
                 usage_by_uid[uid] = usage_by_uid.get(uid, 0) + vol_size
                 volume_by_uid[uid] = volume_by_uid.get(uid, 0) + vol_size
-            else:
-                # Try to resolve from host_user_name
-                host_name = vol_att.get("host_user_name")
-                if host_name and host_name in name_to_uid:
-                    u = name_to_uid[host_name]
-                    usage_by_uid[u] = usage_by_uid.get(u, 0) + vol_size
-                    volume_by_uid[u] = volume_by_uid.get(u, 0) + vol_size
     timings["volume_aggregation"] = time.time() - volume_agg_start
     
     # Total used = containers (all) + images (all from Docker) + volumes (all)

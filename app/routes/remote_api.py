@@ -491,11 +491,18 @@ def register_remote_api_routes(app: Any) -> None:
             return jsonify(msg="Docker quota not enabled on this host"), 400
         
         from app.docker_quota.docker_client import get_image_details, get_image_layers_with_sizes
-        from app.docker_quota.attribution_store import get_layer_effective_attributions, get_image_effective_attributions
-        
+        from app.docker_quota.attribution_store import (
+            get_container_effective_attributions,
+            get_image_effective_attributions,
+            get_layer_effective_attributions,
+        )
+        from app.quota_common import build_name_to_uid_from_container_attributions, resolve_uid_for_docker_attribution
+
         # Get image details from Docker API
         images = get_image_details()
-        
+
+        name_to_uid = build_name_to_uid_from_container_attributions(get_container_effective_attributions())
+
         # Get layer attributions from database (indexed by layer_id for lookup)
         layer_attributions_list = get_layer_effective_attributions()
         layer_attributions_map = {la["layer_id"]: la for la in layer_attributions_list}
@@ -546,10 +553,14 @@ def register_remote_api_routes(app: Any) -> None:
             if att:
                 # Layer has attribution
                 attributed_layer_bytes += size
-                uid = att.get("first_puller_uid")
+                uid = resolve_uid_for_docker_attribution(
+                    att.get("first_puller_uid"),
+                    att.get("first_puller_host_user_name"),
+                    name_to_uid,
+                )
                 if uid is not None:
                     layers_by_user[uid] = layers_by_user.get(uid, 0) + size
-                
+
                 first_seen = att.get("first_seen_at")
                 result_layers.append({
                     "layer_id": layer_id,
