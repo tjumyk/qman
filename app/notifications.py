@@ -121,11 +121,11 @@ def _bytes_to_gib(value: int) -> float:
     return value / (1024**3) if value > 0 else 0.0
 
 
-def _docker_quota_recommended_actions_bilingual(normalized: str) -> tuple[str, str]:
+def _docker_quota_recommended_actions_bilingual(*, include_stop_extra: bool = False) -> tuple[str, str]:
     """Return (zh_html, en_html) remediation blocks for Docker quota notification emails."""
     stop_extra_zh = ""
     stop_extra_en = ""
-    if normalized == "docker_container_stopped":
+    if include_stop_extra:
         stop_extra_zh = (
             "<li>在释放足够磁盘空间或管理员调整配额后，如策略允许，可尝试使用 <code>docker start</code> 重新启动被停止的容器（启动前请确认无数据风险）。</li>"
         )
@@ -159,6 +159,121 @@ def _docker_quota_recommended_actions_bilingual(normalized: str) -> tuple[str, s
     return zh, en
 
 
+def _normalize_docker_slave_event_type(event_type: str) -> str:
+    """Map legacy slave event names to canonical docker_* types."""
+    if event_type == "quota_exceeded":
+        return "docker_quota_exceeded"
+    if event_type == "container_removed":
+        return "docker_container_removed"
+    return event_type
+
+
+def _sanitize_state_key_segment(raw: str, *, max_len: int = 80) -> str:
+    """Strip unsafe characters and cap length so state_key stays within DB limits."""
+    s = raw.strip().replace("|", "_")
+    return s[:max_len] if len(s) > max_len else s
+
+
+def _first_str_id(ids_obj: Any) -> str | None:
+    if not isinstance(ids_obj, list) or not ids_obj:
+        return None
+    first = ids_obj[0]
+    if isinstance(first, str) and first.strip():
+        return first.strip()
+    return None
+
+
+def _docker_notification_state_key_extra(event_type: str, detail: dict[str, Any]) -> str | None:
+    """Optional sixth segment for Docker throttling: per-container stop/remove, not quota exceeded.
+
+    Without this, all docker_container_removed events for a user share one key and suppress
+    distinct containers within the dedupe window.
+    """
+    normalized = _normalize_docker_slave_event_type(event_type)
+    if normalized == "docker_quota_exceeded":
+        return None
+    if normalized == "docker_container_stopped":
+        cid_full = _first_str_id(detail.get("stopped_ids"))
+        if cid_full:
+            return _sanitize_state_key_segment(cid_full)
+        cid = detail.get("container_id")
+        if isinstance(cid, str) and cid.strip():
+            return _sanitize_state_key_segment(cid)
+        return _sanitize_state_key_segment("unknown")
+    if normalized == "docker_container_removed":
+        cid_full = _first_str_id(detail.get("removed_ids"))
+        if cid_full:
+            return _sanitize_state_key_segment(cid_full)
+        cid = detail.get("container_id")
+        if isinstance(cid, str) and cid.strip():
+            return _sanitize_state_key_segment(cid)
+        return _sanitize_state_key_segment("unknown")
+    return None
+
+
+def _docker_quota_single_event_subject(event_type: str) -> str:
+    """Email subject for a single Docker notification event type (with [Qman] prefix)."""
+    normalized = _normalize_docker_slave_event_type(event_type)
+    if normalized == "docker_quota_exceeded":
+        return "[Qman] Docker quota exceeded"
+    if normalized == "docker_container_stopped":
+        return "[Qman] Docker container stopped (quota)"
+    return "[Qman] Container(s) removed due to Docker quota"
+
+
+def _docker_quota_event_heading_zh_en(normalized: str) -> tuple[str, str]:
+    """Section headings (zh, en) for batched Docker quota email sections."""
+    if normalized == "docker_quota_exceeded":
+        return "Docker 配额已超出", "Docker quota exceeded"
+    if normalized == "docker_container_stopped":
+        return "容器已自动停止（配额）", "Container stopped (quota enforcement)"
+    return "容器已移除（配额）", "Container(s) removed (quota)"
+
+
+def _docker_quota_event_lead_zh_en(normalized: str) -> tuple[str, str]:
+    """Lead sentences (zh, en) for a Docker quota email section."""
+    if normalized == "docker_quota_exceeded":
+        return "您在此主机上的 Docker 配额已被超出。", "Your Docker quota on this host has been exceeded."
+    if normalized == "docker_container_stopped":
+        return (
+            "由于已归因的 Docker 用量超出配额，系统已自动停止您的某个容器（未执行删除，可写层等数据仍保留在主机上）。",
+            (
+                "A Docker container was stopped automatically because your attributed Docker usage exceeds your quota. "
+                "The container was not removed, so its filesystem layers were not deleted by this action."
+            ),
+        )
+    return (
+        "由于配额限制，您的部分 Docker 容器已被移除（历史事件类型）。",
+        "One or more of your Docker containers were removed due to quota enforcement (legacy event).",
+    )
+
+
+def _build_docker_quota_event_section(event_type: str, detail: dict[str, Any]) -> tuple[str, str]:
+    """Return (zh_section_html, en_section_html) for one Docker slave event (no greeting or remediation)."""
+    normalized = _normalize_docker_slave_event_type(event_type)
+    zh_h, en_h = _docker_quota_event_heading_zh_en(normalized)
+    lead_zh, lead_en = _docker_quota_event_lead_zh_en(normalized)
+    detail_json = json.dumps(detail, ensure_ascii=False, indent=2)
+    pre = (
+        "<pre style=\"background-color:#f5f5f5;padding:8px;border-radius:4px;white-space:pre-wrap;\">"
+        f"{detail_json}"
+        "</pre>"
+    )
+    zh = (
+        f"<h3 style=\"font-size:15px;margin:16px 0 4px;\">{zh_h}</h3>"
+        f"<p>{lead_zh}</p>"
+        "<p><strong>详细信息：</strong></p>"
+        f"{pre}"
+    )
+    en = (
+        f"<h3 style=\"font-size:15px;margin:16px 0 4px;\">{en_h}</h3>"
+        f"<p>{lead_en}</p>"
+        "<p><strong>Detail:</strong></p>"
+        f"{pre}"
+    )
+    return zh, en
+
+
 def _build_docker_quota_email(
     host_id: str, host_user_name: str, event_type: str, detail: dict[str, Any]
 ) -> tuple[str, str, str, str | None]:
@@ -167,43 +282,18 @@ def _build_docker_quota_email(
     Supports both legacy event names ("quota_exceeded", "container_removed") and
     the newer docker_* names.
     """
-    normalized = event_type
-    if event_type == "quota_exceeded":
-        normalized = "docker_quota_exceeded"
-    elif event_type == "container_removed":
-        normalized = "docker_container_removed"
-    elif event_type == "docker_container_stopped":
-        normalized = "docker_container_stopped"
-
-    if normalized == "docker_quota_exceeded":
-        subject = "[Qman] Docker quota exceeded"
-        lead_en = "Your Docker quota on this host has been exceeded."
-        lead_zh = "您在此主机上的 Docker 配额已被超出。"
-    elif normalized == "docker_container_stopped":
-        subject = "[Qman] Docker container stopped (quota)"
-        lead_en = (
-            "A Docker container was stopped automatically because your attributed Docker usage exceeds your quota. "
-            "The container was not removed, so its filesystem layers were not deleted by this action."
-        )
-        lead_zh = "由于已归因的 Docker 用量超出配额，系统已自动停止您的某个容器（未执行删除，可写层等数据仍保留在主机上）。"
-    else:
-        subject = "[Qman] Container(s) removed due to Docker quota"
-        lead_en = "One or more of your Docker containers were removed due to quota enforcement (legacy event)."
-        lead_zh = "由于配额限制，您的部分 Docker 容器已被移除（历史事件类型）。"
-
-    detail_json = json.dumps(detail, ensure_ascii=False, indent=2)
-
+    normalized = _normalize_docker_slave_event_type(event_type)
+    subject = _docker_quota_single_event_subject(event_type)
+    zh_sec, en_sec = _build_docker_quota_event_section(event_type, detail)
+    reco_zh, reco_en = _docker_quota_recommended_actions_bilingual(
+        include_stop_extra=(normalized == "docker_container_stopped")
+    )
     my_usage = _my_usage_url()
-    reco_zh, reco_en = _docker_quota_recommended_actions_bilingual(normalized)
 
     body_zh = (
         f"<p>您好 {host_user_name}，</p>"
-        f"<p>{lead_zh}</p>"
-        f"<p><strong>主机:</strong> {host_id}</p>"
-        "<p><strong>详细信息:</strong></p>"
-        "<pre style=\"background-color:#f5f5f5;padding:8px;border-radius:4px;white-space:pre-wrap;\">"
-        f"{detail_json}"
-        "</pre>"
+        f"<p>这封邮件与您在主机 <code>{host_id}</code> 上的 Docker 配额有关。</p>"
+        f"{zh_sec}"
         f"{reco_zh}"
         f"<p style=\"margin-top:12px;\">查看当前配额使用情况："
         f'<a href="{my_usage}">{my_usage}</a>'
@@ -213,12 +303,8 @@ def _build_docker_quota_email(
 
     body_en = (
         f"<p>Hello {host_user_name},</p>"
-        f"<p>{lead_en}</p>"
-        f"<p><strong>Host:</strong> {host_id}</p>"
-        "<p><strong>Detail:</strong></p>"
-        "<pre style=\"background-color:#f5f5f5;padding:8px;border-radius:4px;white-space:pre-wrap;\">"
-        f"{detail_json}"
-        "</pre>"
+        f"<p>This email is about your Docker quota on host <code>{host_id}</code>.</p>"
+        f"{en_sec}"
         f"{reco_en}"
         f"<p style=\"margin-top:12px;\">View your current quota usage: "
         f'<a href="{my_usage}">{my_usage}</a>'
@@ -537,20 +623,23 @@ def _compute_state_key(
     host_user_name: str | None,
     device_name: str | None,
     event_type: str,
+    extra_segment: str | None = None,
 ) -> str:
     """Compute a normalized state key for throttling.
 
     The key groups similar states (e.g. per user/host/device/event_type).
+    Optional extra_segment distinguishes per-container Docker stop/remove notifications.
     """
-    return "|".join(
-        [
-            source,
-            host_id,
-            host_user_name or "",
-            device_name or "",
-            event_type,
-        ]
-    )
+    parts: list[str] = [
+        source,
+        host_id,
+        host_user_name or "",
+        device_name or "",
+        event_type,
+    ]
+    if extra_segment:
+        parts.append(extra_segment)
+    return "|".join(parts)
 
 
 def _create_notification_event(
@@ -573,12 +662,17 @@ def _create_notification_event(
     if source == "disk":
         quota_type = _derive_disk_quota_type_from_detail(detail)
 
+    docker_extra: str | None = None
+    if source == "docker":
+        docker_extra = _docker_notification_state_key_extra(event_type, detail)
+
     state_key = _compute_state_key(
         source=source,
         host_id=host_id,
         host_user_name=host_user_name,
         device_name=device_name,
         event_type=event_type,
+        extra_segment=docker_extra,
     )
 
     payload = {"detail": detail}
@@ -765,8 +859,9 @@ def process_slave_events(host_id: str, events: list[dict[str, Any]]) -> None:
 
     db = SessionLocal()
     try:
-        # First pass: create NotificationEvent rows and collect disk events for batching.
+        # First pass: create NotificationEvent rows; collect Docker and disk events for per-user batching.
         disk_events_by_user: dict[tuple[int, str | None], list[Any]] = {}
+        docker_events_by_user: dict[tuple[int, str | None], list[Any]] = {}
 
         for ev in events:
             host_user_name = ev.get("host_user_name")
@@ -793,32 +888,22 @@ def process_slave_events(host_id: str, events: list[dict[str, Any]]) -> None:
                 "docker_container_removed",
                 "docker_container_stopped",
             ):
-                # Docker events: one email per event, still logged as individual events.
-                subject, body, quota_type, device_name = _build_docker_quota_email(
-                    host_id, host_user_name, event_type, detail
-                )
+                key_d = (oauth_uid, email)
+                if key_d not in docker_events_by_user:
+                    docker_events_by_user[key_d] = []
                 ev_row = _create_notification_event(
                     db,
                     oauth_user_id=oauth_uid,
                     email=email,
                     host_id=host_id,
                     host_user_name=host_user_name,
-                    device_name=device_name,
-                    quota_type=quota_type,
+                    device_name=None,
+                    quota_type="docker",
                     event_type=event_type,
                     detail=detail,
                     source="docker",
                 )
-                _maybe_send_email_for_events(
-                    db,
-                    oauth_user_id=oauth_uid,
-                    email=email,
-                    host_id=host_id,
-                    subject=subject,
-                    body=body,
-                    events=[ev_row],
-                    html=True,
-                )
+                docker_events_by_user[key_d].append(ev_row)
             elif event_type in (
                 "disk_soft_limit_exceeded",
                 "disk_soft_grace_ending",
@@ -852,7 +937,106 @@ def process_slave_events(host_id: str, events: list[dict[str, Any]]) -> None:
                     detail,
                 )
 
-        # Second pass: per-user batching for disk quota notifications.
+        # Second pass: Docker quota — one email per user per incoming batch (all Docker events merged).
+        for (oauth_uid, email), user_events in docker_events_by_user.items():
+            if not user_events:
+                continue
+
+            sendable_docker: list[Any] = []
+            host_user_name_docker: str | None = None
+
+            from app.models_db import NotificationEmailLog  # local import to avoid cycles
+
+            now_d = datetime.utcnow()
+            window_d = int(current_app.config.get("QUOTA_NOTIFICATION_DEDUPE_WINDOW_SECONDS", 86400) or 86400)
+            cutoff_d = now_d - timedelta(seconds=window_d)
+
+            recent_d = (
+                db.query(NotificationEmailLog.dedupe_key)
+                .filter(
+                    NotificationEmailLog.email == email,
+                    NotificationEmailLog.created_at >= cutoff_d,
+                    NotificationEmailLog.send_status.in_(["success", "skipped"]),
+                )
+                .all()
+            )
+            recent_keys_d: set[str] = {r.dedupe_key for r in recent_d if r.dedupe_key}
+
+            for ev_row in user_events:
+                host_user_name = ev_row.host_user_name or ""
+                host_user_name_docker = host_user_name_docker or host_user_name
+
+                state_key_d = ev_row.state_key or ""
+                if state_key_d and state_key_d in recent_keys_d:
+                    continue
+
+                sendable_docker.append(ev_row)
+
+            if not sendable_docker:
+                continue
+
+            host_user_name_for_email = host_user_name_docker or "user"
+            unique_docker_types = {ev.event_type for ev in sendable_docker}
+            if len(unique_docker_types) == 1:
+                (single_d_type,) = tuple(unique_docker_types)
+                subject_d = _docker_quota_single_event_subject(single_d_type)
+            else:
+                subject_d = "[Qman] Docker quota notifications"
+
+            include_stop_extra = any(ev.event_type == "docker_container_stopped" for ev in sendable_docker)
+            zh_docker_sections: list[str] = []
+            en_docker_sections: list[str] = []
+            for ev_row in sendable_docker:
+                try:
+                    payload_obj = json.loads(ev_row.payload or "{}")
+                    detail_d = payload_obj.get("detail") or {}
+                except json.JSONDecodeError:
+                    detail_d = {}
+                zh_s, en_s = _build_docker_quota_event_section(ev_row.event_type, detail_d)
+                zh_docker_sections.append(zh_s)
+                en_docker_sections.append(en_s)
+
+            reco_zh_d, reco_en_d = _docker_quota_recommended_actions_bilingual(
+                include_stop_extra=include_stop_extra
+            )
+            my_usage_d = _my_usage_url()
+
+            body_zh_d = (
+                f"<p>您好 {host_user_name_for_email}，</p>"
+                f"<p>这封邮件与您在主机 <code>{host_id}</code> 上的 Docker 配额有关。</p>"
+                + "".join(zh_docker_sections)
+                + reco_zh_d
+                + f"<p style=\"margin-top:12px;\">查看当前配额使用情况："
+                f'<a href="{my_usage_d}">{my_usage_d}</a>'
+                "</p>"
+                "<p>Qman</p>"
+            )
+
+            body_en_d = (
+                f"<p>Hello {host_user_name_for_email},</p>"
+                f"<p>This email is about your Docker quota on host <code>{host_id}</code>.</p>"
+                + "".join(en_docker_sections)
+                + reco_en_d
+                + f"<p style=\"margin-top:12px;\">View your current quota usage: "
+                f'<a href="{my_usage_d}">{my_usage_d}</a>'
+                "</p>"
+                "<p>Qman</p>"
+            )
+
+            body_html_d = body_zh_d + '<hr style="margin:16px 0;"/>' + body_en_d
+
+            _maybe_send_email_for_events(
+                db,
+                oauth_user_id=oauth_uid,
+                email=email,
+                host_id=host_id,
+                subject=subject_d,
+                body=body_html_d,
+                events=sendable_docker,
+                html=True,
+            )
+
+        # Third pass: per-user batching for disk quota notifications.
         for (oauth_uid, email), user_events in disk_events_by_user.items():
             if not user_events:
                 continue
