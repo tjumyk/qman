@@ -83,40 +83,51 @@ export function DockerQuotaBreakdownLegend({ quota }: DockerQuotaBreakdownBarPro
   const blockLimit =
     quota.block_hard_limit > 0 ? quota.block_hard_limit : quota.block_soft_limit
   const blockLimitBytes = blockLimit * 1024
+  const containerB = quota.docker_container_bytes ?? 0
+  const layerB = quota.docker_image_layer_bytes ?? 0
+  const volumeB = quota.docker_volume_bytes ?? 0
+  const remaining =
+    blockLimitBytes > 0 ? Math.max(0, blockLimitBytes - quota.block_current) : 0
 
   return (
     <Group gap="md" wrap="wrap">
-      <Group gap={4}>
-        <Box
-          w={8}
-          h={8}
-          style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-blue-5)' }}
-        />
-        <Text size="xs" c="dimmed">
-          {t('dockerUsageContainerWorkLayer')}
-        </Text>
-      </Group>
-      <Group gap={4}>
-        <Box
-          w={8}
-          h={8}
-          style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-grape-5)' }}
-        />
-        <Text size="xs" c="dimmed">
-          {t('dockerUsageImageLayers')}
-        </Text>
-      </Group>
-      <Group gap={4}>
-        <Box
-          w={8}
-          h={8}
-          style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-cyan-5)' }}
-        />
-        <Text size="xs" c="dimmed">
-          {t('dockerUsageVolumes')}
-        </Text>
-      </Group>
-      {blockLimitBytes > 0 && (
+      {containerB > 0 && (
+        <Group gap={4}>
+          <Box
+            w={8}
+            h={8}
+            style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-blue-5)' }}
+          />
+          <Text size="xs" c="dimmed">
+            {t('dockerUsageContainerWorkLayer')}
+          </Text>
+        </Group>
+      )}
+      {layerB > 0 && (
+        <Group gap={4}>
+          <Box
+            w={8}
+            h={8}
+            style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-grape-5)' }}
+          />
+          <Text size="xs" c="dimmed">
+            {t('dockerUsageImageLayers')}
+          </Text>
+        </Group>
+      )}
+      {volumeB > 0 && (
+        <Group gap={4}>
+          <Box
+            w={8}
+            h={8}
+            style={{ borderRadius: 2, backgroundColor: 'var(--mantine-color-cyan-5)' }}
+          />
+          <Text size="xs" c="dimmed">
+            {t('dockerUsageVolumes')}
+          </Text>
+        </Group>
+      )}
+      {remaining > 0 && (
         <Group gap={4}>
           <Box
             w={8}
