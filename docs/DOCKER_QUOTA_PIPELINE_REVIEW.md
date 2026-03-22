@@ -103,7 +103,7 @@
 - ✅ Supports port 465 (implicit SSL) and 587 (STARTTLS)
 - ✅ `resolve_oauth_user_id()` - host_user_name → oauth_user_id
 - ✅ `get_email_for_oauth_user()` - oauth_user_id → email (with token support)
-- ✅ `process_slave_events()` - processes quota_exceeded and container_removed events
+- ✅ `process_slave_events()` - processes Docker quota events (e.g. quota exceeded, container stopped; legacy container_removed)
 - ✅ INFO logging when skipping due to missing OAuth mapping
 
 ### 12. Configuration (`app/models.py`, `app/__init__.py`)
@@ -150,8 +150,7 @@
 
 **Enforcement**:
 - Checks `container_used + image_layer_used` against quota limit
-- Only removes containers (cannot remove image layers as they may be shared)
-- Recomputes total usage after each container removal
+- Stops at most one running attributed container per user per beat (containers are not removed; image layers are never auto-removed)
 
 **Size Updates**:
 - Container sizes updated during `sync_containers_from_audit()` and `sync_from_docker_events()`
@@ -174,10 +173,10 @@
 - If image A has layers [L1, L2, L3] and image B has layers [L1, L2, L4], layers L1 and L2 are only counted once (attributed to first creator).
 - This correctly reflects actual disk usage (layers are shared on disk).
 
-### 3. **Enforcement Only Removes Containers**
-**Note**: When quota is exceeded, only containers are removed. Image layers cannot be removed as they may be shared by multiple images/containers.
-**Impact**: If a user exceeds quota due to image layers, they must manually remove images or wait for containers to be removed.
-**Future Consideration**: Could add image removal to enforcement, but must be careful about shared layers.
+### 3. **Enforcement Stops Containers; Usage May Stay Over Limit**
+**Note**: Enforcement stops containers (does not `docker rm`). Stopping does not reduce attributed usage from existing writable layers or shared image layers.
+**Impact**: If a user exceeds quota due to image layers or many stopped containers, they must manually prune images/containers or ask an admin for a higher quota.
+**Future Consideration**: Optional AuthZ or other daemon-level blocks on new creates; automatic image removal remains risky because of shared layers.
 
 ### 4. **Backfill for Existing Images**
 **Note**: `sync_existing_images()` backfills layers for images that existed before layer attribution was implemented.

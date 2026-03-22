@@ -121,6 +121,44 @@ def _bytes_to_gib(value: int) -> float:
     return value / (1024**3) if value > 0 else 0.0
 
 
+def _docker_quota_recommended_actions_bilingual(normalized: str) -> tuple[str, str]:
+    """Return (zh_html, en_html) remediation blocks for Docker quota notification emails."""
+    stop_extra_zh = ""
+    stop_extra_en = ""
+    if normalized == "docker_container_stopped":
+        stop_extra_zh = (
+            "<li>在释放足够磁盘空间或管理员调整配额后，如策略允许，可尝试使用 <code>docker start</code> 重新启动被停止的容器（启动前请确认无数据风险）。</li>"
+        )
+        stop_extra_en = (
+            "<li>After freeing enough disk space or if an administrator raises your quota, you may be able to run "
+            "<code>docker start</code> on the stopped container where policy allows (confirm you are not risking data).</li>"
+        )
+
+    en = (
+        '<p style="margin:12px 0 0 0;">Recommended actions:</p>'
+        "<ul>"
+        "<li>Inspect usage with <code>docker system df</code> and review resources linked to your account in Qman.</li>"
+        "<li>Delete or reduce what you no longer need, including unused containers, images, build cache, and large volumes "
+        "(back up anything important in writable layers or volumes before deleting).</li>"
+        "<li>Do not run <code>prune</code> commands yourself (for example <code>docker image prune</code> or "
+        "<code>docker builder prune</code>); on a shared host they can remove data other users still depend on.</li>"
+        "<li>Ask your administrator for a higher Docker quota if your work legitimately needs more space.</li>"
+        f"{stop_extra_en}"
+        "</ul>"
+    )
+    zh = (
+        '<p style="margin:12px 0 0 0;">推荐操作：</p>'
+        "<ul>"
+        "<li>使用 <code>docker system df</code> 查看占用，并在 Qman 中核对关联到您的账户的资源。</li>"
+        "<li>删除或缩减不再需要的内容：包括不再使用的容器、镜像、构建缓存、较大卷等（删除前请备份可写层或卷中的重要数据）。</li>"
+        "<li>请勿自行执行<code>prune</code>操作，例如 <code>docker image prune</code>、<code>docker builder prune</code>；因为这可能会影响其他用户的使用。</li>"
+        "<li>若业务确需更多空间，请联系管理员申请提高 Docker 配额。</li>"
+        f"{stop_extra_zh}"
+        "</ul>"
+    )
+    return zh, en
+
+
 def _build_docker_quota_email(
     host_id: str, host_user_name: str, event_type: str, detail: dict[str, Any]
 ) -> tuple[str, str, str, str | None]:
@@ -134,19 +172,29 @@ def _build_docker_quota_email(
         normalized = "docker_quota_exceeded"
     elif event_type == "container_removed":
         normalized = "docker_container_removed"
+    elif event_type == "docker_container_stopped":
+        normalized = "docker_container_stopped"
 
     if normalized == "docker_quota_exceeded":
         subject = "[Qman] Docker quota exceeded"
         lead_en = "Your Docker quota on this host has been exceeded."
         lead_zh = "您在此主机上的 Docker 配额已被超出。"
+    elif normalized == "docker_container_stopped":
+        subject = "[Qman] Docker container stopped (quota)"
+        lead_en = (
+            "A Docker container was stopped automatically because your attributed Docker usage exceeds your quota. "
+            "The container was not removed, so its filesystem layers were not deleted by this action."
+        )
+        lead_zh = "由于已归因的 Docker 用量超出配额，系统已自动停止您的某个容器（未执行删除，可写层等数据仍保留在主机上）。"
     else:
         subject = "[Qman] Container(s) removed due to Docker quota"
-        lead_en = "One or more of your Docker containers were removed due to quota enforcement."
-        lead_zh = "由于配额限制，您的部分 Docker 容器已被移除。"
+        lead_en = "One or more of your Docker containers were removed due to quota enforcement (legacy event)."
+        lead_zh = "由于配额限制，您的部分 Docker 容器已被移除（历史事件类型）。"
 
     detail_json = json.dumps(detail, ensure_ascii=False, indent=2)
 
     my_usage = _my_usage_url()
+    reco_zh, reco_en = _docker_quota_recommended_actions_bilingual(normalized)
 
     body_zh = (
         f"<p>您好 {host_user_name}，</p>"
@@ -156,6 +204,7 @@ def _build_docker_quota_email(
         "<pre style=\"background-color:#f5f5f5;padding:8px;border-radius:4px;white-space:pre-wrap;\">"
         f"{detail_json}"
         "</pre>"
+        f"{reco_zh}"
         f"<p style=\"margin-top:12px;\">查看当前配额使用情况："
         f'<a href="{my_usage}">{my_usage}</a>'
         "</p>"
@@ -170,8 +219,7 @@ def _build_docker_quota_email(
         "<pre style=\"background-color:#f5f5f5;padding:8px;border-radius:4px;white-space:pre-wrap;\">"
         f"{detail_json}"
         "</pre>"
-        "<p>If this is unexpected, please review your containers and images and remove anything no longer needed, "
-        "or contact your administrator for assistance.</p>"
+        f"{reco_en}"
         f"<p style=\"margin-top:12px;\">View your current quota usage: "
         f'<a href="{my_usage}">{my_usage}</a>'
         "</p>"
@@ -738,7 +786,13 @@ def process_slave_events(host_id: str, events: list[dict[str, Any]]) -> None:
                 continue
             email = get_email_for_oauth_user(oauth_uid)
 
-            if event_type in ("quota_exceeded", "docker_quota_exceeded", "container_removed", "docker_container_removed"):
+            if event_type in (
+                "quota_exceeded",
+                "docker_quota_exceeded",
+                "container_removed",
+                "docker_container_removed",
+                "docker_container_stopped",
+            ):
                 # Docker events: one email per event, still logged as individual events.
                 subject, body, quota_type, device_name = _build_docker_quota_email(
                     host_id, host_user_name, event_type, detail

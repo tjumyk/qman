@@ -1,4 +1,4 @@
-"""Celery task: enforce Docker quota (stop/remove containers when over limit) and emit events to master."""
+"""Celery task: enforce Docker quota by stopping containers when over limit; emit events to master."""
 
 import json
 import os
@@ -10,14 +10,11 @@ from app.celery_app import celery_app
 from app.docker_quota.attribution_store import (
     get_container_effective_attributions,
     get_all_user_quota_limits,
-    delete_container_attribution,
 )
-from app.docker_quota.cache import invalidate_container_cache, invalidate_system_df_cache
 from app.docker_quota.docker_client import (
     get_system_df,
     list_containers,
     stop_container,
-    remove_container,
     _parse_created_iso,
 )
 from app.utils import get_logger
@@ -29,7 +26,7 @@ _VALID_ORDERS = ("newest_first", "oldest_first", "largest_first")
 
 
 def _load_slave_config() -> tuple[str, str, str, str]:
-    """Load host_id, master_url, secret, enforcement_order from CONFIG_PATH (default config.json) or env. Returns (host_id, url, secret, order)."""
+    """Load host_id, master_url, secret, enforcement_order from CONFIG_PATH or env."""
     host_id = os.environ.get("SLAVE_HOST_ID", "slave")
     master_url = os.environ.get("MASTER_EVENT_CALLBACK_URL", "")
     secret = os.environ.get("MASTER_EVENT_CALLBACK_SECRET", "")
@@ -48,6 +45,16 @@ def _load_slave_config() -> tuple[str, str, str, str]:
     if order not in _VALID_ORDERS:
         order = _DEFAULT_ORDER
     return host_id, master_url, secret, order
+
+
+def _container_status_may_run_workloads(status: str | None) -> bool:
+    """True if the container might still be executing or holding resources worth stopping."""
+    s = (status or "").strip().lower()
+    if not s:
+        return True
+    if s in ("exited", "dead", "created"):
+        return False
+    return True
 
 
 def _containers_by_uid_with_created(
@@ -102,7 +109,7 @@ def _post_events_to_master(events: list[dict[str, Any]], host_id: str, master_ur
             url,
             json={"host_id": host_id, "events": events},
             headers={"X-API-Key": secret, "Content-Type": "application/json"},
-            timeout=60,  # Increased from 10s: master API may be slow, and events payload can be large
+            timeout=60,
         )
         if resp.status_code // 100 != 2:
             logger.warning("Master event callback returned %s: %s", resp.status_code, resp.text)
@@ -112,28 +119,26 @@ def _post_events_to_master(events: list[dict[str, Any]], host_id: str, master_ur
 
 @celery_app.task(name="app.tasks.docker_quota_tasks.enforce_docker_quota", bind=True)
 def enforce_docker_quota(self: Any) -> dict[str, Any]:
-    """For each user with Docker quota, if over limit (container + image layer usage), stop and remove containers until under. Emit events to master."""
+    """For each user over Docker quota: stop at most one running container per uid per run (no rm). Emit events."""
     host_id, master_url, secret, order = _load_slave_config()
     limits = get_all_user_quota_limits()
     if not limits:
-        return {"enforced": 0, "events": 0}
-    # Get containers once; pass container_ids to avoid duplicate list_containers inside get_system_df / _aggregate.
-    # use_cache=False so the task always sees current state (correctness for enforcement).
+        return {"enforced": 0, "containers_stopped": 0, "events": 0}
     from app.docker_quota.quota import _aggregate_usage_by_uid
+
     containers_list = list_containers(all_containers=True, use_cache=False)
     container_ids = [c["id"] for c in containers_list]
-    usage_by_uid, _total_used, _unattributed = _aggregate_usage_by_uid(None, None, container_ids=container_ids, use_cache=False)
+    usage_by_uid, _total_used, _unattributed = _aggregate_usage_by_uid(
+        None, None, container_ids=container_ids, use_cache=False
+    )
     uid_to_containers = _containers_by_uid_with_created(order, containers_list=containers_list)
     events: list[dict[str, Any]] = []
-    total_removed = 0
+    total_stopped = 0
     for uid, limit_1k in limits.items():
         if limit_1k <= 0:
             continue
-        # Refresh container list each uid in case previous uid removed containers
         containers_list = list_containers(all_containers=True, use_cache=True)
-        container_ids = [c["id"] for c in containers_list]
         limit_bytes = limit_1k * 1024
-        # Total usage includes containers + image layers
         total_used = usage_by_uid.get(uid, 0)
         if total_used <= limit_bytes:
             continue
@@ -146,71 +151,80 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
         )
         try:
             import pwd
+
             events[-1]["host_user_name"] = pwd.getpwuid(uid).pw_name
         except KeyError:
             events[-1]["host_user_name"] = f"user_{uid}"
-        removed: list[str] = []
+        stopped: list[str] = []
         containers = uid_to_containers.get(uid, [])
-        # Usage is unchanged between removals; only re-aggregate after a successful remove (see below).
+        cid_to_status = {c["id"]: c.get("status", "") for c in containers_list}
+
+        # Stopping does not reduce qman's attributed usage (RW + image layers). One stop per uid per beat.
         current_total_used = total_used
         for cid, size, _created in containers:
-            if current_total_used <= limit_bytes:
-                break
+            if not _container_status_may_run_workloads(cid_to_status.get(cid)):
+                continue
             logger.info(
-                "Enforcing Docker quota: stopping then removing container %s (uid=%s, container_size=%s, total_usage=%s)",
-                cid[:12], uid, size, current_total_used,
+                "Enforcing Docker quota: stopping container %s (uid=%s, container_size=%s, total_usage=%s)",
+                cid[:12],
+                uid,
+                size,
+                current_total_used,
             )
             if stop_container(cid):
-                if remove_container(cid, force=True):
-                    delete_container_attribution(cid)
-                    invalidate_container_cache()
-                    invalidate_system_df_cache()
-                    # Recompute after removal; refresh container list
-                    containers_list = list_containers(all_containers=True, use_cache=True)
-                    container_ids = [c["id"] for c in containers_list]
-                    updated_usage_by_uid, _, _ = _aggregate_usage_by_uid(
-                        None, None, container_ids=container_ids, use_cache=True
-                    )
-                    current_total_used = updated_usage_by_uid.get(uid, 0)
-                    total_removed += 1
-                    removed.append(cid)
-                    events.append(
-                        {
-                            "host_user_name": events[-1]["host_user_name"],
-                            "event_type": "docker_container_removed",
-                            "detail": {"container_id": cid[:12], "size_bytes": size, "new_usage": current_total_used},
-                        }
-                    )
-                    logger.info(
-                        "Container %s removed due to quota; uid=%s new_usage=%s (includes image layers)",
-                        cid[:12], uid, current_total_used,
-                    )
-        if removed:
-            events[-1]["detail"]["removed_ids"] = removed
+                total_stopped += 1
+                stopped.append(cid)
+                events.append(
+                    {
+                        "host_user_name": events[-1]["host_user_name"],
+                        "event_type": "docker_container_stopped",
+                        "detail": {
+                            "container_id": cid[:12],
+                            "size_bytes": size,
+                            "block_current": current_total_used,
+                            "block_hard_limit": limit_1k,
+                        },
+                    }
+                )
+                logger.info(
+                    "Stopped container %s for quota; uid=%s attributed usage unchanged in model",
+                    cid[:12],
+                    uid,
+                )
+                break
+        if stopped:
+            events[-1]["detail"]["stopped_ids"] = stopped
+        elif total_used > limit_bytes:
+            logger.warning(
+                "Docker quota: uid=%s over limit but no running/stoppable containers in enforcement list",
+                uid,
+            )
     if events:
         _post_events_to_master(events, host_id, master_url, secret)
-    return {"enforced": total_removed, "events": len(events)}
+    return {"enforced": total_stopped, "containers_stopped": total_stopped, "events": len(events)}
 
 
 @celery_app.task(
     name="app.tasks.docker_quota_tasks.sync_docker_attribution",
     bind=True,
-    time_limit=300,  # 5 minutes: collect_events_since (90s) + audit parsing + image layer queries; get_system_df is now fast (<1s)
-    soft_time_limit=240,  # 4 minutes: warn before hard limit
+    time_limit=300,
+    soft_time_limit=240,
 )
 def sync_docker_attribution(self: Any) -> dict[str, int]:
     """Sync container/image attribution from audit logs and Docker events (container create, image pull)."""
     from app.docker_quota.attribution_sync import run_sync_docker_attribution
+
     return run_sync_docker_attribution()
 
 
 @celery_app.task(
     name="app.tasks.docker_quota_tasks.sync_volume_actual_disk",
     bind=True,
-    time_limit=14400,  # 4 hours: many volumes, each du can take up to 1h
-    soft_time_limit=12600,  # 3.5 hours
+    time_limit=14400,
+    soft_time_limit=12600,
 )
 def sync_volume_actual_disk(self: Any) -> dict[str, int]:
     """Collect actual disk usage of all Docker volumes via du -sb (low I/O priority, disk-wise parallelism)."""
     from app.docker_quota.volume_actual_disk import collect_volume_actual_disk
+
     return collect_volume_actual_disk()

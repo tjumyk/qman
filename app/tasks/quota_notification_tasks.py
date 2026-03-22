@@ -27,7 +27,7 @@ def _load_slave_identity() -> Tuple[str, str, str]:
     """Load host_id, master_url, secret from CONFIG_PATH or env (reuse docker_quota_tasks logic)."""
     from app.tasks.docker_quota_tasks import _load_slave_config
 
-    host_id, master_url, secret, _order = _load_slave_config()
+    host_id, master_url, secret, *_ = _load_slave_config()
     return host_id, master_url, secret
 
 

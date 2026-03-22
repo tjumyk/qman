@@ -68,7 +68,7 @@ This document recorded unclear areas; decisions have been applied as below.
 
 ## 9. **Enforcement order** - **Configurable; default newest first**
 
-- **Decision:** Make enforcement policy **configurable** via **`DOCKER_QUOTA_ENFORCEMENT_ORDER`**: `newest_first` (default), `oldest_first`, or `largest_first`.
+- **Decision:** Make enforcement policy **configurable** via **`DOCKER_QUOTA_ENFORCEMENT_ORDER`**: `newest_first` (default), `oldest_first`, or `largest_first`. Enforcement **stops** over-quota users’ containers (does not remove them).
 
 - **Implementation:** Task loads order from config (or env); `_containers_by_uid_with_created(order)` returns list of `(cid, size, created_ts)` sorted by the chosen policy.
 
