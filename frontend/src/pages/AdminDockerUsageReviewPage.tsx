@@ -10,11 +10,9 @@ import {
   Select,
   Checkbox,
   Drawer,
-  ScrollArea,
   Code,
   Pagination,
   SegmentedControl,
-  Switch,
   Badge,
 } from '@mantine/core'
 import { IconBrandDocker } from '@tabler/icons-react'
@@ -32,7 +30,7 @@ import {
 import type { DockerUsageReviewQueueItem } from '../api/schemas'
 import { useI18n } from '../i18n'
 import { notifications } from '@mantine/notifications'
-import { DockerEventReviewCell, DockerEventAutoCell } from '../components/docker/DockerUsageEventStatusCells'
+import { DockerEntityEventsPanel } from '../components/docker/DockerEntityEventsPanel'
 
 function entityKey(item: DockerUsageReviewQueueItem): string {
   if (item.entity_type === 'container') return item.container_id
@@ -353,68 +351,20 @@ export function AdminDockerUsageReviewPage() {
               {t('dockerUsageReviewCurrentAttribution')}: {attributionSummary(drawerItem)}
             </Text>
 
-            <Group gap="xl">
-              <Switch
-                label={t('dockerUsageReviewIncludeUsed')}
-                checked={includeUsed}
-                onChange={(e) => setIncludeUsed(e.currentTarget.checked)}
-              />
-              <Switch
-                label={t('dockerEntityDetailIncludeResolved')}
-                checked={includeResolved}
-                onChange={(e) => setIncludeResolved(e.currentTarget.checked)}
-              />
-            </Group>
-
-            {eventsError && (
-              <Alert color="red" title={t('error')}>
-                {getErrorMessage(eventsError, t('dockerUsageReviewEventsFailed'))}
-              </Alert>
-            )}
-            {eventsLoading && (
-              <Group>
-                <Loader size="sm" />
-                <Text size="sm" c="dimmed">
-                  {t('loading')}
-                </Text>
-              </Group>
-            )}
-            {eventsData && (
-              <ScrollArea h={280}>
-                <Table striped fz="xs">
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>{t('dockerUsageReviewColSource')}</Table.Th>
-                      <Table.Th>{t('dockerUsageReviewColWhen')}</Table.Th>
-                      <Table.Th>{t('dockerEventColReview')}</Table.Th>
-                      <Table.Th>{t('dockerEventColAuto')}</Table.Th>
-                      <Table.Th>{t('dockerUsageReviewColPayload')}</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {eventsData.events.map((ev) => (
-                      <Table.Tr key={`${ev.source}-${ev.id}`}>
-                        <Table.Td>
-                          <Badge size="xs">{ev.source}</Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs" lineClamp={2}>
-                            {ev.event_ts ?? ev.created_at ?? '—'}
-                          </Text>
-                        </Table.Td>
-                        <DockerEventReviewCell ev={ev} />
-                        <DockerEventAutoCell ev={ev} />
-                        <Table.Td>
-                          <Text size="xs" lineClamp={3} style={{ wordBreak: 'break-all' }}>
-                            {ev.payload}
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
-            )}
+            <DockerEntityEventsPanel
+              includeUsed={includeUsed}
+              includeResolved={includeResolved}
+              onIncludeUsedChange={setIncludeUsed}
+              onIncludeResolvedChange={setIncludeResolved}
+              includeUsedLabel={t('dockerUsageReviewIncludeUsed')}
+              includeResolvedLabel={t('dockerEntityDetailIncludeResolved')}
+              isLoading={eventsLoading}
+              error={eventsError}
+              eventsErrorFallback={t('dockerUsageReviewEventsFailed')}
+              data={eventsData}
+              tableScrollHeight={280}
+              switchLayout="group"
+            />
 
             <Select
               label={t('dockerUsageReviewAssignee')}

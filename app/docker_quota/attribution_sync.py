@@ -230,19 +230,38 @@ def _audit_events_by_time_window(
     return bucket_to_uid
 
 
-def _parse_audit_timestamp(ev: dict[str, Any]) -> float | None:
-    """Try to get Unix timestamp from audit event (time= or from msg)."""
-    ts = ev.get("timestamp") or ev.get("time")
+def _audit_event_ts_float(ev: dict[str, Any]) -> float | None:
+    """Best-effort Unix time from a parsed audit event dict.
+
+    Order: ``timestamp_unix`` (ausearch epoch lines), then ``timestamp`` as number or string
+    (numeric epoch or ``MM/DD/YYYY HH:MM:SS`` from interpreted ausearch).
+    """
+    tu = ev.get("timestamp_unix")
+    if tu is not None:
+        try:
+            return float(tu)
+        except (TypeError, ValueError):
+            pass
+    ts = ev.get("timestamp")
     if ts is None:
         return None
     if isinstance(ts, (int, float)):
-        return float(ts)
-    # ausearch -i may output "time" as date string
-    try:
-        if ts.isdigit():
+        try:
             return float(ts)
+        except (TypeError, ValueError):
+            return None
+    s = str(ts).strip()
+    if not s:
         return None
-    except Exception:
+    if " " in s and "/" in s:
+        try:
+            dt = datetime.strptime(s, "%m/%d/%Y %H:%M:%S")
+            return dt.timestamp()
+        except ValueError:
+            pass
+    try:
+        return float(s)
+    except ValueError:
         return None
 
 
@@ -372,10 +391,9 @@ def sync_containers_from_audit() -> int:
     pending_audit_events: list[DockerUsageAuditEvent] = []
     seen_audit_fps: set[str] = set()
     
-    # Build list of (uid, timestamp) from audit for time matching
+    # Build sorted list for _find_best_audit_match: (ts, uid, subcommand, proctitle, fingerprint)
     # Try multiple UID sources: uid, auid (audit uid - who initiated), euid
-    audit_by_ts: list[tuple[float, int, str]] = []
-    parse_failures = 0
+    audit_by_ts: list[tuple[float, int, str | None, str | None, str]] = []
     uid_missing = 0
     ts_missing = 0
     
@@ -399,23 +417,7 @@ def sync_containers_from_audit() -> int:
             except KeyError:
                 host_user_name = f"user_{uid}"
         
-        # Get timestamp - try multiple sources
-        ts_float: float | None = None
-        
-        # First try Unix timestamp (most reliable)
-        if ev.get("timestamp_unix"):
-            ts_float = ev["timestamp_unix"]
-        elif ev.get("timestamp"):
-            ts_str = ev["timestamp"]
-            try:
-                # Format: "02/16/2026 12:34:56"
-                if " " in str(ts_str):
-                    dt = datetime.strptime(ts_str.strip(), "%m/%d/%Y %H:%M:%S")
-                    ts_float = dt.timestamp()
-            except Exception as e:
-                logger.debug("Failed to parse audit timestamp '%s': %s", ts_str, e)
-                parse_failures += 1
-        
+        ts_float = _audit_event_ts_float(ev)
         if ts_float is None:
             ts_missing += 1
 
@@ -444,7 +446,9 @@ def sync_containers_from_audit() -> int:
             and ts_float is not None
             and subcommand in (ACTION_TO_SUBCOMMANDS.get("create") or set())
         ):
-            audit_by_ts.append((ts_float, uid, fp))
+            audit_by_ts.append(
+                (ts_float, uid, subcommand or None, ev.get("proctitle"), fp)
+            )
     
     # Persist all parsed audit events for this sync window (dedupe via fingerprint).
     if pending_audit_events:
@@ -465,14 +469,14 @@ def sync_containers_from_audit() -> int:
     
     if audit_events:
         logger.info(
-            "Audit events processed: total=%d, usable=%d (uid_missing=%d, ts_missing=%d, parse_failures=%d)",
-            len(audit_events), len(audit_by_ts), uid_missing, ts_missing, parse_failures
+            "Audit events processed: total=%d, usable=%d (uid_missing=%d, ts_missing=%d)",
+            len(audit_events), len(audit_by_ts), uid_missing, ts_missing
         )
         if audit_by_ts:
             # Log time range of usable events
             oldest = datetime.fromtimestamp(audit_by_ts[0][0]).strftime("%Y-%m-%d %H:%M:%S")
             newest = datetime.fromtimestamp(audit_by_ts[-1][0]).strftime("%Y-%m-%d %H:%M:%S")
-            unique_uids = set(uid for _, uid, _ in audit_by_ts)
+            unique_uids = set(uid for _, uid, _, _, _ in audit_by_ts)
             logger.info("Audit time range: %s to %s, unique_uids=%s", oldest, newest, list(unique_uids))
     set_count = 0
     containers_checked = 0
@@ -517,18 +521,16 @@ def sync_containers_from_audit() -> int:
             logger.debug("Container %s has invalid/missing created timestamp: %s", cid[:12], created_str)
             continue
         
-        # Find audit event within TIME_WINDOW_SECONDS
-        best_uid: int | None = None
-        best_fp: str | None = None
-        best_delta = float("inf")
-        for at, uid, fp in audit_by_ts:
-            delta = abs(at - created_ts)
-            if delta <= TIME_WINDOW_SECONDS and delta < best_delta:
-                best_delta = delta
-                best_uid = uid
-                best_fp = fp
-        
-        if best_uid is not None:
+        match = _find_best_audit_match(
+            created_ts,
+            audit_by_ts,
+            required_subcommands=None,
+            use_asymmetric_window=False,
+        )
+        if match.found:
+            best_uid = match.uid
+            best_fp = match.audit_fingerprint
+            best_delta = match.delta
             try:
                 name = pwd.getpwuid(best_uid).pw_name
             except KeyError:
@@ -544,8 +546,10 @@ def sync_containers_from_audit() -> int:
             set_count += 1
             logger.info(
                 "Attributed container %s to uid=%s from audit (delta=%.1fs, created=%s)",
-                cid[:12], best_uid, best_delta,
-                datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S")
+                cid[:12],
+                best_uid,
+                best_delta,
+                datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
             )
         else:
             containers_no_audit_match += 1
@@ -633,7 +637,10 @@ def sync_from_docker_events(
             except ValueError:
                 pass
         events = collect_events_since(
-            int(since_ts), max_seconds=90.0, max_events=MAX_DOCKER_EVENTS
+            int(since_ts),
+            until_ts=int(now_ts),
+            max_seconds=90.0,
+            max_events=MAX_DOCKER_EVENTS,
         )
         a_timeout = audit_timeout if audit_timeout is not None else 60.0
         audit_events = parse_audit_logs(
@@ -698,18 +705,7 @@ def sync_from_docker_events(
             except KeyError:
                 host_user_name = f"user_{uid}"
 
-        ts_str = ev.get("timestamp")
-        ts_float: float | None = None
-        if ts_str:
-            try:
-                s = str(ts_str).strip()
-                if s.replace(".", "", 1).isdigit():
-                    ts_float = float(s)
-                elif " " in s:
-                    dt = datetime.strptime(s, "%m/%d/%Y %H:%M:%S")
-                    ts_float = dt.timestamp()
-            except Exception:
-                ts_float = None
+        ts_float = _audit_event_ts_float(ev)
 
         # Get docker subcommand and proctitle for filtering and logging
         docker_subcommand_raw = ev.get("docker_subcommand")

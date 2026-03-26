@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -30,6 +31,28 @@ SUBCOMMAND_TO_CATEGORY: dict[str, str] = {}
 for category, subcommands in DOCKER_SUBCOMMAND_CATEGORIES.items():
     for subcmd in subcommands:
         SUBCOMMAND_TO_CATEGORY[subcmd] = category
+
+
+def normalize_audit_proctitle(raw: str | None) -> str | None:
+    """Turn kernel/ausearch proctitle into plain text when it is hex-encoded argv (null-separated).
+
+    Raw audit often logs ``proctitle=646F636B6572...`` (hex of ``docker\\0restart\\0...``).
+    Interpreted ``ausearch -i`` output may already use readable ``docker ...`` text; that path is unchanged.
+    """
+    if not raw:
+        return None
+    s = raw.strip()
+    if len(s) < 12 or len(s) % 2 != 0 or not re.fullmatch(r"[0-9a-fA-F]+", s):
+        return s.replace("\x00", " ").strip()
+    try:
+        b = bytes.fromhex(s)
+    except ValueError:
+        return s.replace("\x00", " ").strip()
+    text = b.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+    text = re.sub(r"\s+", " ", text)
+    if re.match(r"^docker\s+", text, re.IGNORECASE):
+        return text
+    return s
 
 
 def extract_docker_subcommand(proctitle: str | None) -> str | None:
@@ -94,6 +117,87 @@ def get_subcommand_category(subcommand: str | None) -> str | None:
         return None
     return SUBCOMMAND_TO_CATEGORY.get(subcommand.lower())
 
+
+def _decode_audit_quoted_arg(raw: str) -> str:
+    """Decode EXECVE ``aN="..."`` value (minimal C escapes used by auditd)."""
+    if "\\" not in raw:
+        return raw
+    try:
+        return raw.encode("utf-8", errors="surrogateescape").decode("unicode_escape")
+    except UnicodeDecodeError:
+        return raw
+
+
+def parse_execve_audit_line(line: str) -> tuple[int | None, list[str]]:
+    """Parse ``type=EXECVE`` line: return ``(argc, argv)`` with argv in order a0..a(argc-1).
+
+    Handles quoted ``aN="..."`` (with backslash escapes) and unquoted ``aN=token`` fragments.
+    """
+    if "type=EXECVE" not in line:
+        return None, []
+    argc_m = re.search(r"\bargc=(\d+)\b", line)
+    argc: int | None = int(argc_m.group(1)) if argc_m else None
+    by_idx: dict[int, str] = {}
+    for m in re.finditer(r'a(\d+)="((?:\\.|[^"\\])*)"', line):
+        by_idx[int(m.group(1))] = _decode_audit_quoted_arg(m.group(2))
+    for m in re.finditer(r"\ba(\d+)=([^\s]+)", line):
+        i = int(m.group(1))
+        if i in by_idx:
+            continue
+        tok = m.group(2).strip('"')
+        if tok.startswith('"') and tok.endswith('"') and len(tok) >= 2:
+            tok = _decode_audit_quoted_arg(tok[1:-1])
+        by_idx[i] = tok
+    if not by_idx:
+        return argc, []
+    max_i = max(by_idx.keys())
+    argv = [by_idx.get(i, "") for i in range(max_i + 1)]
+    if argc is not None and argc <= len(argv):
+        argv = argv[:argc]
+    return argc, argv
+
+
+def _is_docker_invocation(argv: list[str]) -> bool:
+    if not argv:
+        return False
+    return os.path.basename(argv[0]).lower() == "docker"
+
+
+def _merge_execve_into_event(current: dict[str, Any]) -> None:
+    """Prefer full ``docker`` argv from EXECVE when proctitle is missing, non-docker, or truncated."""
+    argv = current.get("execve_argv")
+    if not isinstance(argv, list) or not argv:
+        return
+    if not _is_docker_invocation(argv):
+        return
+    try:
+        cmdline = shlex.join(str(a) for a in argv)
+    except (TypeError, ValueError):
+        cmdline = " ".join(str(a) for a in argv)
+    current["execve_cmdline"] = cmdline
+    pt = (current.get("proctitle") or "").strip()
+    prefer_execve = (
+        not pt
+        or not re.match(r"^docker\s+", pt, re.IGNORECASE)
+        or len(cmdline) > len(pt) + 8
+    )
+    if prefer_execve:
+        current["proctitle"] = cmdline
+        current["proctitle_source"] = "execve"
+
+
+def _finalize_audit_event(current: dict[str, Any]) -> None:
+    """Derive ``docker_subcommand`` / category from best available cmdline (after EXECVE merge)."""
+    _merge_execve_into_event(current)
+    proctitle = current.get("proctitle")
+    if not proctitle:
+        return
+    subcommand = extract_docker_subcommand(proctitle)
+    if subcommand:
+        current["docker_subcommand"] = subcommand
+        current["docker_subcommand_category"] = get_subcommand_category(subcommand)
+
+
 # ausearch -ts accepts keywords (recent, today, ...) or date + time. "recent" = 10 min only.
 # Relative strings like "60m" are not supported; we convert them to absolute start date/time.
 AUSEARCH_TS_KEYWORDS = frozenset(
@@ -133,15 +237,16 @@ def parse_audit_logs(
 ) -> list[dict[str, Any]]:
     """Parse audit logs for given keys (e.g. docker-socket, docker-client). Returns list of {uid, pid, timestamp, msg, type, key}.
 
-    Uses 'ausearch -k key1 -k key2 ...' when available; otherwise returns empty list.
+    Uses ``ausearch -k key1 -k key2 ...`` (without ``-i``) when available; otherwise returns empty list.
+    Raw output keeps numeric UIDs and epoch-style ``msg=audit(epoch:seq)`` times, which are stable for parsing
+    and attribution. Interpreted ``ausearch -i`` pastes are still accepted by ``_parse_ausearch_output``.
+
     If since is set: use -ts with that value. For relative times (e.g. '60m', '1h') we convert to
     absolute start date/time because ausearch does not accept '60m'; only keywords like 'recent' (10 min).
     If since is None, no -ts is passed (full log search; can be slow — use a larger timeout).
     """
     keys = keys or DEFAULT_AUDIT_KEYS
-    # Note: -i (interpret) converts numeric UIDs to names which can cause parsing issues.
-    # However, it also makes timestamps human-readable. We handle both formats in parsing.
-    cmd = ["ausearch", "-i"]
+    cmd = ["ausearch"]
     for k in keys:
         cmd.extend(["-k", k])
     if since:
@@ -199,19 +304,20 @@ def parse_audit_logs(
 
 
 def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
-    """Parse ausearch -i output into list of events with uid, pid, msg, type, timestamp, docker_subcommand.
-    
-    Example ausearch -i output format:
+    """Parse ausearch text into list of events with uid, pid, cwd, execve argv, proctitle, docker_subcommand.
+
+    Primary shape is **raw** ``ausearch`` output: hex ``proctitle``, ``msg=audit(epoch.mmm:seq)``,
+    numeric ``uid``/``auid``. Also handles **interpreted** ``ausearch -i`` pastes (plaintext proctitle,
+    ``MM/DD/YYYY`` times, username uids via ``uid_name``). When present, ``type=EXECVE`` rebuilds the full
+    command line when kernel ``PROCTITLE`` is truncated.
+
+    Example raw-ish line types:
     ----
-    type=PROCTITLE msg=audit(...) : proctitle=docker load -i pg15.tar.gz
-    type=SYSCALL msg=audit(02/16/2026 12:34:56.789:1234) : arch=x86_64 ... uid=1001 ...
-    type=PATH ... name="/var/run/docker.sock" ...
+    type=PROCTITLE msg=audit(1774339582.741:1028819): proctitle=646F636B6572...
+    type=SYSCALL msg=audit(1774339582.741:1028819): ... uid=1044 ...
     ----
-    
-    Note: The timestamp is in the msg field as audit(MM/DD/YYYY HH:MM:SS.mmm:serial).
-    The -i (interpret) flag converts numeric UIDs to names, but we need numeric UIDs.
-    
-    The docker_subcommand field is extracted from the proctitle line (e.g., "load", "exec", "pull").
+
+    ``docker_subcommand`` is derived from the best available cmdline (EXECVE merge beats short proctitle).
     """
     events: list[dict[str, Any]] = []
     current: dict[str, Any] = {}
@@ -221,15 +327,14 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
         line = line.strip()
         if line.startswith("----"):
             if current:
-                # Extract docker subcommand from proctitle before appending
-                proctitle = current.get("proctitle")
-                if proctitle:
-                    subcommand = extract_docker_subcommand(proctitle)
-                    if subcommand:
-                        current["docker_subcommand"] = subcommand
-                        current["docker_subcommand_category"] = get_subcommand_category(subcommand)
+                _finalize_audit_event(current)
                 events.append(current)
             current = {}
+            continue
+
+        if line.startswith("time->"):
+            # ``time->Tue Mar 24 13:34:44 2026`` (human-readable stamp from ausearch)
+            current["audit_time_text"] = line[len("time->") :].strip()
             continue
         
         # Extract timestamp from msg=audit(MM/DD/YYYY HH:MM:SS.mmm:serial) format
@@ -251,13 +356,32 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
         if "type=PROCTITLE" in line:
             proctitle_match = re.search(r"proctitle=(.+?)(?:\s+$|\s+\w+=|$)", line)
             if proctitle_match:
-                current["proctitle"] = proctitle_match.group(1).strip()
+                raw_pt = proctitle_match.group(1).strip()
+                current["proctitle"] = normalize_audit_proctitle(raw_pt) or raw_pt
+
+        if "type=CWD" in line:
+            cwd_m = re.search(r'\bcwd="((?:\\.|[^"\\])*)"', line)
+            if cwd_m:
+                current["cwd"] = _decode_audit_quoted_arg(cwd_m.group(1))
+            else:
+                cwd_plain = re.search(r'\bcwd=([^\s]+)\s*$', line)
+                if cwd_plain:
+                    current["cwd"] = cwd_plain.group(1).strip().strip('"')
+
+        if "type=EXECVE" in line:
+            argc, argv = parse_execve_audit_line(line)
+            if argc is not None:
+                current["execve_argc"] = argc
+            if argv:
+                current["execve_argv"] = argv
         
         if "=" in line:
             # Parse key=value pairs; handle multiple on same line
             # Use regex to find all key=value or key="value" pairs
             pairs = re.findall(r'(\w+)=("[^"]*"|\S+)', line)
             for k, v in pairs:
+                if k == "argc" or (len(k) >= 2 and k[0] == "a" and k[1:].isdigit()):
+                    continue
                 v = v.strip('"')
                 if k == "uid":
                     try:
@@ -293,13 +417,7 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
                     current["comm"] = v
     
     if current:
-        # Extract docker subcommand from proctitle for final event
-        proctitle = current.get("proctitle")
-        if proctitle:
-            subcommand = extract_docker_subcommand(proctitle)
-            if subcommand:
-                current["docker_subcommand"] = subcommand
-                current["docker_subcommand_category"] = get_subcommand_category(subcommand)
+        _finalize_audit_event(current)
         events.append(current)
     
     # Log summary of parsed events for debugging
@@ -321,12 +439,11 @@ def _parse_ausearch_output(stdout: str, keys: tuple[str, ...] | None = None) -> 
     return events
 
 
-def get_uid_for_container_create(container_id: str, audit_events: list[dict[str, Any]]) -> int | None:
-    """From pre-parsed audit events, try to find uid that created the given container_id. Returns uid or None."""
-    for ev in reversed(audit_events):
-        if ev.get("uid") is not None and container_id in (ev.get("msg") or ""):
-            return ev["uid"]
-    return None
+def parse_ausearch_stdout(
+    stdout: str, keys: tuple[str, ...] | None = None
+) -> list[dict[str, Any]]:
+    """Parse ausearch stdout (raw or ``-i``), e.g. pasted manual output or captured in tests."""
+    return _parse_ausearch_output(stdout, keys)
 
 
 def parse_audit_logs_single_key(key: str, audit_path: str | None = None, since: str | None = None) -> list[dict[str, Any]]:

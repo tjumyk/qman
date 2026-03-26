@@ -7,10 +7,7 @@ import {
   Alert,
   ScrollArea,
   Code,
-  Table,
-  Switch,
   Group,
-  Badge,
   Paper,
   Title,
   Select,
@@ -31,7 +28,7 @@ import {
   type DockerUsageEntityType,
 } from '../../api'
 import { useI18n } from '../../i18n'
-import { DockerEventReviewCell, DockerEventAutoCell } from './DockerUsageEventStatusCells'
+import { DockerEntityEventsPanel } from './DockerEntityEventsPanel'
 import { notifications } from '@mantine/notifications'
 
 /** Modal passes this as scrollAreaComponent: constrain height without one shared body scrollbar so columns can scroll independently. */
@@ -453,65 +450,19 @@ export function DockerEntityDetailModal({
                 <Title order={6} mb="sm">
                   {t('dockerEntityDetailTabEvents')}
                 </Title>
-                <Stack gap="sm">
-                  <Switch
-                    label={t('dockerEntityDetailIncludeUsed')}
-                    checked={includeUsed}
-                    onChange={(e) => setIncludeUsed(e.currentTarget.checked)}
-                  />
-                  <Switch
-                    label={t('dockerEntityDetailIncludeResolved')}
-                    checked={includeResolved}
-                    onChange={(e) => setIncludeResolved(e.currentTarget.checked)}
-                  />
-                  {eventsQ.isLoading && (
-                    <Group>
-                      <Loader size="sm" />
-                      <Text size="sm" c="dimmed">
-                        {t('loading')}
-                      </Text>
-                    </Group>
-                  )}
-                  {eventsQ.error && (
-                    <Alert color="red" title={t('error')}>
-                      {getErrorMessage(eventsQ.error, t('dockerEntityDetailEventsFailed'))}
-                    </Alert>
-                  )}
-                  {eventsQ.data && (
-                    <Table striped fz="xs">
-                      <Table.Thead>
-                        <Table.Tr>
-                          <Table.Th>{t('dockerUsageReviewColSource')}</Table.Th>
-                          <Table.Th>{t('dockerUsageReviewColWhen')}</Table.Th>
-                          <Table.Th>{t('dockerEventColReview')}</Table.Th>
-                          <Table.Th>{t('dockerEventColAuto')}</Table.Th>
-                          <Table.Th>{t('dockerUsageReviewColPayload')}</Table.Th>
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {eventsQ.data.events.map((ev) => (
-                          <Table.Tr key={`${ev.source}-${ev.id}`}>
-                            <Table.Td>
-                              <Badge size="xs">{ev.source}</Badge>
-                            </Table.Td>
-                            <Table.Td>
-                              <Text size="xs" lineClamp={2}>
-                                {ev.event_ts ?? ev.created_at ?? '—'}
-                              </Text>
-                            </Table.Td>
-                            <DockerEventReviewCell ev={ev} />
-                            <DockerEventAutoCell ev={ev} />
-                            <Table.Td>
-                              <Text size="xs" lineClamp={3} style={{ wordBreak: 'break-all' }}>
-                                {ev.payload}
-                              </Text>
-                            </Table.Td>
-                          </Table.Tr>
-                        ))}
-                      </Table.Tbody>
-                    </Table>
-                  )}
-                </Stack>
+                <DockerEntityEventsPanel
+                  includeUsed={includeUsed}
+                  includeResolved={includeResolved}
+                  onIncludeUsedChange={setIncludeUsed}
+                  onIncludeResolvedChange={setIncludeResolved}
+                  includeUsedLabel={t('dockerEntityDetailIncludeUsed')}
+                  includeResolvedLabel={t('dockerEntityDetailIncludeResolved')}
+                  isLoading={eventsQ.isLoading}
+                  error={eventsQ.error}
+                  eventsErrorFallback={t('dockerEntityDetailEventsFailed')}
+                  data={eventsQ.data}
+                  switchLayout="stack"
+                />
               </Paper>
             </Stack>
           </ScrollArea>
