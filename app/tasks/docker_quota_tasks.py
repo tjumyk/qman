@@ -17,7 +17,7 @@ from app.docker_quota.docker_client import (
     stop_container,
     _parse_created_iso,
 )
-from app.utils import get_logger
+from app.utils import get_docker_quota_auto_stop_containers, get_logger
 
 logger = get_logger(__name__)
 
@@ -25,13 +25,14 @@ _DEFAULT_ORDER = "newest_first"
 _VALID_ORDERS = ("newest_first", "oldest_first", "largest_first")
 
 
-def _load_slave_config() -> tuple[str, str, str, str]:
-    """Load host_id, master_url, secret, enforcement_order from CONFIG_PATH or env."""
+def _load_slave_config() -> tuple[str, str, str, str, bool]:
+    """Load host_id, master_url, secret, enforcement_order, auto_stop from CONFIG_PATH or env."""
     host_id = os.environ.get("SLAVE_HOST_ID", "slave")
     master_url = os.environ.get("MASTER_EVENT_CALLBACK_URL", "")
     secret = os.environ.get("MASTER_EVENT_CALLBACK_SECRET", "")
     order = os.environ.get("DOCKER_QUOTA_ENFORCEMENT_ORDER", _DEFAULT_ORDER)
     config_path = os.environ.get("CONFIG_PATH", "config.json")
+    data: dict[str, Any] | None = None
     if config_path and os.path.isfile(config_path):
         try:
             with open(config_path, encoding="utf-8") as f:
@@ -44,7 +45,8 @@ def _load_slave_config() -> tuple[str, str, str, str]:
             logger.warning("Could not load config from %s: %s", config_path, e)
     if order not in _VALID_ORDERS:
         order = _DEFAULT_ORDER
-    return host_id, master_url, secret, order
+    auto_stop = get_docker_quota_auto_stop_containers(data)
+    return host_id, master_url, secret, order, auto_stop
 
 
 def _container_status_may_run_workloads(status: str | None) -> bool:
@@ -119,8 +121,8 @@ def _post_events_to_master(events: list[dict[str, Any]], host_id: str, master_ur
 
 @celery_app.task(name="app.tasks.docker_quota_tasks.enforce_docker_quota", bind=True)
 def enforce_docker_quota(self: Any) -> dict[str, Any]:
-    """For each user over Docker quota: stop at most one running container per uid per run (no rm). Emit events."""
-    host_id, master_url, secret, order = _load_slave_config()
+    """For each user over Docker quota: emit events; if DOCKER_QUOTA_AUTO_STOP_CONTAINERS, stop at most one container per uid per run (no rm)."""
+    host_id, master_url, secret, order, auto_stop = _load_slave_config()
     limits = get_all_user_quota_limits()
     if not limits:
         return {"enforced": 0, "containers_stopped": 0, "events": 0}
@@ -155,6 +157,12 @@ def enforce_docker_quota(self: Any) -> dict[str, Any]:
             events[-1]["host_user_name"] = pwd.getpwuid(uid).pw_name
         except KeyError:
             events[-1]["host_user_name"] = f"user_{uid}"
+        if not auto_stop:
+            logger.debug(
+                "Docker quota exceeded for uid=%s (DOCKER_QUOTA_AUTO_STOP_CONTAINERS is false; not stopping containers)",
+                uid,
+            )
+            continue
         stopped: list[str] = []
         containers = uid_to_containers.get(uid, [])
         cid_to_status = {c["id"]: c.get("status", "") for c in containers_list}

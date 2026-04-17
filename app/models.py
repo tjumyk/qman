@@ -36,6 +36,7 @@ class AppConfig(BaseModel):
     CELERY_BROKER_URL: str | None = None  # When USE_DOCKER_QUOTA: e.g. redis://localhost:6379/0
     CELERY_RESULT_BACKEND: str | None = None  # Optional
     DOCKER_QUOTA_ENFORCE_INTERVAL_SECONDS: int | None = None  # Celery beat interval (default 300)
+    DOCKER_QUOTA_AUTO_STOP_CONTAINERS: bool = True  # If false, do not stop containers when over Docker quota (monitoring-only)
     QUOTA_DEFAULT_APPLY_INTERVAL_SECONDS: int | None = None  # Celery beat interval for apply_default_user_quota (default 600 = 10 min)
     DOCKER_QUOTA_ENFORCEMENT_ORDER: str | None = None  # newest_first | oldest_first | largest_first (default newest_first)
     DOCKER_VOLUME_ACTUAL_DISK_SKIP_USE_LAST_MOUNTED: bool | None = None  # When True, use last_mounted_at in volume scan skip logic (default False)
