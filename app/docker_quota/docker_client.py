@@ -5,9 +5,10 @@ Heavy endpoints such as ``system/df`` can exceed that on busy hosts; ``get_syste
 a longer timeout (default 180s, overridable via ``DOCKER_SYSTEM_DF_TIMEOUT``).
 The collect_events_since() function has a separate configurable wall-clock limit (default 90s).
 
-Note on caching: container/image list entries and ``get_system_df`` results use Redis with default TTL 300s (5 minutes),
-overridable via ``DOCKER_QUOTA_CACHE_TTL_SECONDS`` and ``DOCKER_QUOTA_DF_CACHE_TTL_SECONDS`` respectively.
-Successful live fetches write through; ``use_cache`` only controls whether this call reads from cache first.
+Note on caching: container/image list entries and ``get_system_df`` results use Redis with default fresh TTL 300s (5 minutes),
+overridable via ``DOCKER_QUOTA_DF_CACHE_TTL_SECONDS``. Snapshots are kept up to 3600s (``DOCKER_QUOTA_DF_STALE_CACHE_TTL_SECONDS``)
+and served on API paths (``use_cache=True``) to avoid blocking on slow ``system/df`` calls. Live ``df()`` runs only when
+``use_cache=False`` (background sync/enforcement).
 Caches are invalidated on relevant Docker events (and after quota enforcement removes a container).
 
 Note on locking: Heavy operations (list_containers, list_images, get_system_df) use per-operation locks so that concurrent
@@ -257,9 +258,8 @@ def get_system_df(
         image_sizes: Deprecated/ignored. Previously used to skip images.list().
                      Now all data comes from single df() call.
         include_volumes: If True, also include volume sizes in the result.
-        use_cache: If True, read from Redis cache when valid. If False, skip the read path and
-            always call Docker; the parsed result is still written to Redis (write-through) so
-            other callers can hit the cache.
+        use_cache: If True, return cached df only (fresh, then stale). Never calls Docker API;
+            background tasks must pass False for a live read (result is still write-through to Redis).
 
     Returns:
         dict with keys:
@@ -268,30 +268,38 @@ def get_system_df(
         - "volumes": {volume_name: {"size": int, "labels": dict, "ref_count": int}} (only if include_volumes=True)
     """
     start_time = time.time()
-    
-    # Read cache first only when use_cache=True (write-through still updates cache on live fetch)
-    if use_cache:
+
+    def _read_df_cache(*, allow_stale: bool) -> dict[str, Any] | None:
         try:
             from app.docker_quota.cache import get_cached_system_df
-            cached = get_cached_system_df(include_volumes=include_volumes)
-            if cached is not None:
-                elapsed = time.time() - start_time
-                logger.debug("Docker get_system_df: cache hit (took %.3fs)", elapsed)
-                return cached
+
+            return get_cached_system_df(include_volumes=include_volumes, allow_stale=allow_stale)
         except Exception as e:
             logger.debug("Cache check failed, falling back to Docker API: %s", e)
-    
+            return None
+
+    # API paths: never block on live df(); serve fresh, then stale, then empty.
+    if use_cache:
+        cached = _read_df_cache(allow_stale=False)
+        if cached is not None:
+            elapsed = time.time() - start_time
+            logger.debug("Docker get_system_df: cache hit (took %.3fs)", elapsed)
+            return cached
+        stale = _read_df_cache(allow_stale=True)
+        if stale is not None:
+            elapsed = time.time() - start_time
+            logger.info("Docker get_system_df: stale cache hit (took %.3fs)", elapsed)
+            return stale
+        logger.warning(
+            "Docker get_system_df: no cache on API path; skipping live df() "
+            "(run Celery sync or wait for background refresh)"
+        )
+        empty: dict[str, Any] = {"containers": {}, "images": {}}
+        if include_volumes:
+            empty["volumes"] = {}
+        return empty
+
     with redis_lock("system_df", fallback_lock=_lock_system_df):
-        if use_cache:
-            try:
-                from app.docker_quota.cache import get_cached_system_df
-                cached = get_cached_system_df(include_volumes=include_volumes)
-                if cached is not None:
-                    elapsed = time.time() - start_time
-                    logger.debug("Docker get_system_df: cache hit after lock (took %.3fs)", elapsed)
-                    return cached
-            except Exception:
-                pass
         try:
             import docker
             client_start = time.time()

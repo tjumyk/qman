@@ -303,10 +303,13 @@ def invalidate_image_cache() -> None:
 # where the df() API can take 10-20 seconds due to size calculations on TB of data.
 # Can be overridden via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS config
 _DEFAULT_DF_TTL_SECONDS = 300  # 5 minutes
+# Stale window: keep df snapshots in Redis longer and serve them on API paths when a live
+# df() would block (gunicorn default worker timeout is 30s; df() can exceed 180s).
+_DEFAULT_DF_STALE_TTL_SECONDS = 3600  # 1 hour
 
 
 def _get_df_cache_ttl() -> int:
-    """Get system df cache TTL from config or default."""
+    """Fresh TTL: age below this is a normal cache hit."""
     try:
         from flask import current_app
         ttl = current_app.config.get("DOCKER_QUOTA_DF_CACHE_TTL_SECONDS")
@@ -317,18 +320,36 @@ def _get_df_cache_ttl() -> int:
     return _DEFAULT_DF_TTL_SECONDS
 
 
-def get_cached_system_df(include_volumes: bool = False) -> dict[str, Any] | None:
-    """Get cached system df result if available and not expired.
-    
+def _get_df_stale_cache_ttl() -> int:
+    """Max age to serve stale df snapshots (Redis key TTL uses this)."""
+    try:
+        from flask import current_app
+        ttl = current_app.config.get("DOCKER_QUOTA_DF_STALE_CACHE_TTL_SECONDS")
+        if ttl is not None:
+            return max(int(ttl), _get_df_cache_ttl())
+    except Exception:
+        pass
+    return max(_DEFAULT_DF_STALE_TTL_SECONDS, _get_df_cache_ttl())
+
+
+def get_cached_system_df(
+    include_volumes: bool = False,
+    *,
+    allow_stale: bool = False,
+) -> dict[str, Any] | None:
+    """Get cached system df result if available.
+
     Returns None if cache miss or Redis unavailable.
-    Frontend APIs can use this for faster response; background tasks should bypass.
-    TTL is configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 300s).
+    When ``allow_stale`` is True, returns snapshots older than the fresh TTL but still
+    within ``DOCKER_QUOTA_DF_STALE_CACHE_TTL_SECONDS`` so API requests avoid blocking on
+    a slow ``docker system df`` call.
     """
     redis_client = _get_redis_client()
     if not redis_client:
         return None
-    
-    ttl_seconds = _get_df_cache_ttl()
+
+    fresh_ttl_seconds = _get_df_cache_ttl()
+    stale_ttl_seconds = _get_df_stale_cache_ttl()
     cache_key = f"{_CACHE_KEY_SYSTEM_DF}:volumes={include_volumes}"
     try:
         cached_data = redis_client.get(cache_key)
@@ -336,16 +357,28 @@ def get_cached_system_df(include_volumes: bool = False) -> dict[str, Any] | None
             data = json.loads(cached_data.decode("utf-8"))
             cached_time = data.get("timestamp", 0)
             age_seconds = time.time() - cached_time
-            if age_seconds < ttl_seconds:
+            result = data.get("result")
+            if age_seconds < fresh_ttl_seconds:
                 logger.debug(
                     "Cache hit: system_df (age=%.1fs, containers=%d, images=%d)",
                     age_seconds,
-                    len(data.get("result", {}).get("containers", {})),
-                    len(data.get("result", {}).get("images", {})),
+                    len(result.get("containers", {})) if result else 0,
+                    len(result.get("images", {})) if result else 0,
                 )
-                return data.get("result")
-            else:
-                logger.debug("Cache expired: system_df (age=%.1fs, ttl=%ds)", age_seconds, ttl_seconds)
+                return result
+            if allow_stale and age_seconds < stale_ttl_seconds and result is not None:
+                logger.info(
+                    "Cache stale hit: system_df (age=%.1fs, fresh_ttl=%ds, stale_ttl=%ds)",
+                    age_seconds,
+                    fresh_ttl_seconds,
+                    stale_ttl_seconds,
+                )
+                return result
+            logger.debug(
+                "Cache expired: system_df (age=%.1fs, stale_ttl=%ds)",
+                age_seconds,
+                stale_ttl_seconds,
+            )
         return None
     except Exception as e:
         logger.debug("Cache read failed (system_df): %s", e)
@@ -353,12 +386,12 @@ def get_cached_system_df(include_volumes: bool = False) -> dict[str, Any] | None
 
 
 def set_cached_system_df(result: dict[str, Any], include_volumes: bool = False) -> None:
-    """Cache system df result. TTL configurable via DOCKER_QUOTA_DF_CACHE_TTL_SECONDS (default 300s)."""
+    """Cache system df result. Redis TTL uses stale window; freshness uses DOCKER_QUOTA_DF_CACHE_TTL_SECONDS."""
     redis_client = _get_redis_client()
     if not redis_client:
         return
-    
-    ttl_seconds = _get_df_cache_ttl()
+
+    ttl_seconds = _get_df_stale_cache_ttl()
     cache_key = f"{_CACHE_KEY_SYSTEM_DF}:volumes={include_volumes}"
     try:
         data = {
