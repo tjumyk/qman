@@ -1,6 +1,7 @@
 import { Stack, Text } from '@mantine/core'
 import { useI18n } from '../i18n'
 import { DeviceUsage } from './DeviceUsage'
+import { DockerUsageCacheHint } from './DockerUsageCacheHint'
 import type { DeviceQuota } from '../api/schemas'
 
 export interface DeviceInfoProps {
@@ -24,6 +25,7 @@ export function DeviceInfo({ device }: DeviceInfoProps) {
           quotaFormat={device.user_quota_format}
         />
       )}
+      <DockerUsageCacheHint device={device} />
     </Stack>
   )
 }

@@ -77,6 +77,41 @@ class TestGetCachedSystemDf:
                     assert get_cached_system_df(include_volumes=False, allow_stale=True) is None
 
 
+class TestGetSystemDfCacheInfo:
+    def test_fresh_snapshot(self, fake_redis: MagicMock) -> None:
+        from app.docker_quota.cache import get_system_df_cache_info
+
+        ts = time.time() - 60
+        payload = {"timestamp": ts, "result": _sample_df()}
+        fake_redis.get = MagicMock(return_value=json.dumps(payload).encode("utf-8"))
+        with patch("app.docker_quota.cache._get_redis_client", return_value=fake_redis):
+            with patch("app.docker_quota.cache._get_df_cache_ttl", return_value=300):
+                with patch("app.docker_quota.cache._get_df_stale_cache_ttl", return_value=3600):
+                    info = get_system_df_cache_info(include_volumes=False)
+        assert info["available"] is True
+        assert info["cached_at"] == ts
+        assert info["is_stale"] is False
+
+    def test_stale_snapshot(self, fake_redis: MagicMock) -> None:
+        from app.docker_quota.cache import get_system_df_cache_info
+
+        ts = time.time() - 600
+        payload = {"timestamp": ts, "result": _sample_df()}
+        fake_redis.get = MagicMock(return_value=json.dumps(payload).encode("utf-8"))
+        with patch("app.docker_quota.cache._get_redis_client", return_value=fake_redis):
+            with patch("app.docker_quota.cache._get_df_cache_ttl", return_value=300):
+                with patch("app.docker_quota.cache._get_df_stale_cache_ttl", return_value=3600):
+                    info = get_system_df_cache_info(include_volumes=False)
+        assert info["available"] is True
+        assert info["is_stale"] is True
+
+    def test_missing_when_redis_unavailable(self) -> None:
+        from app.docker_quota.cache import get_system_df_cache_info
+
+        with patch("app.docker_quota.cache._get_redis_client", return_value=None):
+            assert get_system_df_cache_info() == {"available": False}
+
+
 class TestGetSystemDf:
     def test_use_cache_true_never_calls_docker(self) -> None:
         with patch(

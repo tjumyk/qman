@@ -160,6 +160,9 @@ const translations: Record<Locale, Record<string, string>> = {
     dockerUsageImageLayers: 'Image layers',
     dockerUsageVolumes: 'Volumes',
     dockerQuotaRemainingLabel: 'Remaining quota',
+    dockerUsageCacheFresh: 'Usage updated {time}',
+    dockerUsageCacheStale: 'Cached usage from {time} (refresh may be delayed)',
+    dockerUsageCachePending: 'Usage data not yet available; background sync pending',
     // Docker detail tabs
     usersTab: 'Users',
     containersTab: 'Containers',
@@ -478,6 +481,9 @@ const translations: Record<Locale, Record<string, string>> = {
     dockerUsageImageLayers: '镜像层',
     dockerUsageVolumes: '数据卷',
     dockerQuotaRemainingLabel: '剩余配额',
+    dockerUsageCacheFresh: '用量更新于 {time}',
+    dockerUsageCacheStale: '用量来自缓存（{time}），刷新可能延迟',
+    dockerUsageCachePending: '用量数据尚未就绪，后台同步进行中',
     unattributedUsageLabel: '未归属（无 qman.user）',
     // Docker detail tabs
     usersTab: '用户',

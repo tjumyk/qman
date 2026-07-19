@@ -332,6 +332,44 @@ def _get_df_stale_cache_ttl() -> int:
     return max(_DEFAULT_DF_STALE_TTL_SECONDS, _get_df_cache_ttl())
 
 
+def get_system_df_cache_info(include_volumes: bool = True) -> dict[str, Any]:
+    """Return metadata about the cached ``system/df`` snapshot (for API/UI hints).
+
+    Keys:
+    - ``available``: False when Redis is unavailable or no snapshot exists within stale TTL
+    - ``cached_at``: Unix timestamp when the snapshot was stored (only when available)
+    - ``age_seconds``: Seconds since ``cached_at`` (only when available)
+    - ``is_stale``: True when age exceeds fresh TTL but is still within stale TTL
+    """
+    redis_client = _get_redis_client()
+    if not redis_client:
+        return {"available": False}
+
+    fresh_ttl_seconds = _get_df_cache_ttl()
+    stale_ttl_seconds = _get_df_stale_cache_ttl()
+    cache_key = f"{_CACHE_KEY_SYSTEM_DF}:volumes={include_volumes}"
+    try:
+        cached_data = redis_client.get(cache_key)
+        if not cached_data:
+            return {"available": False}
+        data = json.loads(cached_data.decode("utf-8"))
+        cached_time = float(data.get("timestamp") or 0)
+        if cached_time <= 0 or data.get("result") is None:
+            return {"available": False}
+        age_seconds = max(0.0, time.time() - cached_time)
+        if age_seconds >= stale_ttl_seconds:
+            return {"available": False}
+        return {
+            "available": True,
+            "cached_at": cached_time,
+            "age_seconds": age_seconds,
+            "is_stale": age_seconds >= fresh_ttl_seconds,
+        }
+    except Exception as e:
+        logger.debug("Cache info read failed (system_df): %s", e)
+        return {"available": False}
+
+
 def get_cached_system_df(
     include_volumes: bool = False,
     *,

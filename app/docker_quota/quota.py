@@ -40,6 +40,22 @@ from app.utils import get_logger
 logger = get_logger(__name__)
 
 
+def _docker_usage_cache_fields() -> dict[str, Any]:
+    """Expose df cache age on Docker device payloads for UI hints."""
+    from app.docker_quota.cache import get_system_df_cache_info
+
+    info = get_system_df_cache_info(include_volumes=True)
+    if not info.get("available"):
+        return {
+            "docker_usage_cached_at": None,
+            "docker_usage_cache_stale": False,
+        }
+    return {
+        "docker_usage_cached_at": info["cached_at"],
+        "docker_usage_cache_stale": bool(info.get("is_stale")),
+    }
+
+
 def _user_quota_dict_docker(
     uid: int,
     used_bytes: int,
@@ -444,7 +460,8 @@ def collect_remote_quotas(
     }
     if unattributed_bytes > 0:
         device["unattributed_usage"] = unattributed_bytes
-    
+    device.update(_docker_usage_cache_fields())
+
     total_time = time.time() - start_time
     timing_str = ", ".join(f"{k}={v:.2f}s" for k, v in timings.items())
     logger.info(
@@ -502,6 +519,7 @@ def collect_remote_quotas_for_uid(
     }
     if unattributed_bytes > 0:
         device["unattributed_usage"] = unattributed_bytes
+    device.update(_docker_usage_cache_fields())
     return [device]
 
 

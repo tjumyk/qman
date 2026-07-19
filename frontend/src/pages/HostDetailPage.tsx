@@ -6,6 +6,7 @@ import { fetchQuotas } from '../api'
 import { useI18n } from '../i18n'
 import { getQuotaStatus } from '../utils/quotaStatus'
 import { DeviceUsage } from '../components/DeviceUsage'
+import { DockerUsageCacheHint } from '../components/DockerUsageCacheHint'
 
 export function HostDetailPage() {
   const { hostId } = useParams<{ hostId: string }>()
@@ -86,6 +87,7 @@ export function HostDetailPage() {
                     quotaFormat={dev.user_quota_format}
                   />
                 )}
+                <DockerUsageCacheHint device={dev} />
               </Stack>
             </Card>
           )

@@ -24,6 +24,7 @@ import {
   DockerQuotaBreakdownBar,
   DockerQuotaBreakdownLegend,
 } from '../components/DockerQuotaBreakdownBar'
+import { DockerUsageCacheHint } from '../components/DockerUsageCacheHint'
 import { shouldRenderDockerQuotaBreakdownBar } from '../utils/dockerQuotaBreakdown'
 import { getQuotaStatus, getQuotaStatusColor, getQuotaStatusLabelKey } from '../utils/quotaStatus'
 import type { DeviceQuota, UserQuota } from '../api/schemas'
@@ -159,6 +160,7 @@ function QuotaCard({
             </div>
           )}
           {!reduced && <QuotaGraceDisplay quota={quota} showTooltips/>}
+          {device.fstype === 'docker' && <DockerUsageCacheHint device={device} />}
         </Stack>
       </Stack>
     </Card>

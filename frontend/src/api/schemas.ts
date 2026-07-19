@@ -65,6 +65,10 @@ export const deviceQuotaSchema = z.object({
   group_quotas: z.array(groupQuotaSchema).optional(),
   /** Docker: bytes not attributed to any user (containers without qman.user). */
   unattributed_usage: z.number().optional(),
+  /** Docker: Unix timestamp (seconds) when usage snapshot was cached from system df. */
+  docker_usage_cached_at: z.number().nullable().optional(),
+  /** Docker: true when usage is from a snapshot older than the fresh cache TTL. */
+  docker_usage_cache_stale: z.boolean().optional(),
 })
 export type DeviceQuota = z.infer<typeof deviceQuotaSchema>
 
